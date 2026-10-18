@@ -1209,19 +1209,7 @@ struct PlaybackView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button("关闭", systemImage: "xmark") { dismiss() }
-                Text(item.title).font(.headline).lineLimit(1)
-                if session.dolbyVisionDetected {
-                    Text("Dolby Vision").font(.caption.weight(.bold))
-                        .foregroundStyle(.yellow)
-                }
-                Spacer()
-                Button("播放信息", systemImage: "info.circle") { showDiagnostics = true }
-                    .accessibilityLabel("播放信息与诊断")
-            }
-            .padding()
+        ZStack {
             ZStack(alignment: .bottom) {
                 #if canImport(VLCKit)
                 if session.useVLC {
@@ -1240,13 +1228,75 @@ struct PlaybackView: View {
                         .shadow(color: .black, radius: 5)
                         .padding(12)
                         .background(.black.opacity(subtitleBackgroundOpacity), in: RoundedRectangle(cornerRadius: 8))
-                        .padding(.bottom, 48)
+                        .padding(.bottom, 130)
                         .allowsHitTesting(false)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if session.useVLC {
-                HStack(spacing: 12) {
+            VStack(spacing: 0) {
+            HStack {
+                Button("关闭", systemImage: "xmark") { dismiss() }
+                Text(item.title).font(.headline).lineLimit(1)
+                if session.dolbyVisionDetected {
+                    Text("Dolby Vision").font(.caption.weight(.bold))
+                        .foregroundStyle(.yellow)
+                }
+                Spacer()
+                Button("播放信息", systemImage: "info.circle") { showDiagnostics = true }
+                    .accessibilityLabel("播放信息与诊断")
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+                .background(.linearGradient(colors: [.black.opacity(0.78), .clear],
+                                            startPoint: .top, endPoint: .bottom))
+                Spacer(minLength: 0)
+                VStack(spacing: 2) {
+            if !session.segments.isEmpty {
+                Toggle("自动跳过片段", isOn: $session.autoSkipSegments)
+                    .font(.caption)
+                    .padding(.horizontal)
+            }
+            if !session.autoSkipSegments,
+               let segment = session.segments.first(where: {
+                   $0.start <= session.currentTime && session.currentTime < $0.end
+               }) {
+                Button("跳过\(segment.title)", systemImage: "forward.end.fill") {
+                    session.seek(to: segment.end)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            if let introEnd = item.skipIntroEnd,
+               session.currentTime < introEnd,
+               introEnd - session.currentTime <= 180 {
+                Button("跳过片头", systemImage: "forward.end.fill") { session.seek(to: introEnd) }
+                    .buttonStyle(.borderedProminent)
+            }
+            if let creditsStart = item.skipCreditsStart,
+               session.currentTime >= creditsStart,
+               session.duration > creditsStart + 5 {
+                Button("跳过片尾", systemImage: "forward.end.fill") {
+                    session.seek(to: max(0, session.duration - 1))
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            if let nextItem {
+                Button("下一集：\(nextItem.title)", systemImage: "forward.end.fill") {
+                    onContinue?()
+                }
+                .padding(.bottom, 12)
+            }
+            if let message = session.message {
+                Text(message)
+                    .foregroundStyle(.red)
+                    .padding()
+            }
+            if session.isBuffering {
+                Text("正在缓冲 · 已中断 \(session.stallCount) 次")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
+            }
+            HStack(spacing: 12) {
                     Text(Self.timeLabel(isSeeking ? seekPosition : session.currentTime))
                         .monospacedDigit()
                     #if os(tvOS)
@@ -1298,14 +1348,78 @@ struct PlaybackView: View {
                         .monospacedDigit()
                 }
                 .font(.caption)
-                .padding(.horizontal)
-            }
-            HStack(spacing: 24) {
-                if session.useVLC {
-                    Button("播放或暂停", systemImage: "playpause.fill") { session.togglePlayback() }
-                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 6)
+            HStack(spacing: 12) {
                 Button("后退 10 秒", systemImage: "gobackward.10") { session.skip(by: -10) }
-                Spacer()
+                Button("播放或暂停", systemImage: "playpause.fill") { session.togglePlayback() }
+                Button("前进 30 秒", systemImage: "goforward.30") { session.skip(by: 30) }
+                Spacer(minLength: 8)
+                #if os(iOS)
+                AudioRoutePicker()
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel("音频输出设备")
+                #endif
+                Menu {
+                    advancedControls
+                } label: {
+                    Label("更多播放设置", systemImage: "ellipsis")
+                }
+                .accessibilityLabel("更多播放设置")
+            }
+            .labelStyle(.iconOnly)
+            .font(.system(size: 20, weight: .medium))
+            .buttonStyle(.plain)
+            .controlSize(.large)
+            .frame(height: 48)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+                }
+                .background(.linearGradient(colors: [.clear, .black.opacity(0.78), .black.opacity(0.92)],
+                                            startPoint: .top, endPoint: .bottom))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .ignoresSafeArea(edges: .vertical)
+        .background(.black)
+        .foregroundStyle(.white)
+        .tint(.white)
+        .sheet(isPresented: $showDiagnostics) {
+            PlaybackDiagnosticsPanel(report: session.diagnostics,
+                                     buffering: session.isBuffering,
+                                     stalls: session.stallCount,
+                                     failure: session.message)
+        }
+        .onAppear {
+            #if os(iOS)
+            LucentOrientationDelegate.setPlaybackPresented(true)
+            #endif
+            session.start(library: library)
+            castDiscovery.start()
+        }
+        .onDisappear {
+            castDiscovery.stop()
+            session.close()
+            #if os(iOS)
+            LucentOrientationDelegate.setPlaybackPresented(false)
+            #endif
+        }
+        #if os(tvOS)
+        .onPlayPauseCommand { session.togglePlayback() }
+        #endif
+        #if os(macOS)
+        .onKeyPress(.space) { session.togglePlayback(); return .handled }
+        .onKeyPress(.leftArrow) { session.skip(by: -10); return .handled }
+        .onKeyPress(.rightArrow) { session.skip(by: 30); return .handled }
+        #endif
+        .onChange(of: session.didFinish) { _, finished in
+            if finished, nextItem != nil { onContinue?() }
+        }
+    }
+
+    @ViewBuilder private var advancedControls: some View {
                 Menu {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
                         Button("\(rate.formatted())×") { session.setPlaybackRate(Float(rate)) }
@@ -1323,11 +1437,6 @@ struct PlaybackView: View {
                         }
                     }
                 }
-                #if os(iOS)
-                AudioRoutePicker()
-                    .frame(width: 36, height: 36)
-                    .accessibilityLabel("音频输出设备")
-                #endif
                 #if os(tvOS)
                 if session.useVLC, session.duration > 0 {
                     Menu("跳转") {
@@ -1435,77 +1544,6 @@ struct PlaybackView: View {
                     }
                 }
                 #endif
-                Spacer()
-                Button("前进 30 秒", systemImage: "goforward.30") { session.skip(by: 30) }
-            }
-            .buttonStyle(.bordered)
-            .padding()
-            if !session.segments.isEmpty {
-                Toggle("自动跳过片段", isOn: $session.autoSkipSegments)
-                    .font(.caption)
-                    .padding(.horizontal)
-            }
-            if !session.autoSkipSegments,
-               let segment = session.segments.first(where: {
-                   $0.start <= session.currentTime && session.currentTime < $0.end
-               }) {
-                Button("跳过\(segment.title)", systemImage: "forward.end.fill") {
-                    session.seek(to: segment.end)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            if let introEnd = item.skipIntroEnd,
-               session.currentTime < introEnd,
-               introEnd - session.currentTime <= 180 {
-                Button("跳过片头", systemImage: "forward.end.fill") { session.seek(to: introEnd) }
-                    .buttonStyle(.borderedProminent)
-            }
-            if let creditsStart = item.skipCreditsStart,
-               session.currentTime >= creditsStart,
-               session.duration > creditsStart + 5 {
-                Button("跳过片尾", systemImage: "forward.end.fill") {
-                    session.seek(to: max(0, session.duration - 1))
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            if let nextItem {
-                Button("下一集：\(nextItem.title)", systemImage: "forward.end.fill") {
-                    onContinue?()
-                }
-                .padding(.bottom, 12)
-            }
-            if let message = session.message {
-                Text(message)
-                    .foregroundStyle(.red)
-                    .padding()
-            }
-            if session.isBuffering {
-                Text("正在缓冲 · 已中断 \(session.stallCount) 次")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 8)
-            }
-        }
-        .background(.black)
-        .sheet(isPresented: $showDiagnostics) {
-            PlaybackDiagnosticsPanel(report: session.diagnostics,
-                                     buffering: session.isBuffering,
-                                     stalls: session.stallCount,
-                                     failure: session.message)
-        }
-        .onAppear { session.start(library: library); castDiscovery.start() }
-        .onDisappear { castDiscovery.stop(); session.close() }
-        #if os(tvOS)
-        .onPlayPauseCommand { session.togglePlayback() }
-        #endif
-        #if os(macOS)
-        .onKeyPress(.space) { session.togglePlayback(); return .handled }
-        .onKeyPress(.leftArrow) { session.skip(by: -10); return .handled }
-        .onKeyPress(.rightArrow) { session.skip(by: 30); return .handled }
-        #endif
-        .onChange(of: session.didFinish) { _, finished in
-            if finished, nextItem != nil { onContinue?() }
-        }
     }
 
     private struct PlaybackDiagnosticsPanel: View {

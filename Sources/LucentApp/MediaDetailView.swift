@@ -388,30 +388,15 @@ struct MediaDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
             }
-            .sheet(item: $playingItem) { item in
-                let next = nextEpisode(after: item)
-                PlaybackView(item: item, nextItem: next,
-                             serverMediaSourceID: selectedServerMediaSourceID,
-                             serverContainer: activeVersion(for: item)?.container,
-                             serverDolbyVision: activeVersion(for: item)?.isDolbyVision == true,
-                             mediaFeatures: activeVersion(for: item)?.features ?? .unknown,
-                             forceRemoteVersion: forceRemoteVersion,
-                             transcodeBitrate: selectedTranscodeBitrate,
-                             audioStreamIndex: selectedAudioStreamIndex,
-                             subtitleStreamIndex: selectedSubtitleStreamIndex,
-                             plexPartID: selectedPlexPartID,
-                             plexMediaIndex: selectedPlexMediaIndex,
-                             serverTracks: playbackTracks(for: item)) {
-                    if let next {
-                        selectedServerMediaSourceID = nil
-                        forceRemoteVersion = false
-                        selectedTranscodeBitrate = nil
-                        playingItem = next
-                    }
-                }
-                .id(item.id)
-                .environmentObject(library)
+            #if os(iOS)
+            .fullScreenCover(item: $playingItem) { item in
+                playbackContent(for: item)
             }
+            #else
+            .sheet(item: $playingItem) { item in
+                playbackContent(for: item)
+            }
+            #endif
             .task(id: itemID) { await loadServerVersions() }
             .sheet(item: $editingItem) { item in
                 MediaEditView(item: item).environmentObject(library)
@@ -504,6 +489,31 @@ struct MediaDetailView: View {
             .navigationTitle("在线字幕")
             .toolbar { Button("完成") { showOnlineSubtitles = false } }
         }
+    }
+
+    @ViewBuilder private func playbackContent(for item: MediaItem) -> some View {
+        let next = nextEpisode(after: item)
+        PlaybackView(item: item, nextItem: next,
+                     serverMediaSourceID: selectedServerMediaSourceID,
+                     serverContainer: activeVersion(for: item)?.container,
+                     serverDolbyVision: activeVersion(for: item)?.isDolbyVision == true,
+                     mediaFeatures: activeVersion(for: item)?.features ?? .unknown,
+                     forceRemoteVersion: forceRemoteVersion,
+                     transcodeBitrate: selectedTranscodeBitrate,
+                     audioStreamIndex: selectedAudioStreamIndex,
+                     subtitleStreamIndex: selectedSubtitleStreamIndex,
+                     plexPartID: selectedPlexPartID,
+                     plexMediaIndex: selectedPlexMediaIndex,
+                     serverTracks: playbackTracks(for: item)) {
+            if let next {
+                selectedServerMediaSourceID = nil
+                forceRemoteVersion = false
+                selectedTranscodeBitrate = nil
+                playingItem = next
+            }
+        }
+        .id(item.id)
+        .environmentObject(library)
     }
 
     private func loadServerVersions() async {

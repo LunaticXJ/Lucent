@@ -8,7 +8,11 @@ struct PlexItem: Decodable, Sendable {
                 let streamType: Int?
                 let displayTitle: String?
                 let language: String?
-                private enum CodingKeys: String, CodingKey { case id, streamType, displayTitle, language }
+                let codec: String?
+                let videoProfile: String?
+                private enum CodingKeys: String, CodingKey {
+                    case id, streamType, displayTitle, language, codec, videoProfile
+                }
                 init(from decoder: Decoder) throws {
                     let values = try decoder.container(keyedBy: CodingKeys.self)
                     id = (try? values.decode(Int.self, forKey: .id))
@@ -17,6 +21,8 @@ struct PlexItem: Decodable, Sendable {
                         ?? (try? values.decode(String.self, forKey: .streamType)).flatMap(Int.init)
                     displayTitle = try values.decodeIfPresent(String.self, forKey: .displayTitle)
                     language = try values.decodeIfPresent(String.self, forKey: .language)
+                    codec = try values.decodeIfPresent(String.self, forKey: .codec)
+                    videoProfile = try values.decodeIfPresent(String.self, forKey: .videoProfile)
                 }
             }
             let id: Int?
@@ -35,6 +41,8 @@ struct PlexItem: Decodable, Sendable {
             }
         }
         let videoResolution: String?
+        let videoCodec: String?
+        let audioCodec: String?
         let bitrate: Int?
         let Part: [Part]?
     }

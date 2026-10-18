@@ -10,9 +10,12 @@ struct JellyfinItem: Decodable, Sendable {
             let codec: String?
             let profile: String?
             let videoRangeType: String?
+            let width: Int?
+            let height: Int?
             enum CodingKeys: String, CodingKey {
                 case index = "Index", type = "Type", language = "Language", displayTitle = "DisplayTitle"
                 case codec = "Codec", profile = "Profile", videoRangeType = "VideoRangeType"
+                case width = "Width", height = "Height"
             }
         }
         let id: String?

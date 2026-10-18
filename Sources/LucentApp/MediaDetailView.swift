@@ -16,8 +16,16 @@ private struct ServerPlaybackVersion: Identifiable {
     let streams: [JellyfinItem.MediaSource.Stream]
     let plexStreams: [PlexItem.MediaEntry.Part.Stream]
     let container: String?
+    let features: PlaybackMediaFeatures
     var dolbyVisionStream: JellyfinItem.MediaSource.Stream? {
         streams.first(where: DolbyVisionSupport.isDolbyVision)
+    }
+    var isDolbyVision: Bool {
+        if dolbyVisionStream != nil { return true }
+        let markers = [features.dynamicRange, features.videoCodec]
+            .compactMap { $0?.lowercased() }
+        return markers.contains { $0.contains("dolby vision") || $0.contains("dovi") ||
+            $0.contains("dvhe") || $0.contains("dvh1") }
     }
 }
 
@@ -91,11 +99,9 @@ struct MediaDetailView: View {
                                 Text(item.watched ? "已看完" : item.isInProgress ? "观看中" : "未观看")
                                     .foregroundStyle(.secondary)
                                 if item.progress > 0 { ProgressView(value: item.progress) }
-                                if let version = serverVersions.first(where: {
-                                    $0.mediaSourceID == selectedServerMediaSourceID
-                                }) ?? serverVersions.first,
-                                   let stream = version.dolbyVisionStream {
-                                    Label("Dolby Vision" + (DolbyVisionSupport.profile(stream).map { " P\($0)" } ?? ""),
+                                if let version = activeVersion(for: item), version.isDolbyVision {
+                                    Label("Dolby Vision" + (version.dolbyVisionStream.flatMap(DolbyVisionSupport.profile)
+                                            .map { " P\($0)" } ?? ""),
                                           systemImage: "sparkles.tv")
                                         .font(.subheadline.weight(.semibold))
                                     if !DolbyVisionSupport.isApplePlaybackContainer(version.container) {
@@ -123,27 +129,37 @@ struct MediaDetailView: View {
                                 }
                                 .buttonStyle(.bordered)
                             }
-                            if serverVersions.count > 1 {
-                                Menu("选择版本") {
+                            if !serverVersions.isEmpty {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("可用版本").font(.title3.bold())
                                     ForEach(serverVersions) { version in
-                                        Button(version.title) {
-                                            var selected = item
-                                            if let partKey = version.plexPartKey,
-                                               case .plexItem(let sourceID, let ratingKey, _) = item.location {
-                                                selected.location = .plexItem(sourceID: sourceID,
-                                                                              ratingKey: ratingKey,
-                                                                              partKey: partKey)
+                                        Button {
+                                            selectVersion(version, item: item)
+                                        } label: {
+                                            HStack(spacing: 12) {
+                                                Image(systemName: !version.isDolbyVision ?
+                                                      "film" : "sparkles.tv")
+                                                    .frame(width: 28)
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(version.title).font(.subheadline.weight(.semibold))
+                                                    Text([version.features.resolution,
+                                                          version.features.videoCodec,
+                                                          version.features.dynamicRange,
+                                                          version.container?.uppercased()]
+                                                        .compactMap { $0 }.joined(separator: " · "))
+                                                        .font(.caption).foregroundStyle(.secondary)
+                                                }
+                                                Spacer()
+                                                Image(systemName: version.id == activeVersion(for: item)?.id ?
+                                                      "checkmark.circle.fill" : "play.fill")
+                                                    .font(.caption)
                                             }
-                                            selectedServerMediaSourceID = version.mediaSourceID
-                                            selectedPlexPartID = version.plexPartID
-                                            selectedPlexMediaIndex = version.plexMediaIndex ?? 0
-                                            forceRemoteVersion = true
-                                            selectedTranscodeBitrate = nil
-                                            playingItem = selected
+                                            .padding(12)
+                                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
                                         }
+                                        .buttonStyle(.plain)
                                     }
                                 }
-                                .buttonStyle(.bordered)
                             }
                             if item.isMediaServerItem {
                                 if serverVersions.count > 1 {
@@ -376,12 +392,9 @@ struct MediaDetailView: View {
                 let next = nextEpisode(after: item)
                 PlaybackView(item: item, nextItem: next,
                              serverMediaSourceID: selectedServerMediaSourceID,
-                             serverContainer: serverVersions.first(where: {
-                                 $0.mediaSourceID == selectedServerMediaSourceID
-                             })?.container ?? serverVersions.first?.container,
-                             serverDolbyVision: (serverVersions.first(where: {
-                                 $0.mediaSourceID == selectedServerMediaSourceID
-                             }) ?? serverVersions.first)?.dolbyVisionStream != nil,
+                             serverContainer: activeVersion(for: item)?.container,
+                             serverDolbyVision: activeVersion(for: item)?.isDolbyVision == true,
+                             mediaFeatures: activeVersion(for: item)?.features ?? .unknown,
                              forceRemoteVersion: forceRemoteVersion,
                              transcodeBitrate: selectedTranscodeBitrate,
                              audioStreamIndex: selectedAudioStreamIndex,
@@ -507,7 +520,7 @@ struct MediaDetailView: View {
                         title: source.name ?? "版本 \(index + 1) · \(source.container ?? "视频")",
                         mediaSourceID: id, plexPartKey: nil, plexPartID: nil,
                         plexMediaIndex: nil, streams: source.mediaStreams ?? [], plexStreams: [],
-                        container: source.container)
+                        container: source.container, features: features(for: source))
                 }
             case .embyItem(let sourceID, let itemID):
                 guard let source = library.embySources.first(where: { $0.id == sourceID }),
@@ -519,7 +532,7 @@ struct MediaDetailView: View {
                         title: source.name ?? "版本 \(index + 1) · \(source.container ?? "视频")",
                         mediaSourceID: id, plexPartKey: nil, plexPartID: nil,
                         plexMediaIndex: nil, streams: source.mediaStreams ?? [], plexStreams: [],
-                        container: source.container)
+                        container: source.container, features: features(for: source))
                 }
             case .plexItem(let sourceID, let ratingKey, _):
                 guard let source = library.plexSources.first(where: { $0.id == sourceID }),
@@ -533,13 +546,57 @@ struct MediaDetailView: View {
                         title: "版本 \(index + 1) · \(resolution)",
                         mediaSourceID: nil, plexPartKey: part.key, plexPartID: part.id,
                         plexMediaIndex: index, streams: [], plexStreams: part.streams ?? [],
-                        container: (part.key as NSString).pathExtension)
+                        container: (part.key as NSString).pathExtension,
+                        features: PlaybackMediaFeatures(
+                            container: (part.key as NSString).pathExtension,
+                            videoCodec: version.videoCodec,
+                            audioCodec: version.audioCodec,
+                            dynamicRange: part.streams?.first(where: { $0.streamType == 1 })?.videoProfile,
+                            resolution: version.videoResolution))
                 }
             default:
                 serverVersions = []
             }
         } catch {
             serverVersions = []
+        }
+    }
+
+    private func features(for source: JellyfinItem.MediaSource) -> PlaybackMediaFeatures {
+        let video = source.mediaStreams?.first { $0.type?.caseInsensitiveCompare("Video") == .orderedSame }
+        let audio = source.mediaStreams?.first { $0.type?.caseInsensitiveCompare("Audio") == .orderedSame }
+        let size: String?
+        if let width = video?.width, let height = video?.height { size = "\(width)×\(height)" }
+        else { size = nil }
+        return PlaybackMediaFeatures(container: source.container, videoCodec: video?.codec,
+                                     audioCodec: audio?.codec, dynamicRange: video?.videoRangeType,
+                                     resolution: size)
+    }
+
+    private func selectVersion(_ version: ServerPlaybackVersion, item: MediaItem) {
+        var selected = item
+        if let partKey = version.plexPartKey,
+           case .plexItem(let sourceID, let ratingKey, _) = item.location {
+            selected.location = .plexItem(sourceID: sourceID, ratingKey: ratingKey, partKey: partKey)
+        }
+        selectedServerMediaSourceID = version.mediaSourceID
+        selectedPlexPartID = version.plexPartID
+        selectedPlexMediaIndex = version.plexMediaIndex ?? 0
+        selectedAudioStreamIndex = nil
+        selectedSubtitleStreamIndex = nil
+        forceRemoteVersion = true
+        selectedTranscodeBitrate = nil
+        playingItem = selected
+    }
+
+    private func activeVersion(for item: MediaItem) -> ServerPlaybackVersion? {
+        switch item.location {
+        case .plexItem:
+            return serverVersions.first(where: { $0.plexMediaIndex == selectedPlexMediaIndex })
+                ?? serverVersions.first
+        default:
+            return serverVersions.first(where: { $0.mediaSourceID == selectedServerMediaSourceID })
+                ?? serverVersions.first
         }
     }
 

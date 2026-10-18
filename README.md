@@ -4,6 +4,8 @@
 
 MP4、M4V、MOV 和 HLS 经系统 AVPlayer 播放，保留兼容流的杜比视界元数据；详情页识别 Emby/Jellyfin 报告的 Dolby Vision 视频流与版本容器，播放页进一步检查 AVFoundation 的视频流描述。选择服务器的不同版本时，会使用该版本的实际容器决定播放内核。杜比视界 MP4 搭配 ASS/SSA 外挂字幕时，字幕改为应用内文本叠加，以保留系统播放路径。MKV/ISO 由 VLCKit 播放，当前不保证杜比视界输出；杜比视界实际激活仍取决于视频 Profile、设备及显示链路。音频直通尚未实现。
 
+影片详情展示服务器提供的播放版本、分辨率、编码、动态范围与容器；播放页的“播放信息”面板显示实际播放器内核、直连或转码、选路原因和缓冲状态。系统播放器路径在拖动进度时生成画面预览；VLCKit 路径暂无进度缩略图。
+
 Lucent 是面向 iPhone、iPad、Apple TV 和 Mac 的个人媒体库播放器。产品目标是让用户连接自己的视频文件与家庭媒体服务器，快速整理、查找并稳定播放影片。
 
 当前阶段：P0/P1 尚未达到完成标准，P2 的 Emby 直连目录浏览已加入。工程已写入本地文件、SMB、WebDAV、Jellyfin、Emby、Plex 片源，范围读取桥接、AVPlayer/VLCKit 双播放路径、续播、SRT/VTT/ASS/SSA 文本字幕与音轨、Jellyfin/Emby 登录、Plex PIN 授权、在线资料匹配、海报、SQLite 媒体库、CloudKit 状态及合集成员同步、下载与合集等代码。Emby 连接后只保存服务器，浏览目录时按页获取内容，不再自动扫描全库。官方 VLCKit 二进制已校验并放入 `Vendor/VLCKit`；本机 MKV 样本通过 VLCKit 实际播放。ASS 样式/PGS 位图字幕、CloudKit 签名与冲突恢复、各服务器协议兼容性和四端交互仍待完成或验证。

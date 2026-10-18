@@ -33,6 +33,8 @@ final class PlaybackSession: ObservableObject {
     @Published var audioOptions: [String] = []
     @Published var subtitleOptions: [String] = []
     @Published private(set) var dolbyVisionDetected = false
+    @Published private(set) var diagnostics = PlaybackDiagnostics()
+    @Published private(set) var seekPreview: CGImage?
     @Published private(set) var playlistEntries: [PlaylistResolver.Entry] = []
     @Published private(set) var currentPlaylistIndex = 0
     @Published private(set) var segments: [PlaybackSegment] = []
@@ -72,6 +74,7 @@ final class PlaybackSession: ObservableObject {
     private var audioGroup: AVMediaSelectionGroup?
     private var subtitleGroup: AVMediaSelectionGroup?
     private var tracksTask: Task<Void, Never>?
+    private var seekPreviewTask: Task<Void, Never>?
     private var segmentTask: Task<Void, Never>?
     private var lastSkippedSegmentID: String?
     private var endObserver: NSObjectProtocol?
@@ -83,6 +86,7 @@ final class PlaybackSession: ObservableObject {
     private let serverMediaSourceID: String?
     private let serverContainer: String?
     private let serverDolbyVision: Bool
+    private let mediaFeatures: PlaybackMediaFeatures
     private let forceRemoteVersion: Bool
     private let transcodeBitrate: Int?
     private var audioStreamIndex: Int?
@@ -95,6 +99,7 @@ final class PlaybackSession: ObservableObject {
 
     init(item: MediaItem, serverMediaSourceID: String? = nil,
          serverContainer: String? = nil, serverDolbyVision: Bool = false,
+         mediaFeatures: PlaybackMediaFeatures = .unknown,
          forceRemoteVersion: Bool = false, transcodeBitrate: Int? = nil,
          audioStreamIndex: Int? = nil, subtitleStreamIndex: Int? = nil,
          plexPartID: Int? = nil, plexMediaIndex: Int = 0,
@@ -103,6 +108,7 @@ final class PlaybackSession: ObservableObject {
         self.serverMediaSourceID = serverMediaSourceID
         self.serverContainer = serverContainer
         self.serverDolbyVision = serverDolbyVision
+        self.mediaFeatures = mediaFeatures
         self.forceRemoteVersion = forceRemoteVersion
         self.transcodeBitrate = transcodeBitrate
         self.audioStreamIndex = audioStreamIndex
@@ -381,7 +387,36 @@ final class PlaybackSession: ObservableObject {
         }
         isOpticalMedia = ["VIDEO_TS", "BDMV"].contains(url.lastPathComponent.uppercased())
             || url.pathExtension.lowercased() == "iso"
-        if Self.needsVLC(url) || nativeSubtitleURL != nil || externalAudioURL != nil {
+        let needsVLC = Self.needsVLC(url)
+        let hasNativeSubtitle = nativeSubtitleURL != nil
+        let hasExternalAudio = externalAudioURL != nil
+        let vlcRoute = needsVLC || hasNativeSubtitle || hasExternalAudio
+        var report = PlaybackDiagnostics()
+        report.engine = vlcRoute ? .vlc : .native
+        if transcodeBitrate != nil {
+            report.delivery = "服务器转码 HLS"
+        } else {
+            switch item.location {
+            case .bookmark, .folderFile: report.delivery = "本地文件"
+            case .remote: report.delivery = "网络地址直连"
+            default: report.delivery = "远程文件直连"
+            }
+        }
+        report.container = transcodeBitrate == nil ?
+            (mediaFeatures.container ?? serverContainer ?? url.pathExtension).uppercased() : "HLS"
+        report.videoCodec = transcodeBitrate == nil ? (mediaFeatures.videoCodec ?? "待识别") : "服务器决定"
+        report.audioCodec = transcodeBitrate == nil ? (mediaFeatures.audioCodec ?? "待识别") : "服务器决定"
+        report.dynamicRange = transcodeBitrate == nil ? (mediaFeatures.dynamicRange ?? "待识别") : "由服务器处理"
+        report.resolution = mediaFeatures.resolution ?? "待识别"
+        report.requestedDolbyVision = serverDolbyVision
+        report.routeReason = transcodeBitrate != nil ? "已选择服务器转码画质" :
+            needsVLC ? "容器或协议需由 VLCKit 处理" :
+            hasNativeSubtitle ? "外挂位图或样式字幕需由 VLCKit 处理" :
+            hasExternalAudio ? "外挂音轨需由 VLCKit 处理" :
+            serverDolbyVision ? "优先使用系统播放器保留兼容的杜比视界流" :
+            "容器适合系统播放器直连"
+        diagnostics = report
+        if vlcRoute {
             #if canImport(VLCKit)
             playWithVLC(url: url)
             #else
@@ -426,7 +461,9 @@ final class PlaybackSession: ObservableObject {
         player.play()
         tracksTask = Task { [weak self] in
             do {
-                self?.dolbyVisionDetected = await DolbyVisionSupport.assetHasDolbyVision(playerItem.asset)
+                let detected = await DolbyVisionSupport.assetHasDolbyVision(playerItem.asset)
+                self?.dolbyVisionDetected = detected
+                self?.diagnostics.detectedDolbyVision = detected
                 let audio = try await playerItem.asset.loadMediaSelectionGroup(for: .audible)
                 let subtitles = try await playerItem.asset.loadMediaSelectionGroup(for: .legible)
                 guard !Task.isCancelled else { return }
@@ -533,6 +570,9 @@ final class PlaybackSession: ObservableObject {
     }
 
     private func prepareForReplacement() {
+        seekPreviewTask?.cancel()
+        seekPreviewTask = nil
+        seekPreview = nil
         if let timeObserver { player.removeTimeObserver(timeObserver); self.timeObserver = nil }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver); self.endObserver = nil }
         if let playbackErrorObserver {
@@ -563,6 +603,35 @@ final class PlaybackSession: ObservableObject {
         if ["ftp", "ftps", "sftp", "nfs"].contains(url.scheme?.lowercased() ?? "") { return true }
         return ["mkv", "avi", "wmv", "flv", "webm", "ts", "m2ts", "mts", "vob", "mpg", "mpeg", "ogv", "iso"]
             .contains(url.pathExtension.lowercased())
+    }
+
+    func preview(at seconds: Double) {
+        seekPreviewTask?.cancel()
+        guard !useVLC, seconds.isFinite, seconds >= 0,
+              let url = (player.currentItem?.asset as? AVURLAsset)?.url else {
+            seekPreview = nil
+            return
+        }
+        seekPreviewTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            let image = await Self.generateSeekPreview(url: url, seconds: seconds)
+            guard !Task.isCancelled else { return }
+            self?.seekPreview = image
+        }
+    }
+
+    private nonisolated static func generateSeekPreview(url: URL, seconds: Double) async -> CGImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.maximumSize = CGSize(width: 360, height: 204)
+        generator.appliesPreferredTrackTransform = true
+        return try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image
+    }
+
+    func clearPreview() {
+        seekPreviewTask?.cancel()
+        seekPreviewTask = nil
+        seekPreview = nil
     }
 
     private static func usesNativeSubtitle(_ fileExtension: String) -> Bool {
@@ -1110,6 +1179,7 @@ struct PlaybackView: View {
     @StateObject private var castDiscovery = CastDiscovery()
     @State private var seekPosition: Double = 0
     @State private var isSeeking = false
+    @State private var showDiagnostics = false
     private let item: MediaItem
     private let nextItem: MediaItem?
     private let onContinue: (() -> Void)?
@@ -1118,6 +1188,7 @@ struct PlaybackView: View {
     init(item: MediaItem, nextItem: MediaItem? = nil,
          serverMediaSourceID: String? = nil, serverContainer: String? = nil,
          serverDolbyVision: Bool = false,
+         mediaFeatures: PlaybackMediaFeatures = .unknown,
          forceRemoteVersion: Bool = false,
          transcodeBitrate: Int? = nil,
          audioStreamIndex: Int? = nil, subtitleStreamIndex: Int? = nil,
@@ -1131,6 +1202,7 @@ struct PlaybackView: View {
         _session = StateObject(wrappedValue: PlaybackSession(
             item: item, serverMediaSourceID: serverMediaSourceID,
             serverContainer: serverContainer, serverDolbyVision: serverDolbyVision,
+            mediaFeatures: mediaFeatures,
             forceRemoteVersion: forceRemoteVersion, transcodeBitrate: transcodeBitrate,
             audioStreamIndex: audioStreamIndex, subtitleStreamIndex: subtitleStreamIndex,
             plexPartID: plexPartID, plexMediaIndex: plexMediaIndex, serverTracks: serverTracks))
@@ -1146,6 +1218,8 @@ struct PlaybackView: View {
                         .foregroundStyle(.yellow)
                 }
                 Spacer()
+                Button("播放信息", systemImage: "info.circle") { showDiagnostics = true }
+                    .accessibilityLabel("播放信息与诊断")
             }
             .padding()
             ZStack(alignment: .bottom) {
@@ -1185,21 +1259,40 @@ struct PlaybackView: View {
                     }
                     .frame(height: 8)
                     #else
-                    Slider(value: Binding(
-                        get: { isSeeking ? seekPosition : session.currentTime },
-                        set: { seekPosition = $0 }),
-                        in: 0...max(1, session.duration),
-                        onEditingChanged: { editing in
-                            if editing {
-                                seekPosition = session.currentTime
-                                isSeeking = true
-                            } else {
-                                session.seek(to: seekPosition)
-                                isSeeking = false
-                            }
+                    VStack(spacing: 6) {
+                        if isSeeking, let preview = session.seekPreview {
+                            Image(decorative: preview, scale: 1)
+                                .resizable().scaledToFill()
+                                .frame(width: 160, height: 90)
+                                .clipShape(RoundedRectangle(cornerRadius: 9))
+                                .overlay(alignment: .bottomTrailing) {
+                                    Text(Self.timeLabel(seekPosition)).font(.caption2.monospacedDigit())
+                                        .padding(5).background(.black.opacity(0.75),
+                                                               in: RoundedRectangle(cornerRadius: 5))
+                                        .padding(5)
+                                }
                         }
-                    )
-                    .accessibilityLabel("播放进度")
+                        Slider(value: Binding(
+                            get: { isSeeking ? seekPosition : session.currentTime },
+                            set: { seekPosition = $0 }),
+                            in: 0...max(1, session.duration),
+                            onEditingChanged: { editing in
+                                if editing {
+                                    seekPosition = session.currentTime
+                                    isSeeking = true
+                                    session.preview(at: seekPosition)
+                                } else {
+                                    session.seek(to: seekPosition)
+                                    isSeeking = false
+                                    session.clearPreview()
+                                }
+                            }
+                        )
+                        .accessibilityLabel("播放进度")
+                        .onChange(of: seekPosition) { _, value in
+                            if isSeeking { session.preview(at: value) }
+                        }
+                    }
                     #endif
                     Text(Self.timeLabel(session.duration))
                         .monospacedDigit()
@@ -1394,6 +1487,12 @@ struct PlaybackView: View {
             }
         }
         .background(.black)
+        .sheet(isPresented: $showDiagnostics) {
+            PlaybackDiagnosticsPanel(report: session.diagnostics,
+                                     buffering: session.isBuffering,
+                                     stalls: session.stallCount,
+                                     failure: session.message)
+        }
         .onAppear { session.start(library: library); castDiscovery.start() }
         .onDisappear { castDiscovery.stop(); session.close() }
         #if os(tvOS)
@@ -1406,6 +1505,66 @@ struct PlaybackView: View {
         #endif
         .onChange(of: session.didFinish) { _, finished in
             if finished, nextItem != nil { onContinue?() }
+        }
+    }
+
+    private struct PlaybackDiagnosticsPanel: View {
+        let report: PlaybackDiagnostics
+        let buffering: Bool
+        let stalls: Int
+        let failure: String?
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(report.engine.rawValue).font(.title2.bold())
+                            Text(report.routeReason).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+
+                        detail("播放方式", report.delivery)
+                        detail("容器", report.container)
+                        detail("视频编码", report.videoCodec)
+                        detail("音频编码", report.audioCodec)
+                        detail("分辨率", report.resolution)
+                        detail("动态范围", report.dynamicRange)
+                        if let explanation = report.dolbyVisionExplanation {
+                            Text(explanation).font(.subheadline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
+                                .background(.yellow.opacity(0.14),
+                                            in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        detail("缓冲状态", buffering ? "正在缓冲" : "正常")
+                        detail("中断次数", String(stalls))
+                        if let failure { Text(failure).foregroundStyle(.red) }
+                    }
+                    .frame(maxWidth: 520, alignment: .leading)
+                    .padding(22)
+                    .frame(maxWidth: .infinity)
+                }
+                .navigationTitle("播放信息")
+                .toolbar { Button("完成") { dismiss() } }
+            }
+            .frame(minWidth: 360, minHeight: 470)
+        }
+
+        private func detail(_ title: String, _ value: String) -> some View {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(title).foregroundStyle(.secondary)
+                Spacer()
+                #if os(tvOS)
+                Text(value).multilineTextAlignment(.trailing)
+                #else
+                Text(value).multilineTextAlignment(.trailing).textSelection(.enabled)
+                #endif
+            }
+            .font(.subheadline)
         }
     }
 

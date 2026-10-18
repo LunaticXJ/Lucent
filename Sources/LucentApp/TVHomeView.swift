@@ -2,6 +2,13 @@
 import SwiftUI
 import UIKit
 
+private enum TVPalette {
+    static let background = Color(red: 0.045, green: 0.055, blue: 0.078)
+    static let secondary = Color(red: 0.73, green: 0.76, blue: 0.81)
+    static let accent = Color(red: 0.87, green: 0.93, blue: 1.0)
+    static let horizontalInset: CGFloat = 88
+}
+
 @MainActor
 private enum TVArtworkCache {
     static var images: [String: UIImage] = [:]
@@ -71,6 +78,7 @@ struct TVHomeView: View {
 
     @State private var latest: [JellyfinItem] = []
     @State private var continuing: [JellyfinItem] = []
+    @State private var continuingTotal = 0
     @State private var views: [JellyfinItem] = []
     @State private var shelves: [TVHomeShelf] = []
     @State private var loading = false
@@ -81,20 +89,27 @@ struct TVHomeView: View {
     private var source: EmbySource? { library.embySources.first }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 42) {
-                hero
-                if let errorMessage {
-                    Text(errorMessage).font(.title3).foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 72)
+        Group {
+            if source == nil {
+                emptyState
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 48) {
+                        hero
+                        if let errorMessage {
+                            Text(errorMessage).font(.system(size: 22))
+                                .foregroundStyle(TVPalette.secondary)
+                                .padding(.horizontal, TVPalette.horizontalInset)
+                        }
+                        if !continuing.isEmpty { continueSection }
+                        if !views.isEmpty { sourceSection }
+                        ForEach(shelves) { shelf in posterSection(shelf) }
+                    }
+                    .padding(.bottom, 90)
                 }
-                if !continuing.isEmpty { continueSection }
-                if !views.isEmpty { sourceSection }
-                ForEach(shelves) { shelf in posterSection(shelf) }
             }
-            .padding(.bottom, 90)
         }
-        .background(Color(red: 0.055, green: 0.073, blue: 0.10))
+        .background(TVPalette.background)
         .ignoresSafeArea(edges: .top)
         .task(id: source?.id) { await loadHome() }
         .sheet(item: $selectedItem) { item in
@@ -106,31 +121,80 @@ struct TVHomeView: View {
         }
     }
 
+    private var emptyState: some View {
+        ZStack {
+            RadialGradient(colors: [.init(red: 0.19, green: 0.29, blue: 0.42),
+                                    TVPalette.background],
+                           center: .init(x: 0.76, y: 0.44), startRadius: 80, endRadius: 900)
+            Image(systemName: "play.rectangle.on.rectangle")
+                .font(.system(size: 450, weight: .ultraLight))
+                .foregroundStyle(.white.opacity(0.055))
+                .offset(x: 470, y: 60)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("LUCENT")
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .tracking(4)
+                    Spacer()
+                    Button("媒体库", systemImage: "square.stack.3d.up") { showLibrary() }
+                        .buttonStyle(.bordered)
+                }
+                Spacer()
+                Text("你的大屏幕，从这里开始")
+                    .font(.system(size: 68, weight: .bold))
+                Text("连接媒体服务器或网络片源，电影和剧集即刻呈现。")
+                    .font(.system(size: 27))
+                    .foregroundStyle(TVPalette.secondary)
+                    .padding(.top, 18)
+                Button("添加片源", systemImage: "plus") { showLibrary() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(TVPalette.accent)
+                    .foregroundStyle(TVPalette.background)
+                    .padding(.top, 36)
+                Text("Emby  ·  Jellyfin  ·  Plex  ·  网络共享  ·  网盘")
+                    .font(.system(size: 19))
+                    .foregroundStyle(TVPalette.secondary.opacity(0.72))
+                    .padding(.top, 30)
+                Spacer()
+            }
+            .padding(.horizontal, TVPalette.horizontalInset)
+            .padding(.top, 62)
+            .padding(.bottom, 72)
+        }
+    }
+
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
             if let source, let item = latest.first {
                 TVArtwork(source: source, itemID: item.id, backdrop: true, width: 1920,
                           topAligned: true)
-                    .frame(height: 630)
+                    .frame(height: 620)
             } else {
                 LinearGradient(colors: [.init(red: 0.13, green: 0.24, blue: 0.38),
                                         .init(red: 0.25, green: 0.24, blue: 0.28)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .frame(height: 630)
+                    .frame(height: 620)
             }
             LinearGradient(stops: [
-                .init(color: .black.opacity(0.65), location: 0),
-                .init(color: .clear, location: 0.28),
-                .init(color: .black.opacity(0.18), location: 0.48),
-                .init(color: Color(red: 0.055, green: 0.073, blue: 0.10), location: 1)
+                .init(color: TVPalette.background.opacity(0.92), location: 0),
+                .init(color: TVPalette.background.opacity(0.74), location: 0.29),
+                .init(color: TVPalette.background.opacity(0.20), location: 0.67),
+                .init(color: .clear, location: 1)
+            ], startPoint: .leading, endPoint: .trailing)
+            LinearGradient(stops: [
+                .init(color: .black.opacity(0.24), location: 0),
+                .init(color: .clear, location: 0.35),
+                .init(color: TVPalette.background.opacity(0.24), location: 0.62),
+                .init(color: TVPalette.background, location: 1)
             ], startPoint: .top, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 26) {
-                    Text("LUCENT").font(.system(size: 30, weight: .bold, design: .rounded))
-                        .tracking(5)
+                HStack(spacing: 28) {
+                    Text("LUCENT").font(.system(size: 25, weight: .bold, design: .rounded))
+                        .tracking(4)
                     if let source {
-                        Text(source.name).font(.title3.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.75))
+                        Text(source.name).font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(TVPalette.secondary)
+                            .lineLimit(1)
                     }
                     Spacer()
                     Button("媒体库", systemImage: "square.stack.3d.up") { showLibrary() }
@@ -138,11 +202,11 @@ struct TVHomeView: View {
                 }
                 Spacer(minLength: 0)
                 if let item = latest.first {
-                    Text("为你推荐").font(.title3.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.8))
-                    Text(item.name).font(.system(size: 64, weight: .bold))
-                        .lineLimit(1).padding(.top, 12)
-                    HStack(spacing: 18) {
+                    Text("新近入库").font(.system(size: 19, weight: .semibold))
+                        .tracking(3).foregroundStyle(TVPalette.accent)
+                    Text(item.name).font(.system(size: 68, weight: .bold))
+                        .lineLimit(1).padding(.top, 10)
+                    HStack(spacing: 16) {
                         if let rating = item.communityRating {
                             Label(rating.formatted(.number.precision(.fractionLength(1))),
                                   systemImage: "star.fill")
@@ -151,78 +215,82 @@ struct TVHomeView: View {
                         if let year = item.productionYear { Text(String(year)) }
                         Text("电影")
                     }
-                    .font(.title3)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.top, 12)
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(TVPalette.secondary)
+                    .padding(.top, 10)
                     if let overview = item.overview, !overview.isEmpty {
-                        Text(overview).font(.title3)
-                            .foregroundStyle(.white.opacity(0.75))
+                        Text(overview).font(.system(size: 24))
+                            .foregroundStyle(TVPalette.secondary)
                             .lineLimit(2)
-                            .frame(maxWidth: 900, alignment: .leading)
-                            .padding(.top, 16)
+                            .frame(maxWidth: 760, alignment: .leading)
+                            .padding(.top, 18)
                     }
                     Button("查看影片", systemImage: "play.fill") { open(item) }
                         .buttonStyle(.borderedProminent)
-                        .padding(.top, 24)
+                        .tint(TVPalette.accent)
+                        .foregroundStyle(TVPalette.background)
+                        .padding(.top, 26)
                 } else {
                     Text("让好故事，触手可及")
                         .font(.system(size: 58, weight: .bold))
-                    Text(source == nil ? "连接 Emby，开始浏览你的影片。" : "正在读取服务器推荐…")
-                        .font(.title2).foregroundStyle(.white.opacity(0.75))
+                    Text(source == nil ? "连接 Emby，开始浏览你的影片。" :
+                         loading ? "正在读取服务器推荐…" : "暂无推荐影片，可在媒体库中浏览。")
+                        .font(.system(size: 25)).foregroundStyle(TVPalette.secondary)
                         .padding(.top, 12)
+                    if loading { ProgressView().padding(.top, 22) }
                     Button("打开媒体库", systemImage: "square.stack.3d.up") { showLibrary() }
                         .buttonStyle(.borderedProminent).padding(.top, 24)
                 }
             }
-            .padding(.horizontal, 72)
-            .padding(.top, 58)
-            .padding(.bottom, 48)
+            .padding(.horizontal, TVPalette.horizontalInset)
+            .padding(.top, 62)
+            .padding(.bottom, 56)
         }
-        .frame(height: 630)
+        .frame(height: 620)
         .clipped()
     }
 
     private var continueSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            heading("继续观看", count: continuing.count)
+        VStack(alignment: .leading, spacing: 22) {
+            heading("继续观看", count: continuingTotal)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 28) {
+                LazyHStack(alignment: .top, spacing: 26) {
                     if let source {
                         ForEach(continuing, id: \.id) { item in
                             Button { open(item) } label: {
-                                VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 10) {
                                     ZStack(alignment: .bottom) {
                                         TVArtwork(source: source, itemID: item.id,
                                                   backdrop: true, width: 640)
                                         ProgressView(value: progress(item)).tint(.white)
                                             .padding(14)
                                     }
-                                    .frame(width: 320, height: 180)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    Text(item.name).font(.title3.weight(.semibold))
+                                    .frame(width: 350, height: 196)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    Text(item.name).font(.system(size: 27, weight: .semibold))
                                         .lineLimit(1)
                                     if let episode = item.identity.episodeLabel {
-                                        Text(episode).font(.body)
-                                            .foregroundStyle(.white.opacity(0.58))
+                                        Text(episode).font(.system(size: 20))
+                                            .foregroundStyle(TVPalette.secondary)
                                             .lineLimit(1)
                                     }
                                 }
-                                .frame(width: 320, alignment: .leading)
+                                .frame(width: 350, alignment: .leading)
                             }
                             .buttonStyle(.card)
                         }
                     }
                 }
-                .padding(.horizontal, 72)
+                .padding(.horizontal, TVPalette.horizontalInset)
             }
         }
     }
 
     private var sourceSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 22) {
             heading("我的媒体", count: views.count)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 28) {
+                LazyHStack(spacing: 26) {
                     if let source {
                         ForEach(views, id: \.id) { view in
                             Button {
@@ -238,55 +306,57 @@ struct TVHomeView: View {
                                     }
                                     LinearGradient(colors: [.clear, .black.opacity(0.75)],
                                                    startPoint: .center, endPoint: .bottom)
-                                    Text(view.name).font(.title2.bold()).padding(20)
+                                    Text(view.name).font(.system(size: 28, weight: .bold))
+                                        .padding(20)
                                 }
-                                .frame(width: 320, height: 180)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .frame(width: 350, height: 196)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
                             }
                             .buttonStyle(.card)
                         }
                     }
                 }
-                .padding(.horizontal, 72)
+                .padding(.horizontal, TVPalette.horizontalInset)
             }
         }
     }
 
     private func posterSection(_ shelf: TVHomeShelf) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 22) {
             heading(shelf.view.name, count: nil)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 28) {
+                LazyHStack(alignment: .top, spacing: 26) {
                     if let source {
                         ForEach(shelf.items, id: \.id) { item in
                             Button { open(item) } label: {
-                                VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 10) {
                                     TVArtwork(source: source, itemID: item.id,
                                               backdrop: false, width: 420)
-                                        .frame(width: 210, height: 315)
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    Text(item.name).font(.title3.weight(.semibold))
+                                        .frame(width: 202, height: 303)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    Text(item.name).font(.system(size: 22, weight: .semibold))
                                         .lineLimit(1)
                                 }
-                                .frame(width: 210, alignment: .leading)
+                                .frame(width: 202, alignment: .leading)
                             }
                             .buttonStyle(.card)
                         }
                     }
                 }
-                .padding(.horizontal, 72)
+                .padding(.horizontal, TVPalette.horizontalInset)
             }
         }
     }
 
     private func heading(_ title: String, count: Int?) -> some View {
-        HStack(spacing: 14) {
-            Text(title).font(.title.bold())
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(title).font(.system(size: 36, weight: .bold))
             if let count {
-                Text(String(count)).font(.title3).foregroundStyle(.white.opacity(0.55))
+                Text(String(count)).font(.system(size: 22))
+                    .foregroundStyle(TVPalette.secondary)
             }
         }
-        .padding(.horizontal, 72)
+        .padding(.horizontal, TVPalette.horizontalInset)
     }
 
     private func progress(_ item: JellyfinItem) -> Double {
@@ -304,7 +374,10 @@ struct TVHomeView: View {
     }
 
     private func loadHome() async {
-        guard let source else { return }
+        guard let source else {
+            latest = []; continuing = []; continuingTotal = 0; views = []; shelves = []
+            return
+        }
         loading = true
         errorMessage = nil
         defer { loading = false }
@@ -318,7 +391,9 @@ struct TVHomeView: View {
             async let resumeRequest = EmbyClient.resume(source: source, token: token)
             async let viewsRequest = EmbyClient.browse(source: source, token: token, parentID: nil)
             latest = (try? await latestRequest) ?? []
-            continuing = (try? await resumeRequest.items) ?? []
+            let resumePage = try? await resumeRequest
+            continuing = resumePage?.items ?? []
+            continuingTotal = resumePage?.totalCount ?? continuing.count
             views = (try? await viewsRequest.items) ?? []
             var loaded: [TVHomeShelf] = []
             for view in views.prefix(3) {

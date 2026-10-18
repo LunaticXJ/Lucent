@@ -7,8 +7,12 @@ struct JellyfinItem: Decodable, Sendable {
             let type: String?
             let language: String?
             let displayTitle: String?
+            let codec: String?
+            let profile: String?
+            let videoRangeType: String?
             enum CodingKeys: String, CodingKey {
                 case index = "Index", type = "Type", language = "Language", displayTitle = "DisplayTitle"
+                case codec = "Codec", profile = "Profile", videoRangeType = "VideoRangeType"
             }
         }
         let id: String?

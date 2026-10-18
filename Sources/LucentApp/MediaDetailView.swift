@@ -15,6 +15,10 @@ private struct ServerPlaybackVersion: Identifiable {
     let plexMediaIndex: Int?
     let streams: [JellyfinItem.MediaSource.Stream]
     let plexStreams: [PlexItem.MediaEntry.Part.Stream]
+    let container: String?
+    var dolbyVisionStream: JellyfinItem.MediaSource.Stream? {
+        streams.first(where: DolbyVisionSupport.isDolbyVision)
+    }
 }
 
 private extension MediaItem {
@@ -87,6 +91,18 @@ struct MediaDetailView: View {
                                 Text(item.watched ? "已看完" : item.isInProgress ? "观看中" : "未观看")
                                     .foregroundStyle(.secondary)
                                 if item.progress > 0 { ProgressView(value: item.progress) }
+                                if let version = serverVersions.first(where: {
+                                    $0.mediaSourceID == selectedServerMediaSourceID
+                                }) ?? serverVersions.first,
+                                   let stream = version.dolbyVisionStream {
+                                    Label("Dolby Vision" + (DolbyVisionSupport.profile(stream).map { " P\($0)" } ?? ""),
+                                          systemImage: "sparkles.tv")
+                                        .font(.subheadline.weight(.semibold))
+                                    if !DolbyVisionSupport.isApplePlaybackContainer(version.container) {
+                                        Text("此版本为 \(version.container?.uppercased() ?? "未知") 容器；可选择 MP4/MOV 版本以保留杜比视界播放路径。")
+                                            .font(.footnote).foregroundStyle(.secondary)
+                                    }
+                                }
                             }
 
                             HStack {
@@ -360,6 +376,12 @@ struct MediaDetailView: View {
                 let next = nextEpisode(after: item)
                 PlaybackView(item: item, nextItem: next,
                              serverMediaSourceID: selectedServerMediaSourceID,
+                             serverContainer: serverVersions.first(where: {
+                                 $0.mediaSourceID == selectedServerMediaSourceID
+                             })?.container ?? serverVersions.first?.container,
+                             serverDolbyVision: (serverVersions.first(where: {
+                                 $0.mediaSourceID == selectedServerMediaSourceID
+                             }) ?? serverVersions.first)?.dolbyVisionStream != nil,
                              forceRemoteVersion: forceRemoteVersion,
                              transcodeBitrate: selectedTranscodeBitrate,
                              audioStreamIndex: selectedAudioStreamIndex,
@@ -484,7 +506,8 @@ struct MediaDetailView: View {
                     return ServerPlaybackVersion(id: id,
                         title: source.name ?? "版本 \(index + 1) · \(source.container ?? "视频")",
                         mediaSourceID: id, plexPartKey: nil, plexPartID: nil,
-                        plexMediaIndex: nil, streams: source.mediaStreams ?? [], plexStreams: [])
+                        plexMediaIndex: nil, streams: source.mediaStreams ?? [], plexStreams: [],
+                        container: source.container)
                 }
             case .embyItem(let sourceID, let itemID):
                 guard let source = library.embySources.first(where: { $0.id == sourceID }),
@@ -495,7 +518,8 @@ struct MediaDetailView: View {
                     return ServerPlaybackVersion(id: id,
                         title: source.name ?? "版本 \(index + 1) · \(source.container ?? "视频")",
                         mediaSourceID: id, plexPartKey: nil, plexPartID: nil,
-                        plexMediaIndex: nil, streams: source.mediaStreams ?? [], plexStreams: [])
+                        plexMediaIndex: nil, streams: source.mediaStreams ?? [], plexStreams: [],
+                        container: source.container)
                 }
             case .plexItem(let sourceID, let ratingKey, _):
                 guard let source = library.plexSources.first(where: { $0.id == sourceID }),
@@ -508,7 +532,8 @@ struct MediaDetailView: View {
                     return ServerPlaybackVersion(id: part.key,
                         title: "版本 \(index + 1) · \(resolution)",
                         mediaSourceID: nil, plexPartKey: part.key, plexPartID: part.id,
-                        plexMediaIndex: index, streams: [], plexStreams: part.streams ?? [])
+                        plexMediaIndex: index, streams: [], plexStreams: part.streams ?? [],
+                        container: (part.key as NSString).pathExtension)
                 }
             default:
                 serverVersions = []

@@ -43,6 +43,7 @@
 		3001F8CBC1B1602680608D29 /* CloudPlaybackSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3916E7378624863840BC778 /* CloudPlaybackSync.swift */; };
 		3074513BCECF1172B498BF9B /* OpenSubtitlesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */; };
 		323935CE30B243B89BA0B6AB /* EmbyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */; };
+		33AF2986F11948BDDE04E518 /* DolbyVisionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD9B3CD53AC5E71C15F3628 /* DolbyVisionSupport.swift */; };
 		33EA6EFA269DB0EA5B441703 /* RangeInputStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */; };
 		37A4558B724E7333B4DC8D99 /* SwiftSMB in Frameworks */ = {isa = PBXBuildFile; productRef = A2A0FCEF45196BF6968E789B /* SwiftSMB */; };
 		37F85951C9458A13657BD1E4 /* SRTParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E344C69EEF493CFD5BED53 /* SRTParser.swift */; };
@@ -60,6 +61,7 @@
 		49E0AE598069EA8AC533AC56 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */; };
 		4CC7E8110EA06A8F526938B5 /* HTTPRangeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */; };
 		4CE5F6FC77FC94968B22376A /* PlexAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C3EF162365113C3AE02C /* PlexAuthClient.swift */; };
+		50B38312B90AAEADB4A31F2E /* DolbyVisionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD9B3CD53AC5E71C15F3628 /* DolbyVisionSupport.swift */; };
 		52330AB6208321B7AE8CF113 /* TMDBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */; };
 		528CDC034C23C9CA4059B8E8 /* PlaylistResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */; };
 		52DA24B620C2679E23391A6C /* PlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */; };
@@ -88,6 +90,7 @@
 		77DF162EA7CCD833383090C3 /* SMBScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DF71622AD5A9D1D13B249D /* SMBScanner.swift */; };
 		7A4FB3A0E68BA6AF54D9A71C /* CloudDriveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A958243E594A7D86762A57B /* CloudDriveClient.swift */; };
 		7AD47F729412E04FE9473E8B /* PlexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483F341CF13C9DAF8728F0DE /* PlexClient.swift */; };
+		7DD92EC37A1340CEDB45C904 /* DolbyVisionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD9B3CD53AC5E71C15F3628 /* DolbyVisionSupport.swift */; };
 		7E59A363B5F9A13DEB33F3BD /* VLCNetworkBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */; };
 		8322DA1654ACE3485EFABDDC /* SubtitleTextDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */; };
 		86FD8DD938403FD1C8385031 /* RangeInputStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */; };
@@ -178,6 +181,7 @@
 		22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserUploadServer.swift; sourceTree = "<group>"; };
 		3A361B6CDE0BF07018AAFF8D /* VLCKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VLCKit; path = Vendor/VLCKit; sourceTree = SOURCE_ROOT; };
 		3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TMDBService.swift; sourceTree = "<group>"; };
+		3FD9B3CD53AC5E71C15F3628 /* DolbyVisionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DolbyVisionSupport.swift; sourceTree = "<group>"; };
 		432A898696BEFBEED0B6F342 /* TVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVHomeView.swift; sourceTree = "<group>"; };
 		4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPRangeReader.swift; sourceTree = "<group>"; };
 		483F341CF13C9DAF8728F0DE /* PlexClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexClient.swift; sourceTree = "<group>"; };
@@ -303,6 +307,7 @@
 				D3916E7378624863840BC778 /* CloudPlaybackSync.swift */,
 				A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */,
 				B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */,
+				3FD9B3CD53AC5E71C15F3628 /* DolbyVisionSupport.swift */,
 				FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */,
 				CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */,
 				B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */,
@@ -471,6 +476,7 @@
 				3001F8CBC1B1602680608D29 /* CloudPlaybackSync.swift in Sources */,
 				701C9105ECB87825CBBAA981 /* CloudTokenRefresher.swift in Sources */,
 				A31DD790DC19987C6735744E /* DLNAClient.swift in Sources */,
+				50B38312B90AAEADB4A31F2E /* DolbyVisionSupport.swift in Sources */,
 				9D5512829091AFD9A06F5F77 /* EmbyBrowserView.swift in Sources */,
 				3A186B8DB9B44811D2C9DCB3 /* EmbyClient.swift in Sources */,
 				96DB0E827B928FDFE85D9FCE /* FolderScanner.swift in Sources */,
@@ -529,6 +535,7 @@
 				B559F7976013546A53864384 /* CloudPlaybackSync.swift in Sources */,
 				55EC5965D1C18347A00EF9A7 /* CloudTokenRefresher.swift in Sources */,
 				CF23D109BF7022EFD1644563 /* DLNAClient.swift in Sources */,
+				33AF2986F11948BDDE04E518 /* DolbyVisionSupport.swift in Sources */,
 				C0400D021B962A42783AF599 /* EmbyBrowserView.swift in Sources */,
 				323935CE30B243B89BA0B6AB /* EmbyClient.swift in Sources */,
 				CE7E7F0974487A8A06516740 /* FolderScanner.swift in Sources */,
@@ -587,6 +594,7 @@
 				034911E2616459AD312BDD7F /* CloudPlaybackSync.swift in Sources */,
 				0DD8A08F9F0ACA68D31E2397 /* CloudTokenRefresher.swift in Sources */,
 				92664C72DC5B4A1CF4936547 /* DLNAClient.swift in Sources */,
+				7DD92EC37A1340CEDB45C904 /* DolbyVisionSupport.swift in Sources */,
 				F0DD956D4E464A6F246BECE5 /* EmbyBrowserView.swift in Sources */,
 				45312F671C1D08F12AEC869B /* EmbyClient.swift in Sources */,
 				FF142136B68BE44D94BC97DE /* FolderScanner.swift in Sources */,

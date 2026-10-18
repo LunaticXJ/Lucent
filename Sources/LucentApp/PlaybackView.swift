@@ -32,6 +32,7 @@ final class PlaybackSession: ObservableObject {
     @Published var subtitleDelay: Double = 0
     @Published var audioOptions: [String] = []
     @Published var subtitleOptions: [String] = []
+    @Published private(set) var dolbyVisionDetected = false
     @Published private(set) var playlistEntries: [PlaylistResolver.Entry] = []
     @Published private(set) var currentPlaylistIndex = 0
     @Published private(set) var segments: [PlaybackSegment] = []
@@ -80,6 +81,8 @@ final class PlaybackSession: ObservableObject {
     private var resumeOverride: Double?
     private let item: MediaItem
     private let serverMediaSourceID: String?
+    private let serverContainer: String?
+    private let serverDolbyVision: Bool
     private let forceRemoteVersion: Bool
     private let transcodeBitrate: Int?
     private var audioStreamIndex: Int?
@@ -91,12 +94,15 @@ final class PlaybackSession: ObservableObject {
     private weak var library: LibraryStore?
 
     init(item: MediaItem, serverMediaSourceID: String? = nil,
+         serverContainer: String? = nil, serverDolbyVision: Bool = false,
          forceRemoteVersion: Bool = false, transcodeBitrate: Int? = nil,
          audioStreamIndex: Int? = nil, subtitleStreamIndex: Int? = nil,
          plexPartID: Int? = nil, plexMediaIndex: Int = 0,
          serverTracks: ServerPlaybackTracks = .empty) {
         self.item = item
         self.serverMediaSourceID = serverMediaSourceID
+        self.serverContainer = serverContainer
+        self.serverDolbyVision = serverDolbyVision
         self.forceRemoteVersion = forceRemoteVersion
         self.transcodeBitrate = transcodeBitrate
         self.audioStreamIndex = audioStreamIndex
@@ -238,7 +244,7 @@ final class PlaybackSession: ObservableObject {
                 message = "Jellyfin 片源或令牌不可用。"
                 return
             }
-            let server = RangeHTTPServer(fileExtension: item.serverFileExtension ?? "mp4") { offset, length in
+            let server = RangeHTTPServer(fileExtension: serverContainer ?? item.serverFileExtension ?? "mp4") { offset, length in
                 try JellyfinClient.readRange(source: source, token: token, itemID: itemID,
                                              offset: offset, length: length,
                                              mediaSourceID: self.serverMediaSourceID)
@@ -263,7 +269,7 @@ final class PlaybackSession: ObservableObject {
                 message = "Emby 片源或令牌不可用。"
                 return
             }
-            let server = RangeHTTPServer(fileExtension: item.serverFileExtension ?? "mp4") { offset, length in
+            let server = RangeHTTPServer(fileExtension: serverContainer ?? item.serverFileExtension ?? "mp4") { offset, length in
                 try EmbyClient.readRange(source: source, token: token, itemID: itemID,
                                          offset: offset, length: length,
                                          mediaSourceID: self.serverMediaSourceID)
@@ -364,6 +370,15 @@ final class PlaybackSession: ObservableObject {
 
     private func play(url: URL) {
         prepareForReplacement()
+        dolbyVisionDetected = false
+        let preferNativeDolbyVision = serverDolbyVision &&
+            DolbyVisionSupport.isApplePlaybackContainer(url.pathExtension)
+        if preferNativeDolbyVision, let subtitleURL = nativeSubtitleURL,
+           ["ass", "ssa"].contains(subtitleURL.pathExtension.lowercased()),
+           let data = try? Data(contentsOf: subtitleURL) {
+            subtitleCues = SubtitleParser.parse(data, fileExtension: subtitleURL.pathExtension)
+            nativeSubtitleURL = nil
+        }
         isOpticalMedia = ["VIDEO_TS", "BDMV"].contains(url.lastPathComponent.uppercased())
             || url.pathExtension.lowercased() == "iso"
         if Self.needsVLC(url) || nativeSubtitleURL != nil || externalAudioURL != nil {
@@ -411,6 +426,7 @@ final class PlaybackSession: ObservableObject {
         player.play()
         tracksTask = Task { [weak self] in
             do {
+                self?.dolbyVisionDetected = await DolbyVisionSupport.assetHasDolbyVision(playerItem.asset)
                 let audio = try await playerItem.asset.loadMediaSelectionGroup(for: .audible)
                 let subtitles = try await playerItem.asset.loadMediaSelectionGroup(for: .legible)
                 guard !Task.isCancelled else { return }
@@ -1100,7 +1116,9 @@ struct PlaybackView: View {
     private let transcodeBitrate: Int?
 
     init(item: MediaItem, nextItem: MediaItem? = nil,
-         serverMediaSourceID: String? = nil, forceRemoteVersion: Bool = false,
+         serverMediaSourceID: String? = nil, serverContainer: String? = nil,
+         serverDolbyVision: Bool = false,
+         forceRemoteVersion: Bool = false,
          transcodeBitrate: Int? = nil,
          audioStreamIndex: Int? = nil, subtitleStreamIndex: Int? = nil,
          plexPartID: Int? = nil, plexMediaIndex: Int = 0,
@@ -1112,6 +1130,7 @@ struct PlaybackView: View {
         self.transcodeBitrate = transcodeBitrate
         _session = StateObject(wrappedValue: PlaybackSession(
             item: item, serverMediaSourceID: serverMediaSourceID,
+            serverContainer: serverContainer, serverDolbyVision: serverDolbyVision,
             forceRemoteVersion: forceRemoteVersion, transcodeBitrate: transcodeBitrate,
             audioStreamIndex: audioStreamIndex, subtitleStreamIndex: subtitleStreamIndex,
             plexPartID: plexPartID, plexMediaIndex: plexMediaIndex, serverTracks: serverTracks))
@@ -1122,6 +1141,10 @@ struct PlaybackView: View {
             HStack {
                 Button("关闭", systemImage: "xmark") { dismiss() }
                 Text(item.title).font(.headline).lineLimit(1)
+                if session.dolbyVisionDetected {
+                    Text("Dolby Vision").font(.caption.weight(.bold))
+                        .foregroundStyle(.yellow)
+                }
                 Spacer()
             }
             .padding()

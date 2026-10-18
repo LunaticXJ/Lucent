@@ -46,7 +46,7 @@ enum EmbyClient {
                 URLQueryItem(name: "Fields", value: "Path,MediaSources,Overview"),
                 URLQueryItem(name: "EnableUserData", value: "true"),
                 URLQueryItem(name: "StartIndex", value: String(all.count)),
-                URLQueryItem(name: "Limit", value: "200")
+                URLQueryItem(name: "Limit", value: "1000")
             ]
             request.url = components.url
             let page = try JSONDecoder().decode(Page.self, from: await fetch(request))

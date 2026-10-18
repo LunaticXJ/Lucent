@@ -1043,27 +1043,31 @@ final class LibraryStore: ObservableObject {
                 let remoteItems = try await EmbyClient.scan(source: source, token: token)
                 guard let index = embySources.firstIndex(where: { $0.id == id }) else { return }
                 let remoteIDs = Set(remoteItems.map(\.id))
+                var updatedItems = items
+                var existingIndices: [String: Int] = [:]
+                for itemIndex in updatedItems.indices {
+                    if case .embyItem(let sourceID, let itemID) = updatedItems[itemIndex].location,
+                       sourceID == id {
+                        existingIndices[itemID] = itemIndex
+                    }
+                }
+                var addedItems: [MediaItem] = []
                 for remote in remoteItems {
-                    if let itemIndex = items.firstIndex(where: {
-                        if case .embyItem(let sourceID, let itemID) = $0.location {
-                            return sourceID == id && itemID == remote.id
-                        }
-                        return false
-                    }) {
-                        items[itemIndex].missingSince = nil
-                        if items[itemIndex].metadata == nil { items[itemIndex].title = remote.name }
-                        items[itemIndex].serverSummary = remote.overview
-                        if items[itemIndex].serverPosterKey != remote.imageTags?.primary,
-                           items[itemIndex].metadata == nil { clearPoster(index: itemIndex) }
-                        items[itemIndex].serverPosterKey = remote.imageTags?.primary
-                        items[itemIndex].duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
-                        items[itemIndex].serverFileExtension = remote.fileExtension
-                        if (remote.remoteStateDate ?? .distantPast) > (items[itemIndex].stateUpdatedAt ?? .distantPast) ||
-                            items[itemIndex].stateUpdatedAt == nil {
-                            items[itemIndex].position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
-                            items[itemIndex].watched = remote.userData?.played ?? false
-                            items[itemIndex].favorite = remote.userData?.isFavorite ?? false
-                            items[itemIndex].stateUpdatedAt = remote.remoteStateDate ?? Date()
+                    if let itemIndex = existingIndices[remote.id] {
+                        updatedItems[itemIndex].missingSince = nil
+                        if updatedItems[itemIndex].metadata == nil { updatedItems[itemIndex].title = remote.name }
+                        updatedItems[itemIndex].serverSummary = remote.overview
+                        if updatedItems[itemIndex].serverPosterKey != remote.imageTags?.primary,
+                           updatedItems[itemIndex].metadata == nil { clearPoster(index: itemIndex) }
+                        updatedItems[itemIndex].serverPosterKey = remote.imageTags?.primary
+                        updatedItems[itemIndex].duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
+                        updatedItems[itemIndex].serverFileExtension = remote.fileExtension
+                        if (remote.remoteStateDate ?? .distantPast) > (updatedItems[itemIndex].stateUpdatedAt ?? .distantPast) ||
+                            updatedItems[itemIndex].stateUpdatedAt == nil {
+                            updatedItems[itemIndex].position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
+                            updatedItems[itemIndex].watched = remote.userData?.played ?? false
+                            updatedItems[itemIndex].favorite = remote.userData?.isFavorite ?? false
+                            updatedItems[itemIndex].stateUpdatedAt = remote.remoteStateDate ?? Date()
                         }
                     } else {
                         var item = MediaItem(title: remote.name,
@@ -1077,15 +1081,16 @@ final class LibraryStore: ObservableObject {
                         item.serverSummary = remote.overview
                         item.serverPosterKey = remote.imageTags?.primary
                         item.serverFileExtension = remote.fileExtension
-                        items.insert(item, at: 0)
+                        addedItems.append(item)
                     }
                 }
-                for itemIndex in items.indices {
-                    if case .embyItem(let sourceID, let itemID) = items[itemIndex].location,
+                for itemIndex in updatedItems.indices {
+                    if case .embyItem(let sourceID, let itemID) = updatedItems[itemIndex].location,
                        sourceID == id, !remoteIDs.contains(itemID) {
-                        items[itemIndex].missingSince = items[itemIndex].missingSince ?? Date()
+                        updatedItems[itemIndex].missingSince = updatedItems[itemIndex].missingSince ?? Date()
                     }
                 }
+                items = Array(addedItems.reversed()) + updatedItems
                 embySources[index].lastScannedAt = Date()
                 offlineEmbySources.remove(id)
                 save()

@@ -224,6 +224,60 @@ enum EmbyClient {
     }
 }
 
+enum ServerEpisodeClient {
+    private struct Page: Decodable {
+        let items: [JellyfinItem]
+        let totalRecordCount: Int
+        enum CodingKeys: String, CodingKey {
+            case items = "Items", totalRecordCount = "TotalRecordCount"
+        }
+    }
+
+    static func episodes(baseAddress: String, userID: String, itemID: String,
+                         token: String) async throws -> [JellyfinItem] {
+        guard let base = URL(string: baseAddress) else { throw EmbyError.invalidResponse }
+        var detail = URLRequest(url: base.appendingPathComponent("Users")
+            .appendingPathComponent(userID).appendingPathComponent("Items")
+            .appendingPathComponent(itemID))
+        detail.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+        detail.timeoutInterval = 20
+        let (detailData, detailResponse) = try await URLSession.shared.data(for: detail)
+        guard (detailResponse as? HTTPURLResponse)?.statusCode == 200,
+              let json = try JSONSerialization.jsonObject(with: detailData) as? [String: Any],
+              let seriesID = json["SeriesId"] as? String, !seriesID.isEmpty else { return [] }
+
+        var episodes: [JellyfinItem] = []
+        repeat {
+            var components = URLComponents(url: base.appendingPathComponent("Shows")
+                .appendingPathComponent(seriesID).appendingPathComponent("Episodes"),
+                resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "UserId", value: userID),
+                URLQueryItem(name: "StartIndex", value: String(episodes.count)),
+                URLQueryItem(name: "Limit", value: "200"),
+                URLQueryItem(name: "Fields", value: "Overview,MediaSources"),
+                URLQueryItem(name: "EnableUserData", value: "true")
+            ]
+            var request = URLRequest(url: components.url!)
+            request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+            request.timeoutInterval = 20
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw EmbyError.requestFailed }
+            let page = try JSONDecoder().decode(Page.self, from: data)
+            guard !page.items.isEmpty || episodes.count >= page.totalRecordCount else {
+                throw EmbyError.invalidResponse
+            }
+            episodes.append(contentsOf: page.items)
+            if episodes.count >= page.totalRecordCount || episodes.count >= 10_000 { break }
+        } while true
+        return episodes.sorted {
+            let lhs = ($0.parentIndexNumber ?? 0, $0.indexNumber ?? 0, $0.name)
+            let rhs = ($1.parentIndexNumber ?? 0, $1.indexNumber ?? 0, $1.name)
+            return lhs < rhs
+        }
+    }
+}
+
 private enum EmbyError: LocalizedError {
     case requestFailed, invalidResponse
     var errorDescription: String? {

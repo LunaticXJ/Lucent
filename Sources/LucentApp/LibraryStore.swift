@@ -944,6 +944,29 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    func openJellyfinItem(sourceID: UUID, remote: JellyfinItem) -> MediaItem {
+        if let existing = items.first(where: {
+            if case .jellyfinItem(let id, let itemID) = $0.location {
+                return id == sourceID && itemID == remote.id
+            }
+            return false
+        }) { return existing }
+        var item = MediaItem(title: remote.name,
+                             location: .jellyfinItem(sourceID: sourceID, itemID: remote.id),
+                             identity: remote.identity)
+        item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
+        item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
+        item.watched = remote.userData?.played ?? false
+        item.favorite = remote.userData?.isFavorite ?? false
+        item.stateUpdatedAt = remote.remoteStateDate ?? Date()
+        item.serverSummary = remote.overview
+        item.serverPosterKey = remote.imageTags?.primary
+        item.serverFileExtension = remote.fileExtension
+        items.insert(item, at: 0)
+        save()
+        return item
+    }
+
     func removeJellyfin(id: UUID) {
         jellyfinSources.removeAll { $0.id == id }
         offlineJellyfinSources.remove(id)

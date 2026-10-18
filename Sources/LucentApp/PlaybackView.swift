@@ -1171,6 +1171,16 @@ private enum PlaybackError: LocalizedError {
 }
 
 struct PlaybackView: View {
+    private struct EpisodeChoice: Identifiable {
+        let id: String
+        let title: String
+        let season: Int
+        let number: Int
+        let watched: Bool
+        let item: MediaItem?
+        let remote: JellyfinItem?
+    }
+
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     @AppStorage("lucent.subtitleFontScale") private var subtitleFontScale = 1.0
@@ -1181,9 +1191,14 @@ struct PlaybackView: View {
     @State private var isSeeking = false
     @State private var showDiagnostics = false
     @State private var controlsLocked = false
+    @State private var showEpisodeList = false
+    @State private var episodeChoices: [EpisodeChoice] = []
+    @State private var episodeLoading = false
+    @State private var episodeError: String?
     private let item: MediaItem
     private let nextItem: MediaItem?
     private let onContinue: (() -> Void)?
+    private let onSelectEpisode: ((MediaItem) -> Void)?
     private let transcodeBitrate: Int?
 
     init(item: MediaItem, nextItem: MediaItem? = nil,
@@ -1195,10 +1210,12 @@ struct PlaybackView: View {
          audioStreamIndex: Int? = nil, subtitleStreamIndex: Int? = nil,
          plexPartID: Int? = nil, plexMediaIndex: Int = 0,
          serverTracks: ServerPlaybackTracks = .empty,
-         onContinue: (() -> Void)? = nil) {
+         onContinue: (() -> Void)? = nil,
+         onSelectEpisode: ((MediaItem) -> Void)? = nil) {
         self.item = item
         self.nextItem = nextItem
         self.onContinue = onContinue
+        self.onSelectEpisode = onSelectEpisode
         self.transcodeBitrate = transcodeBitrate
         _session = StateObject(wrappedValue: PlaybackSession(
             item: item, serverMediaSourceID: serverMediaSourceID,
@@ -1259,6 +1276,10 @@ struct PlaybackView: View {
                                      stalls: session.stallCount,
                                      failure: session.message)
         }
+        .sheet(isPresented: $showEpisodeList) {
+            episodeList
+        }
+        .task(id: item.id) { await loadEpisodeChoices() }
         .onAppear {
             #if os(iOS)
             LucentOrientationDelegate.setPlaybackPresented(true)
@@ -1283,6 +1304,152 @@ struct PlaybackView: View {
         #endif
         .onChange(of: session.didFinish) { _, finished in
             if finished, nextItem != nil { onContinue?() }
+        }
+    }
+
+    private var episodeList: some View {
+        NavigationStack {
+            List {
+                if episodeLoading { ProgressView("正在读取剧集…") }
+                if let episodeError {
+                    Section {
+                        Text(episodeError).foregroundStyle(.secondary)
+                        Button("重试") { Task { await loadEpisodeChoices() } }
+                    }
+                }
+                ForEach(Array(Set(episodeChoices.map(\.season))).sorted(), id: \.self) { season in
+                    Section(season == 0 ? "特别篇" : "第 \(season) 季") {
+                        ForEach(episodeChoices.filter { $0.season == season }) { choice in
+                            Button { selectEpisode(choice) } label: {
+                                HStack(spacing: 12) {
+                                    Text(choice.number > 0 ? String(format: "%02d", choice.number) : "·")
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 30, alignment: .leading)
+                                    Text(choice.title).lineLimit(2)
+                                    Spacer()
+                                    if choice.id == currentEpisodeID || choice.item?.id == item.id {
+                                        Image(systemName: "waveform").foregroundStyle(.tint)
+                                    } else if choice.watched {
+                                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !episodeLoading && episodeChoices.isEmpty && episodeError == nil {
+                    ContentUnavailableView("暂无剧集", systemImage: "list.bullet.rectangle")
+                }
+            }
+            .navigationTitle(item.identity?.seriesName ?? "剧集列表")
+            .toolbar { Button("完成") { showEpisodeList = false } }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var currentEpisodeID: String {
+        switch item.location {
+        case .embyItem(_, let id), .jellyfinItem(_, let id): return id
+        default: return item.id.uuidString
+        }
+    }
+
+    private func selectEpisode(_ choice: EpisodeChoice) {
+        if choice.id == currentEpisodeID || choice.item?.id == item.id {
+            showEpisodeList = false
+            return
+        }
+        guard onSelectEpisode != nil else { return }
+        let selected: MediaItem?
+        if let stored = choice.item {
+            selected = stored
+        } else if let remote = choice.remote {
+            switch item.location {
+            case .embyItem(let sourceID, _):
+                selected = library.openEmbyItem(sourceID: sourceID, remote: remote)
+            case .jellyfinItem(let sourceID, _):
+                selected = library.openJellyfinItem(sourceID: sourceID, remote: remote)
+            default:
+                selected = nil
+            }
+        } else {
+            selected = nil
+        }
+        guard let selected else { return }
+        showEpisodeList = false
+        onSelectEpisode?(selected)
+    }
+
+    private func loadEpisodeChoices() async {
+        guard let series = item.identity?.seriesName else { return }
+        episodeLoading = true
+        episodeError = nil
+        let local = library.visibleItems.filter {
+            $0.identity?.seriesName == series && sameEpisodeSource($0.location, item.location)
+        }
+        episodeChoices = local.compactMap { candidate in
+            guard case .episode(_, let season, let number, _) = candidate.identity else { return nil }
+            return EpisodeChoice(id: candidate.id.uuidString, title: candidate.title,
+                                 season: season, number: number, watched: candidate.watched,
+                                 item: candidate, remote: nil)
+        }.sorted { ($0.season, $0.number, $0.title) < ($1.season, $1.number, $1.title) }
+        if episodeChoices.isEmpty,
+           case .episode(_, let season, let number, _) = item.identity {
+            episodeChoices = [EpisodeChoice(id: currentEpisodeID, title: item.title,
+                                            season: season, number: number, watched: item.watched,
+                                            item: item, remote: nil)]
+        }
+
+        let source: (base: String, userID: String, itemID: String, token: String)?
+        do {
+            switch item.location {
+            case .embyItem(let sourceID, let itemID):
+                guard let server = library.embySources.first(where: { $0.id == sourceID }),
+                      let token = try KeychainPasswordStore.embyToken(for: sourceID) else {
+                    throw PlaybackError.fileUnavailable
+                }
+                source = (server.baseAddress, server.userID, itemID, token)
+            case .jellyfinItem(let sourceID, let itemID):
+                guard let server = library.jellyfinSources.first(where: { $0.id == sourceID }),
+                      let token = try KeychainPasswordStore.jellyfinToken(for: sourceID) else {
+                    throw PlaybackError.fileUnavailable
+                }
+                source = (server.baseAddress, server.userID, itemID, token)
+            default:
+                source = nil
+            }
+            if let source {
+                let remote = try await ServerEpisodeClient.episodes(baseAddress: source.base,
+                    userID: source.userID, itemID: source.itemID, token: source.token)
+                if !remote.isEmpty {
+                    episodeChoices = remote.map { episode in
+                        EpisodeChoice(id: episode.id, title: episode.name,
+                                      season: episode.parentIndexNumber ?? 0,
+                                      number: episode.indexNumber ?? 0,
+                                      watched: episode.userData?.played ?? false,
+                                      item: nil, remote: episode)
+                    }
+                }
+            }
+        } catch {
+            episodeError = "无法读取服务器剧集：\(error.localizedDescription)"
+        }
+        episodeLoading = false
+    }
+
+    private func sameEpisodeSource(_ candidate: MediaLocation, _ current: MediaLocation) -> Bool {
+        switch (candidate, current) {
+        case (.embyItem(let lhs, _), .embyItem(let rhs, _)),
+             (.jellyfinItem(let lhs, _), .jellyfinItem(let rhs, _)),
+             (.plexItem(let lhs, _, _), .plexItem(let rhs, _, _)):
+            return lhs == rhs
+        case (.embyItem, _), (.jellyfinItem, _), (.plexItem, _):
+            return false
+        case (_, .embyItem), (_, .jellyfinItem), (_, .plexItem):
+            return false
+        default:
+            return true
         }
     }
 
@@ -1372,6 +1539,10 @@ struct PlaybackView: View {
 
             HStack(spacing: 0) {
                 HStack(spacing: 24) {
+                    if item.identity?.seriesName != nil {
+                        Button("剧集列表", systemImage: "list.bullet") { showEpisodeList = true }
+                            .labelStyle(.iconOnly)
+                    }
                     if session.playlistEntries.count > 1 {
                         Menu("播放列表", systemImage: "list.bullet") {
                             ForEach(session.playlistEntries) { entry in

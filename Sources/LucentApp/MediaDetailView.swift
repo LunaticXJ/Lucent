@@ -504,14 +504,25 @@ struct MediaDetailView: View {
                      subtitleStreamIndex: selectedSubtitleStreamIndex,
                      plexPartID: selectedPlexPartID,
                      plexMediaIndex: selectedPlexMediaIndex,
-                     serverTracks: playbackTracks(for: item)) {
-            if let next {
-                selectedServerMediaSourceID = nil
-                forceRemoteVersion = false
-                selectedTranscodeBitrate = nil
-                playingItem = next
-            }
-        }
+                     serverTracks: playbackTracks(for: item),
+                     onContinue: {
+                         if let next {
+                             selectedServerMediaSourceID = nil
+                             forceRemoteVersion = false
+                             selectedTranscodeBitrate = nil
+                             playingItem = next
+                         }
+                     },
+                     onSelectEpisode: { selected in
+                         selectedServerMediaSourceID = nil
+                         forceRemoteVersion = false
+                         selectedTranscodeBitrate = nil
+                         selectedAudioStreamIndex = nil
+                         selectedSubtitleStreamIndex = nil
+                         selectedPlexPartID = nil
+                         selectedPlexMediaIndex = 0
+                         playingItem = selected
+                     })
         .id(item.id)
         .environmentObject(library)
     }

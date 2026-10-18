@@ -29,6 +29,7 @@ targets:
       path: Generated/iOS-Info.plist
       properties:
         CFBundleDisplayName: Lucent
+        UILaunchScreen: {}
         UIBackgroundModes: [audio]
         NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源。
         NSBonjourServices: [_smb._tcp]

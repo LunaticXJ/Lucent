@@ -7,10 +7,13 @@ private enum HomePalette {
     static let background = Color(red: 0.981, green: 0.950, blue: 0.939)
     static let ink = Color(red: 0.115, green: 0.137, blue: 0.170)
     static let muted = Color(red: 0.44, green: 0.45, blue: 0.48)
-    static let blue = Color(red: 0.18, green: 0.41, blue: 0.83)
-    static let continueWidth: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 240 : 185
-    static let categoryWidth: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 240 : 165
-    static let posterWidth: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 150 : 105
+    static let isPad = UIDevice.current.userInterfaceIdiom == .pad
+    static let inset: CGFloat = isPad ? 42 : 20
+    static let heroHeight: CGFloat = isPad ? 510 : 390
+    static let continueWidth: CGFloat = isPad ? 285 : 185
+    static let categoryWidth: CGFloat = isPad ? 250 : 165
+    static let posterWidth: CGFloat = isPad ? 160 : 105
+    static let sectionSpacing: CGFloat = isPad ? 38 : 30
 }
 
 @MainActor
@@ -78,6 +81,7 @@ struct MobileHomeView: View {
     @State private var views: [JellyfinItem] = []
     @State private var latest: [JellyfinItem] = []
     @State private var continuing: [JellyfinItem] = []
+    @State private var continuingTotal = 0
     @State private var shelves: [HomeShelf] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -93,7 +97,7 @@ struct MobileHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 hero.frame(width: viewport.size.width)
-                VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: HomePalette.sectionSpacing) {
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.subheadline)
@@ -110,8 +114,8 @@ struct MobileHomeView: View {
                             .foregroundStyle(HomePalette.muted)
                     }
                 }
-                .padding(.top, 24)
-                .padding(.bottom, 36)
+                .padding(.top, HomePalette.isPad ? 30 : 20)
+                .padding(.bottom, 56)
             }
             .frame(width: viewport.size.width, alignment: .leading)
         }
@@ -143,11 +147,11 @@ struct MobileHomeView: View {
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
             LinearGradient(stops: [
-                .init(color: .black.opacity(0.20), location: 0),
-                .init(color: .clear, location: 0.32),
-                .init(color: .black.opacity(0.36), location: 0.58),
-                .init(color: HomePalette.background.opacity(0.82), location: 0.88),
-                .init(color: HomePalette.background, location: 1)
+                .init(color: .black.opacity(0.38), location: 0),
+                .init(color: .clear, location: 0.30),
+                .init(color: .black.opacity(0.52), location: 0.50),
+                .init(color: HomePalette.background.opacity(0.88), location: 0.73),
+                .init(color: HomePalette.background, location: 0.95)
             ], startPoint: .top, endPoint: .bottom)
 
             VStack(alignment: .leading, spacing: 0) {
@@ -175,45 +179,51 @@ struct MobileHomeView: View {
                     Spacer()
                 }
                 .foregroundStyle(HomePalette.ink)
-                .padding(.top, 64)
+                .padding(.top, HomePalette.isPad ? 72 : 60)
                 Spacer(minLength: 0)
                 if let item = latest.first {
-                    Text("为你推荐").font(.caption.weight(.semibold)).tracking(2)
-                        .foregroundStyle(.white.opacity(0.9))
-                    Text(item.name)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-                        .padding(.top, 8)
-                    HStack(spacing: 8) {
-                        if let rating = item.communityRating {
-                            Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
-                                .foregroundStyle(.yellow)
-                        }
-                        if let year = item.productionYear { Text(String(year)) }
-                        Text("电影")
-                    }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(.top, 8)
-                    if let overview = item.overview, !overview.isEmpty {
-                        Text(overview)
-                            .font(.subheadline)
-                            .foregroundStyle(HomePalette.ink.opacity(0.8))
-                            .lineLimit(2)
-                            .padding(.top, 14)
-                    }
-                    Button {
-                        open(item)
-                    } label: {
-                        Label("查看影片", systemImage: "play.fill")
-                            .font(.subheadline.bold())
-                            .padding(.horizontal, 18).padding(.vertical, 12)
-                            .background(HomePalette.ink, in: Capsule())
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("新近入库").font(.caption.weight(.semibold)).tracking(2)
+                            .foregroundStyle(.white.opacity(0.9))
+                        Text(item.name)
+                            .font(.system(size: HomePalette.isPad ? 48 : 34,
+                                          weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                            .lineLimit(2)
+                            .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                            .padding(.top, 8)
+                        HStack(spacing: 8) {
+                            if let rating = item.communityRating {
+                                Label(rating.formatted(.number.precision(.fractionLength(1))),
+                                      systemImage: "star.fill")
+                                    .foregroundStyle(.yellow)
+                            }
+                            if let year = item.productionYear { Text(String(year)) }
+                            Text("电影")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.top, 8)
+                        if let overview = item.overview, !overview.isEmpty {
+                            Text(overview)
+                                .font(HomePalette.isPad ? .body : .subheadline)
+                                .foregroundStyle(HomePalette.ink.opacity(0.84))
+                                .lineLimit(2)
+                                .padding(.top, 14)
+                        }
+                        Button {
+                            open(item)
+                        } label: {
+                            Label("查看影片", systemImage: "play.fill")
+                                .font(.subheadline.bold())
+                                .padding(.horizontal, 18).padding(.vertical, 12)
+                                .background(HomePalette.ink, in: Capsule())
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.top, 18)
                     }
-                    .padding(.top, 18)
+                    .frame(maxWidth: HomePalette.isPad ? 640 : .infinity,
+                           alignment: .leading)
                 } else {
                     Text("让好故事，触手可及")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -226,19 +236,20 @@ struct MobileHomeView: View {
                         .padding(.top, 18)
                 }
             }
-            .frame(width: geometry.size.width - 44, alignment: .leading)
-            .padding(.horizontal, 22)
+            .frame(width: geometry.size.width - HomePalette.inset * 2,
+                   alignment: .leading)
+            .padding(.horizontal, HomePalette.inset)
             .padding(.bottom, 24)
         }
         .frame(width: geometry.size.width, height: geometry.size.height)
         .clipped()
         }
-        .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 540 : 400)
+        .frame(height: HomePalette.heroHeight)
     }
 
     private var continueSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            heading("继续观看", count: continuing.count)
+            heading("继续观看", count: continuingTotal)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     if let source {
@@ -254,8 +265,9 @@ struct MobileHomeView: View {
                                             .tint(.white)
                                             .padding(10)
                                     }
-                                    .frame(width: HomePalette.continueWidth, height: 110)
-                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    .frame(width: HomePalette.continueWidth,
+                                           height: HomePalette.isPad ? 160 : 110)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
                                     Text(item.name).font(.subheadline.weight(.semibold))
                                         .foregroundStyle(HomePalette.ink).lineLimit(1)
                                     if let label = item.identity.episodeLabel {
@@ -269,7 +281,7 @@ struct MobileHomeView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, HomePalette.inset)
             }
         }
     }
@@ -301,14 +313,15 @@ struct MobileHomeView: View {
                                         .foregroundStyle(.white)
                                         .padding(16)
                                 }
-                                .frame(width: HomePalette.categoryWidth, height: 120)
-                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                                .frame(width: HomePalette.categoryWidth,
+                                       height: HomePalette.isPad ? 145 : 120)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
                             }
                             .buttonStyle(.plain)
                         }
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, HomePalette.inset)
             }
         }
     }
@@ -341,7 +354,8 @@ struct MobileHomeView: View {
                                                 .padding(8)
                                         }
                                     }
-                                    .frame(width: HomePalette.posterWidth, height: 158)
+                                    .frame(width: HomePalette.posterWidth,
+                                           height: HomePalette.isPad ? 240 : 158)
                                     .clipShape(RoundedRectangle(cornerRadius: 15))
                                     Text(item.name).font(.subheadline.weight(.medium))
                                         .foregroundStyle(HomePalette.ink).lineLimit(1)
@@ -355,20 +369,21 @@ struct MobileHomeView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, HomePalette.inset)
             }
         }
     }
 
     private func heading(_ title: String, count: Int?) -> some View {
         HStack(spacing: 6) {
-            Text(title).font(.title3.bold()).foregroundStyle(HomePalette.ink)
+            Text(title).font(HomePalette.isPad ? .title2.bold() : .title3.bold())
+                .foregroundStyle(HomePalette.ink)
             Spacer()
             if let count { Text(String(count)).font(.subheadline).foregroundStyle(HomePalette.muted) }
             Image(systemName: "chevron.right").font(.caption.bold())
                 .foregroundStyle(HomePalette.muted)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, HomePalette.inset)
     }
 
     private func progress(_ item: JellyfinItem) -> Double {
@@ -387,7 +402,7 @@ struct MobileHomeView: View {
 
     private func loadHome() async {
         guard let source else {
-            views = []; latest = []; continuing = []; shelves = []
+            views = []; latest = []; continuing = []; continuingTotal = 0; shelves = []
             return
         }
         isLoading = true
@@ -407,6 +422,7 @@ struct MobileHomeView: View {
             views = viewPage?.items ?? []
             latest = recentMovies ?? []
             continuing = resumePage?.items ?? []
+            continuingTotal = resumePage?.totalCount ?? continuing.count
             if views.isEmpty && latest.isEmpty && continuing.isEmpty {
                 errorMessage = "服务器暂时无法提供首页内容，请在片源中浏览目录。"
             }

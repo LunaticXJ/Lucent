@@ -22,6 +22,7 @@
 		0EB0D332BF33DF1250B6BD9F /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
 		0F543795E1691477C27AE762 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95723DE6607ECC25204574AD /* MobileHomeView.swift */; };
 		1059007BB1CA28D76A3C4227 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
+		108542BD655E52D8A3BE60D6 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A989709453124F9315EDAAF6 /* MacHomeView.swift */; };
 		1241121A356327C0A0D5E9B1 /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432A898696BEFBEED0B6F342 /* TVHomeView.swift */; };
 		19B721A9980B89798AC6D0AC /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
 		1A27FE799E9B5504BC67E52D /* LibraryDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */; };
@@ -103,6 +104,7 @@
 		9BCDC684028407BE6657C07D /* SSDPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */; };
 		9D5512829091AFD9A06F5F77 /* EmbyBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */; };
 		9DA79CDA0785D4018DA42968 /* BrowserUploadServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */; };
+		9DB4BD6B2AB2DB9B83C248F6 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A989709453124F9315EDAAF6 /* MacHomeView.swift */; };
 		A02F5485201B86BA9C14EF22 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D837828C6927A928619282B /* LibraryView.swift */; };
 		A2446AB9E89B8B86903FCA2C /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
 		A31DD790DC19987C6735744E /* DLNAClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */; };
@@ -143,6 +145,7 @@
 		D9E19A01A9C08A9B427B73C0 /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
 		DBB0F7F469C6CEE8091A910D /* AudioRoutePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */; };
 		DCBC6C96F6D9FB9B730FD55B /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432A898696BEFBEED0B6F342 /* TVHomeView.swift */; };
+		DF83E1DE1190149541050FF9 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A989709453124F9315EDAAF6 /* MacHomeView.swift */; };
 		E0B5CF70BE15364E72CFBCF8 /* SwiftSMB in Frameworks */ = {isa = PBXBuildFile; productRef = A45761EA0E1D4C2FF69362DB /* SwiftSMB */; };
 		E234741AB7CD5562C6DD1FE0 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95723DE6607ECC25204574AD /* MobileHomeView.swift */; };
 		E282CEA03702FF94DE92CBA5 /* ChineseCloudClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */; };
@@ -202,6 +205,7 @@
 		9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSubtitlesClient.swift; sourceTree = "<group>"; };
 		A783901481863088FDE35E39 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		A7C06239CC35CD4002E499AF /* JellyfinClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JellyfinClient.swift; sourceTree = "<group>"; };
+		A989709453124F9315EDAAF6 /* MacHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacHomeView.swift; sourceTree = "<group>"; };
 		A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudTokenRefresher.swift; sourceTree = "<group>"; };
 		B0E344C69EEF493CFD5BED53 /* SRTParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SRTParser.swift; sourceTree = "<group>"; };
 		B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderScanner.swift; sourceTree = "<group>"; };
@@ -311,6 +315,7 @@
 				C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */,
 				6D837828C6927A928619282B /* LibraryView.swift */,
 				822205233E4B2B4CA28AE811 /* LucentApp.swift */,
+				A989709453124F9315EDAAF6 /* MacHomeView.swift */,
 				C54B97982618CB94DF83B691 /* MediaDetailView.swift */,
 				8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */,
 				B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */,
@@ -478,6 +483,7 @@
 				76EC073F50D5ADFA72D6C025 /* LibraryStore.swift in Sources */,
 				D3B4630DE06038D6FD15DCE5 /* LibraryView.swift in Sources */,
 				276F4FB00563E76B1972DC06 /* LucentApp.swift in Sources */,
+				108542BD655E52D8A3BE60D6 /* MacHomeView.swift in Sources */,
 				ADC8CB3C0786207AA729BA0F /* MediaDetailView.swift in Sources */,
 				5B366F094C185995C56B5AA2 /* MediaEditView.swift in Sources */,
 				0B34F2F2815143B85E83D757 /* MediaItem.swift in Sources */,
@@ -535,6 +541,7 @@
 				42DAF4BAF307813E9FAC049A /* LibraryStore.swift in Sources */,
 				A02F5485201B86BA9C14EF22 /* LibraryView.swift in Sources */,
 				F66E60E0673B1C0DD7EB0406 /* LucentApp.swift in Sources */,
+				DF83E1DE1190149541050FF9 /* MacHomeView.swift in Sources */,
 				56A55486EC2A517EAE7CA25B /* MediaDetailView.swift in Sources */,
 				619E3E1312F00684E798E499 /* MediaEditView.swift in Sources */,
 				415F68969D3E9EBAF8045A41 /* MediaItem.swift in Sources */,
@@ -592,6 +599,7 @@
 				BF6AF5E36888B8CB380BA194 /* LibraryStore.swift in Sources */,
 				E9D3C3F8D76328E14DF6E8A3 /* LibraryView.swift in Sources */,
 				F3EB64551EF413726B2AF522 /* LucentApp.swift in Sources */,
+				9DB4BD6B2AB2DB9B83C248F6 /* MacHomeView.swift in Sources */,
 				D58F7DBBB1088587F04DF25C /* MediaDetailView.swift in Sources */,
 				F8FECDAC62B4D300D0D3DA68 /* MediaEditView.swift in Sources */,
 				2242731EE1403E39B713B796 /* MediaItem.swift in Sources */,

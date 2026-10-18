@@ -1,6 +1,9 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#endif
 
 struct LibraryView: View {
     private enum SortOrder { case newest, title }
@@ -11,6 +14,10 @@ struct LibraryView: View {
     #endif
     #if os(tvOS)
     @State private var tvShowLibrary = false
+    #endif
+    #if os(macOS)
+    private enum MacPage { case home, library }
+    @State private var macPage: MacPage = .home
     #endif
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.scenePhase) private var scenePhase
@@ -159,6 +166,8 @@ struct LibraryView: View {
                 TVHomeView(showLibrary: { tvShowLibrary = true })
                     .environmentObject(library)
             }
+            #elseif os(macOS)
+            macShell
             #else
             navigationBody
             #endif
@@ -180,6 +189,59 @@ struct LibraryView: View {
                 library.scheduleTraktSync()
             }
     }
+
+    #if os(macOS)
+    private var macShell: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("LUCENT")
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .tracking(3)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 14)
+                    .padding(.bottom, 34)
+                macSidebarButton(.home, title: "首页", symbol: "play.rectangle.fill")
+                macSidebarButton(.library, title: "片源与媒体库", symbol: "externaldrive.fill")
+                Spacer()
+                Text("电影，尽在眼前")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+            }
+            .padding(16)
+            .frame(width: 230, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            Divider()
+            Group {
+                switch macPage {
+                case .home:
+                    MacHomeView(showLibrary: { macPage = .library })
+                        .environmentObject(library)
+                case .library:
+                    navigationBody
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 900, minHeight: 640)
+        .preferredColorScheme(.dark)
+    }
+
+    private func macSidebarButton(_ page: MacPage, title: String, symbol: String) -> some View {
+        Button { macPage = page } label: {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 14, weight: .medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .background(macPage == page ? Color.accentColor.opacity(0.16) : .clear,
+                            in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+    #endif
 
     #if os(iOS)
     private var mobileShell: some View {
@@ -215,9 +277,10 @@ struct LibraryView: View {
             Label(title, systemImage: symbol)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(mobileTab == tab ? Color.white : Color.primary)
-                .frame(width: 78)
-                .frame(height: 42)
-                .background(mobileTab == tab ? Color.blue : Color.clear, in: Capsule())
+                .frame(width: UIDevice.current.userInterfaceIdiom == .pad ? 108 : 78)
+                .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 48 : 42)
+                .background(mobileTab == tab ? Color(red: 0.115, green: 0.137, blue: 0.170) :
+                            Color.clear, in: Capsule())
         }
         .accessibilityLabel(title)
     }

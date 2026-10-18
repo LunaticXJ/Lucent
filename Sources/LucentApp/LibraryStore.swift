@@ -27,8 +27,6 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var offlineWebDAVSources: Set<UUID> = []
     @Published private(set) var scanningJellyfinSources: Set<UUID> = []
     @Published private(set) var offlineJellyfinSources: Set<UUID> = []
-    @Published private(set) var scanningEmbySources: Set<UUID> = []
-    @Published private(set) var offlineEmbySources: Set<UUID> = []
     @Published private(set) var scanningPlexSources: Set<UUID> = []
     @Published private(set) var offlinePlexSources: Set<UUID> = []
     @Published private(set) var scanningCloudSources: Set<UUID> = []
@@ -653,7 +651,6 @@ final class LibraryStore: ObservableObject {
         for source in smbSources { scanSMB(id: source.id) }
         for source in webDAVSources { scanWebDAV(id: source.id) }
         for source in jellyfinSources { scanJellyfin(id: source.id) }
-        for source in embySources { scanEmby(id: source.id) }
         for source in plexSources { scanPlex(id: source.id) }
         for source in cloudSources { scanCloud(id: source.id) }
         for source in dlnaSources { scanDLNA(id: source.id) }
@@ -996,7 +993,6 @@ final class LibraryStore: ObservableObject {
             try KeychainPasswordStore.setEmbyToken(token, for: source.id)
             embySources.append(source)
             save()
-            scanEmby(id: source.id)
             return true
         } catch {
             errorMessage = "连接 Emby 失败：\(error.localizedDescription)"
@@ -1029,82 +1025,33 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func scanEmby(id: UUID) {
-        guard let source = embySources.first(where: { $0.id == id }),
-              !scanningEmbySources.contains(id) else { return }
-        let token: String
-        do { token = try KeychainPasswordStore.embyToken(for: id) ?? "" }
-        catch { errorMessage = "无法读取 Emby 令牌：\(error.localizedDescription)"; return }
-        guard !token.isEmpty else { errorMessage = "Emby 令牌已丢失，请重新添加服务器。"; return }
-        scanningEmbySources.insert(id)
-        Task {
-            defer { scanningEmbySources.remove(id) }
-            do {
-                let remoteItems = try await EmbyClient.scan(source: source, token: token)
-                guard let index = embySources.firstIndex(where: { $0.id == id }) else { return }
-                let remoteIDs = Set(remoteItems.map(\.id))
-                var updatedItems = items
-                var existingIndices: [String: Int] = [:]
-                for itemIndex in updatedItems.indices {
-                    if case .embyItem(let sourceID, let itemID) = updatedItems[itemIndex].location,
-                       sourceID == id {
-                        existingIndices[itemID] = itemIndex
-                    }
-                }
-                var addedItems: [MediaItem] = []
-                for remote in remoteItems {
-                    if let itemIndex = existingIndices[remote.id] {
-                        updatedItems[itemIndex].missingSince = nil
-                        if updatedItems[itemIndex].metadata == nil { updatedItems[itemIndex].title = remote.name }
-                        updatedItems[itemIndex].serverSummary = remote.overview
-                        if updatedItems[itemIndex].serverPosterKey != remote.imageTags?.primary,
-                           updatedItems[itemIndex].metadata == nil { clearPoster(index: itemIndex) }
-                        updatedItems[itemIndex].serverPosterKey = remote.imageTags?.primary
-                        updatedItems[itemIndex].duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
-                        updatedItems[itemIndex].serverFileExtension = remote.fileExtension
-                        if (remote.remoteStateDate ?? .distantPast) > (updatedItems[itemIndex].stateUpdatedAt ?? .distantPast) ||
-                            updatedItems[itemIndex].stateUpdatedAt == nil {
-                            updatedItems[itemIndex].position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
-                            updatedItems[itemIndex].watched = remote.userData?.played ?? false
-                            updatedItems[itemIndex].favorite = remote.userData?.isFavorite ?? false
-                            updatedItems[itemIndex].stateUpdatedAt = remote.remoteStateDate ?? Date()
-                        }
-                    } else {
-                        var item = MediaItem(title: remote.name,
-                                             location: .embyItem(sourceID: id, itemID: remote.id),
-                                             identity: remote.identity)
-                        item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
-                        item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
-                        item.watched = remote.userData?.played ?? false
-                        item.favorite = remote.userData?.isFavorite ?? false
-                        item.stateUpdatedAt = remote.remoteStateDate ?? Date()
-                        item.serverSummary = remote.overview
-                        item.serverPosterKey = remote.imageTags?.primary
-                        item.serverFileExtension = remote.fileExtension
-                        addedItems.append(item)
-                    }
-                }
-                for itemIndex in updatedItems.indices {
-                    if case .embyItem(let sourceID, let itemID) = updatedItems[itemIndex].location,
-                       sourceID == id, !remoteIDs.contains(itemID) {
-                        updatedItems[itemIndex].missingSince = updatedItems[itemIndex].missingSince ?? Date()
-                    }
-                }
-                items = Array(addedItems.reversed()) + updatedItems
-                embySources[index].lastScannedAt = Date()
-                offlineEmbySources.remove(id)
-                save()
-                scheduleMetadataEnrichment()
-            } catch {
-                offlineEmbySources.insert(id)
-                errorMessage = "Emby 扫描失败：\(error.localizedDescription)"
+    func openEmbyItem(sourceID: UUID, remote: JellyfinItem) -> MediaItem {
+        if let index = items.firstIndex(where: {
+            if case .embyItem(let id, let itemID) = $0.location {
+                return id == sourceID && itemID == remote.id
             }
+            return false
+        }) {
+            return items[index]
         }
+        var item = MediaItem(title: remote.name,
+                             location: .embyItem(sourceID: sourceID, itemID: remote.id),
+                             identity: remote.identity)
+        item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
+        item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
+        item.watched = remote.userData?.played ?? false
+        item.favorite = remote.userData?.isFavorite ?? false
+        item.stateUpdatedAt = remote.remoteStateDate ?? Date()
+        item.serverSummary = remote.overview
+        item.serverPosterKey = remote.imageTags?.primary
+        item.serverFileExtension = remote.fileExtension
+        items.insert(item, at: 0)
+        save()
+        return item
     }
 
     func removeEmby(id: UUID) {
         embySources.removeAll { $0.id == id }
-        offlineEmbySources.remove(id)
         removeItemsAndAssets {
             if case .embyItem(let sourceID, _) = $0.location { return sourceID == id }
             return false
@@ -1119,9 +1066,7 @@ final class LibraryStore: ObservableObject {
             try await EmbyClient.validateUser(baseAddress: embySources[index].baseAddress,
                                               token: token, userID: embySources[index].userID)
             try KeychainPasswordStore.setEmbyToken(token, for: id)
-            offlineEmbySources.remove(id)
             save()
-            scanEmby(id: id)
             return true
         } catch {
             errorMessage = "无法更新 Emby 令牌：\(error.localizedDescription)"

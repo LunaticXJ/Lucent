@@ -98,6 +98,7 @@
 		96DB0E827B928FDFE85D9FCE /* FolderScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */; };
 		998B844D1D5D6C9E26ADFBFC /* SMBDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B873ED80B83D9EE0A7B7916D /* SMBDiscovery.swift */; };
 		9BCDC684028407BE6657C07D /* SSDPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */; };
+		9D5512829091AFD9A06F5F77 /* EmbyBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */; };
 		9DA79CDA0785D4018DA42968 /* BrowserUploadServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */; };
 		A02F5485201B86BA9C14EF22 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D837828C6927A928619282B /* LibraryView.swift */; };
 		A2446AB9E89B8B86903FCA2C /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
@@ -114,6 +115,7 @@
 		B921265F08E9F7C38C7AD7DF /* TraktClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06E4CE71A807F4420ED5937 /* TraktClient.swift */; };
 		BF6AF5E36888B8CB380BA194 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */; };
 		BFA29B2A40876EEE86CB8E44 /* MetadataMatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */; };
+		C0400D021B962A42783AF599 /* EmbyBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */; };
 		C0820D3073B0483AE86F0BC1 /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
 		C0A386FF7B69A1262B48841C /* AudioRoutePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */; };
 		C265556CAC58A2B80ED630FD /* PlexAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C3EF162365113C3AE02C /* PlexAuthClient.swift */; };
@@ -143,6 +145,7 @@
 		E9D3C3F8D76328E14DF6E8A3 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D837828C6927A928619282B /* LibraryView.swift */; };
 		ED82DB954F43B88C77F7D754 /* OpenSubtitlesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */; };
 		ED93501D6029A16342643310 /* SRTParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E344C69EEF493CFD5BED53 /* SRTParser.swift */; };
+		F0DD956D4E464A6F246BECE5 /* EmbyBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */; };
 		F12E45816023041A5EA1B7CB /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
 		F16843427F228CA600AB6DC8 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */; };
 		F30C1998C894AD161015302B /* PlaylistResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */; };
@@ -212,6 +215,7 @@
 		EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayerSurface.swift; sourceTree = "<group>"; };
 		F06E4CE71A807F4420ED5937 /* TraktClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TraktClient.swift; sourceTree = "<group>"; };
 		F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleParser.swift; sourceTree = "<group>"; };
+		FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyBrowserView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -287,6 +291,7 @@
 				D3916E7378624863840BC778 /* CloudPlaybackSync.swift */,
 				A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */,
 				B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */,
+				FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */,
 				CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */,
 				B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */,
 				6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */,
@@ -451,6 +456,7 @@
 				3001F8CBC1B1602680608D29 /* CloudPlaybackSync.swift in Sources */,
 				701C9105ECB87825CBBAA981 /* CloudTokenRefresher.swift in Sources */,
 				A31DD790DC19987C6735744E /* DLNAClient.swift in Sources */,
+				9D5512829091AFD9A06F5F77 /* EmbyBrowserView.swift in Sources */,
 				3A186B8DB9B44811D2C9DCB3 /* EmbyClient.swift in Sources */,
 				96DB0E827B928FDFE85D9FCE /* FolderScanner.swift in Sources */,
 				604FC1F63860F993748F4E65 /* GuangyaClient.swift in Sources */,
@@ -505,6 +511,7 @@
 				B559F7976013546A53864384 /* CloudPlaybackSync.swift in Sources */,
 				55EC5965D1C18347A00EF9A7 /* CloudTokenRefresher.swift in Sources */,
 				CF23D109BF7022EFD1644563 /* DLNAClient.swift in Sources */,
+				C0400D021B962A42783AF599 /* EmbyBrowserView.swift in Sources */,
 				323935CE30B243B89BA0B6AB /* EmbyClient.swift in Sources */,
 				CE7E7F0974487A8A06516740 /* FolderScanner.swift in Sources */,
 				0679BE2A95DF90951A949A3E /* GuangyaClient.swift in Sources */,
@@ -559,6 +566,7 @@
 				034911E2616459AD312BDD7F /* CloudPlaybackSync.swift in Sources */,
 				0DD8A08F9F0ACA68D31E2397 /* CloudTokenRefresher.swift in Sources */,
 				92664C72DC5B4A1CF4936547 /* DLNAClient.swift in Sources */,
+				F0DD956D4E464A6F246BECE5 /* EmbyBrowserView.swift in Sources */,
 				45312F671C1D08F12AEC869B /* EmbyClient.swift in Sources */,
 				FF142136B68BE44D94BC97DE /* FolderScanner.swift in Sources */,
 				0B377D149A34709694EB5E69 /* GuangyaClient.swift in Sources */,

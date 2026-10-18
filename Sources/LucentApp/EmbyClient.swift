@@ -1,6 +1,10 @@
 import Foundation
 
 enum EmbyClient {
+    struct BrowsePage: Sendable {
+        let items: [JellyfinItem]
+        let totalCount: Int
+    }
     private struct User: Decodable {
         let id: String
         enum CodingKeys: String, CodingKey { case id = "Id" }
@@ -24,6 +28,28 @@ enum EmbyClient {
         guard user.id.caseInsensitiveCompare(userID) == .orderedSame else { throw EmbyError.invalidResponse }
     }
 
+    static func browse(source: EmbySource, token: String, parentID: String?,
+                       startIndex: Int = 0, limit: Int = 100) async throws -> BrowsePage {
+        let path = parentID == nil ? "Users/\(source.userID)/Views" : "Users/\(source.userID)/Items"
+        var request = try makeRequest(baseAddress: source.baseAddress, path: path, token: token)
+        if let parentID {
+            var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "ParentId", value: parentID),
+                URLQueryItem(name: "Recursive", value: "false"),
+                URLQueryItem(name: "StartIndex", value: String(startIndex)),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "Overview,MediaSources"),
+                URLQueryItem(name: "EnableUserData", value: "true"),
+                URLQueryItem(name: "SortBy", value: "SortName"),
+                URLQueryItem(name: "SortOrder", value: "Ascending")
+            ]
+            request.url = components.url
+        }
+        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
+        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+    }
+
     static func authenticate(baseAddress: String, username: String, password: String) async throws -> (token: String, userID: String) {
         guard !username.isEmpty else { throw EmbyError.invalidResponse }
         var request = try makeRequest(baseAddress: baseAddress, path: "Users/AuthenticateByName", token: "")
@@ -32,30 +58,6 @@ enum EmbyClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["Username": username, "Pw": password])
         let result = try JSONDecoder().decode(Authentication.self, from: await fetch(request))
         return (result.accessToken, result.user.id)
-    }
-
-    static func scan(source: EmbySource, token: String) async throws -> [JellyfinItem] {
-        var all: [JellyfinItem] = []
-        repeat {
-            var request = try makeRequest(baseAddress: source.baseAddress,
-                                          path: "Users/\(source.userID)/Items", token: token)
-            var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
-            components.queryItems = [
-                URLQueryItem(name: "Recursive", value: "true"),
-                URLQueryItem(name: "IncludeItemTypes", value: "Movie,Episode,Video"),
-                URLQueryItem(name: "Fields", value: "Path,MediaSources,Overview"),
-                URLQueryItem(name: "EnableUserData", value: "true"),
-                URLQueryItem(name: "StartIndex", value: String(all.count)),
-                URLQueryItem(name: "Limit", value: "1000")
-            ]
-            request.url = components.url
-            let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
-            guard !page.items.isEmpty || all.count >= page.totalRecordCount else { throw EmbyError.invalidResponse }
-            all.append(contentsOf: page.items)
-            if all.count > 50_000 { throw EmbyError.tooManyItems }
-            if all.count >= page.totalRecordCount { break }
-        } while true
-        return all
     }
 
     static func readRange(source: EmbySource, token: String, itemID: String,
@@ -145,12 +147,11 @@ enum EmbyClient {
 }
 
 private enum EmbyError: LocalizedError {
-    case requestFailed, invalidResponse, tooManyItems
+    case requestFailed, invalidResponse
     var errorDescription: String? {
         switch self {
         case .requestFailed: "Emby 请求失败，请检查地址和访问令牌。"
         case .invalidResponse: "Emby 返回了无法识别的数据。"
-        case .tooManyItems: "媒体库超过 50,000 项，请缩小扫描范围。"
         }
     }
 }

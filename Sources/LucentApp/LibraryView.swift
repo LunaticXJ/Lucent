@@ -105,6 +105,7 @@ struct LibraryView: View {
     @State private var editingSMB: SMBSource?
     @State private var editingJellyfin: JellyfinSource?
     @State private var editingEmby: EmbySource?
+    @State private var browsingEmby: EmbySource?
     @State private var editingPlex: PlexSource?
     @State private var replacementToken = ""
     @State private var replacingToken = false
@@ -118,7 +119,12 @@ struct LibraryView: View {
 
     private var filtered: [MediaItem] {
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let available = library.visibleItems.filter { $0.missingSince == nil || library.downloadedURL(for: $0) != nil }
+        let available = library.visibleItems.filter { item in
+            if case .embyItem = item.location {
+                return library.downloadedURL(for: item) != nil
+            }
+            return item.missingSince == nil || library.downloadedURL(for: item) != nil
+        }
         let searched = term.isEmpty ? available : available.filter {
             $0.title.localizedCaseInsensitiveContains(term) ||
             ($0.identity?.seriesName?.localizedCaseInsensitiveContains(term) ?? false)
@@ -304,6 +310,9 @@ struct LibraryView: View {
             .sheet(item: $editingSMB) { source in smbCredentialsSheet(source) }
             .sheet(item: $editingJellyfin) { source in jellyfinTokenSheet(source) }
             .sheet(item: $editingEmby) { source in embyTokenSheet(source) }
+            .sheet(item: $browsingEmby) { source in
+                EmbyBrowserView(source: source).environmentObject(library)
+            }
             .sheet(item: $editingPlex) { source in plexTokenSheet(source) }
             .sheet(isPresented: $showWebDAV) { webDAVSheet }
             .sheet(item: $editingWebDAV) { source in webDAVCredentialsSheet(source) }
@@ -1122,24 +1131,21 @@ struct LibraryView: View {
             ForEach(library.embySources) { source in
                 HStack(spacing: 12) {
                     Image(systemName: "server.rack")
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(source.name).font(.headline)
-                        Text(library.offlineEmbySources.contains(source.id) ? "当前不可访问" :
-                             source.lastScannedAt.map { "上次扫描：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "尚未扫描")
-                            .font(.caption).foregroundStyle(.secondary)
+                    Button { browsingEmby = source } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(source.name).font(.headline)
+                            Text("浏览服务器目录").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
                     Spacer()
-                    if library.scanningEmbySources.contains(source.id) {
-                        ProgressView()
-                    } else {
-                        Button("刷新") { library.scanEmby(id: source.id) }
-                    }
+                    Button("浏览", systemImage: "chevron.right") { browsingEmby = source }
                     Menu {
                         Button("更新访问令牌") {
                             replacementToken = ""
                             editingEmby = source
                         }
-                        Button("移除服务器及其影片", role: .destructive) { library.removeEmby(id: source.id) }
+                        Button("移除服务器及播放记录", role: .destructive) { library.removeEmby(id: source.id) }
                     } label: { Image(systemName: "ellipsis") }
                 }
                 .padding(14)

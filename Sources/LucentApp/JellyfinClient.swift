@@ -41,6 +41,8 @@ struct JellyfinItem: Decodable, Sendable {
     let id: String
     let name: String
     let type: String
+    let isFolder: Bool?
+    let mediaType: String?
     let seriesName: String?
     let parentIndexNumber: Int?
     let indexNumber: Int?
@@ -55,6 +57,7 @@ struct JellyfinItem: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id = "Id", name = "Name", type = "Type"
+        case isFolder = "IsFolder", mediaType = "MediaType"
         case seriesName = "SeriesName"
         case parentIndexNumber = "ParentIndexNumber"
         case indexNumber = "IndexNumber"

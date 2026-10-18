@@ -1,0 +1,924 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		003BF4DAF08E93334E94569C /* MetadataMatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */; };
+		00851FA4619CDA27ABEE5D91 /* HTTPDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */; };
+		034911E2616459AD312BDD7F /* CloudPlaybackSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3916E7378624863840BC778 /* CloudPlaybackSync.swift */; };
+		03DCE1EC646A3EE113A1E3B9 /* PlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */; };
+		0679BE2A95DF90951A949A3E /* GuangyaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */; };
+		08221D60E5B50A2CFCAC975E /* VLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = FE10C3EC9A6D1D937865F287 /* VLCKit */; };
+		0823CA4E2E1B599213B16355 /* SRTParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E344C69EEF493CFD5BED53 /* SRTParser.swift */; };
+		0AB699AFF06CA41B870025DD /* SubtitleRangeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */; };
+		0B34F2F2815143B85E83D757 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */; };
+		0B377D149A34709694EB5E69 /* GuangyaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */; };
+		0DD8A08F9F0ACA68D31E2397 /* CloudTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */; };
+		0EA81EB0DCEE6AAE2A663E7E /* PlexAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C3EF162365113C3AE02C /* PlexAuthClient.swift */; };
+		0EB0D332BF33DF1250B6BD9F /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
+		1059007BB1CA28D76A3C4227 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
+		19B721A9980B89798AC6D0AC /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
+		1A27FE799E9B5504BC67E52D /* LibraryDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */; };
+		1CF5E0E569682E1491FA51F2 /* PlexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483F341CF13C9DAF8728F0DE /* PlexClient.swift */; };
+		2242731EE1403E39B713B796 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */; };
+		2282229B7E8E3D72E8A7D7E1 /* VLCNetworkBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */; };
+		26B22739ABECB092DEB4A9EE /* SMBDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B309C00ED20341424CB374F /* SMBDownloader.swift */; };
+		276F4FB00563E76B1972DC06 /* LucentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822205233E4B2B4CA28AE811 /* LucentApp.swift */; };
+		27FD185DC8B1ACEED0EE4543 /* KeychainPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E21D986157C391CAAD60BE /* KeychainPasswordStore.swift */; };
+		2802006C2955C8841486AF6E /* RangeHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172B9DB1756D414D8D930996 /* RangeHTTPServer.swift */; };
+		2DCEA7F7AD5C96800BF5193F /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
+		2E23E994018A8ACCD0437975 /* TraktClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06E4CE71A807F4420ED5937 /* TraktClient.swift */; };
+		2E65801DCD9E7C1395BAFC7B /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
+		2F7AD42320BE03C976F764B2 /* SubtitleTextDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */; };
+		2F839D14DA3B477D68BB7CBE /* RangeInputStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */; };
+		2FA45DA09BD71FEF6301239B /* KeychainPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E21D986157C391CAAD60BE /* KeychainPasswordStore.swift */; };
+		3001F8CBC1B1602680608D29 /* CloudPlaybackSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3916E7378624863840BC778 /* CloudPlaybackSync.swift */; };
+		3074513BCECF1172B498BF9B /* OpenSubtitlesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */; };
+		323935CE30B243B89BA0B6AB /* EmbyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */; };
+		33EA6EFA269DB0EA5B441703 /* RangeInputStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */; };
+		37A4558B724E7333B4DC8D99 /* SwiftSMB in Frameworks */ = {isa = PBXBuildFile; productRef = A2A0FCEF45196BF6968E789B /* SwiftSMB */; };
+		37F85951C9458A13657BD1E4 /* SRTParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E344C69EEF493CFD5BED53 /* SRTParser.swift */; };
+		3839D3A3498A33F1C6CEA1D4 /* HTTPDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */; };
+		386C1B6DA435DD10B68FFE13 /* SMBDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B873ED80B83D9EE0A7B7916D /* SMBDiscovery.swift */; };
+		3A186B8DB9B44811D2C9DCB3 /* EmbyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */; };
+		3CEA08BBEB5FD25555908C31 /* PlaybackSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */; };
+		3FA1473ED079B7383BB153B8 /* CloudDriveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A958243E594A7D86762A57B /* CloudDriveClient.swift */; };
+		3FCDB893B5D7D74E27C89EAB /* VLCPlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */; };
+		415F68969D3E9EBAF8045A41 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */; };
+		4273AB7FEE9A55A3D9016C77 /* SwiftSMB in Frameworks */ = {isa = PBXBuildFile; productRef = E74BB10A9F87D54E1FB3AFB7 /* SwiftSMB */; };
+		42DAF4BAF307813E9FAC049A /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */; };
+		45312F671C1D08F12AEC869B /* EmbyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */; };
+		46C0D0C08FD7EDCACC6499E9 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
+		49E0AE598069EA8AC533AC56 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */; };
+		4CC7E8110EA06A8F526938B5 /* HTTPRangeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */; };
+		4CE5F6FC77FC94968B22376A /* PlexAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C3EF162365113C3AE02C /* PlexAuthClient.swift */; };
+		52330AB6208321B7AE8CF113 /* TMDBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */; };
+		528CDC034C23C9CA4059B8E8 /* PlaylistResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */; };
+		52DA24B620C2679E23391A6C /* PlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */; };
+		54554A2B5E60309945567759 /* ChineseCloudClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */; };
+		55EC5965D1C18347A00EF9A7 /* CloudTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */; };
+		56A55486EC2A517EAE7CA25B /* MediaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54B97982618CB94DF83B691 /* MediaDetailView.swift */; };
+		58178B3386EE9E2E3B1233B4 /* ChineseCloudClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */; };
+		589CB6BD6FF3C661CDD8B964 /* SubtitleTextDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */; };
+		58A19C0AE760B7FD082A669B /* SubtitleParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */; };
+		58C93097236D0A172422C083 /* PlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */; };
+		5A0AC15023AD2BB3ABE19028 /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
+		5B366F094C185995C56B5AA2 /* MediaEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */; };
+		5CF7B611415823EE852BF4D4 /* HTTPDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */; };
+		5FB8E4C9ECD8D47CB03D11FB /* LibraryDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */; };
+		604FC1F63860F993748F4E65 /* GuangyaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */; };
+		616127BDDA086115FA591085 /* AudioRoutePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */; };
+		617863C545A8D6A4B5D8149C /* LibraryDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */; };
+		619E3E1312F00684E798E499 /* MediaEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */; };
+		68AF766FCFCC2AB02664F661 /* RangeHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172B9DB1756D414D8D930996 /* RangeHTTPServer.swift */; };
+		6C228A00CA059C7074FA4634 /* OpenSubtitlesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */; };
+		701C9105ECB87825CBBAA981 /* CloudTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */; };
+		732CB6E2714E7E7D743ECBAD /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
+		74D2D1A701B0FA8FAB5D7791 /* PlaybackSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */; };
+		75AFC385B3BA0EFD4E51C4C0 /* SSDPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */; };
+		76EC073F50D5ADFA72D6C025 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */; };
+		77DF162EA7CCD833383090C3 /* SMBScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DF71622AD5A9D1D13B249D /* SMBScanner.swift */; };
+		7A4FB3A0E68BA6AF54D9A71C /* CloudDriveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A958243E594A7D86762A57B /* CloudDriveClient.swift */; };
+		7AD47F729412E04FE9473E8B /* PlexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483F341CF13C9DAF8728F0DE /* PlexClient.swift */; };
+		7E59A363B5F9A13DEB33F3BD /* VLCNetworkBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */; };
+		8322DA1654ACE3485EFABDDC /* SubtitleTextDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */; };
+		86FD8DD938403FD1C8385031 /* RangeInputStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */; };
+		889F157010A2D7735B712DDB /* PlaylistResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */; };
+		8D32A8E9F585D2006825C2FA /* VLCPlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */; };
+		8FF93BB4B1DD455DBB24D7AF /* CastDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CE42EA85280DF860F3293E /* CastDiscovery.swift */; };
+		90949C846CA02AC9DCFEB7A3 /* BrowserUploadServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */; };
+		910348E2F21E2C2196CA8DFB /* SSDPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */; };
+		92664C72DC5B4A1CF4936547 /* DLNAClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */; };
+		9328D76FA04E18C8F0DB49EE /* SubtitleParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */; };
+		9694C7515277E19017F39C8D /* BrowserUploadServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */; };
+		96DB0E827B928FDFE85D9FCE /* FolderScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */; };
+		998B844D1D5D6C9E26ADFBFC /* SMBDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B873ED80B83D9EE0A7B7916D /* SMBDiscovery.swift */; };
+		9BCDC684028407BE6657C07D /* SSDPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */; };
+		9DA79CDA0785D4018DA42968 /* BrowserUploadServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */; };
+		A02F5485201B86BA9C14EF22 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D837828C6927A928619282B /* LibraryView.swift */; };
+		A2446AB9E89B8B86903FCA2C /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
+		A31DD790DC19987C6735744E /* DLNAClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */; };
+		A5E07A428B7911146F9F1BA9 /* VLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1DC72D141EC946D41C51A8C0 /* VLCKit */; };
+		ABE520145F9575B037CDCE0C /* VLCPlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */; };
+		ACC39CA5608A1A0F6CAB6F5B /* SubtitleRangeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */; };
+		ACDC7CADA72EEC2BE18850C3 /* CloudDriveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A958243E594A7D86762A57B /* CloudDriveClient.swift */; };
+		ADC8CB3C0786207AA729BA0F /* MediaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54B97982618CB94DF83B691 /* MediaDetailView.swift */; };
+		AEA61C4350467EFBBE9FF9A0 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
+		B1C23407343E14E663A2F15D /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
+		B559F7976013546A53864384 /* CloudPlaybackSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3916E7378624863840BC778 /* CloudPlaybackSync.swift */; };
+		B577296817B68FFD42BF6B9F /* PlaybackSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */; };
+		B921265F08E9F7C38C7AD7DF /* TraktClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06E4CE71A807F4420ED5937 /* TraktClient.swift */; };
+		BF6AF5E36888B8CB380BA194 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */; };
+		BFA29B2A40876EEE86CB8E44 /* MetadataMatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */; };
+		C0820D3073B0483AE86F0BC1 /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
+		C0A386FF7B69A1262B48841C /* AudioRoutePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */; };
+		C265556CAC58A2B80ED630FD /* PlexAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C3EF162365113C3AE02C /* PlexAuthClient.swift */; };
+		C2C5C1EE80F5D24A0D5FFA27 /* HTTPRangeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */; };
+		C405FED6D5FB1409B73F2553 /* SubtitleParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */; };
+		C5C38BA38A7808E7E97F5D12 /* SMBScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DF71622AD5A9D1D13B249D /* SMBScanner.swift */; };
+		C61662E63F06D1FC49841991 /* TMDBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */; };
+		C6DC3ED7D59B57311DE0C80E /* KeychainPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E21D986157C391CAAD60BE /* KeychainPasswordStore.swift */; };
+		C85B175361549ECE9F84D249 /* SMBScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DF71622AD5A9D1D13B249D /* SMBScanner.swift */; };
+		C945AE24C8CAD877BC4AE660 /* SMBDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B309C00ED20341424CB374F /* SMBDownloader.swift */; };
+		CDDCD06C4F45328E895CB880 /* SMBDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B873ED80B83D9EE0A7B7916D /* SMBDiscovery.swift */; };
+		CE7E7F0974487A8A06516740 /* FolderScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */; };
+		CE7FB509EBB4C3F0B9F0E654 /* TraktClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06E4CE71A807F4420ED5937 /* TraktClient.swift */; };
+		CF23D109BF7022EFD1644563 /* DLNAClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */; };
+		D2A60B5CA9894C662BA216FB /* SubtitleRangeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */; };
+		D3B4164B0F618D23557FF499 /* VLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7BA385AA5448300E666F352F /* VLCKit */; };
+		D3B4630DE06038D6FD15DCE5 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D837828C6927A928619282B /* LibraryView.swift */; };
+		D58F7DBBB1088587F04DF25C /* MediaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54B97982618CB94DF83B691 /* MediaDetailView.swift */; };
+		D5EC1AAD2F0B31B21899F6E2 /* CastDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CE42EA85280DF860F3293E /* CastDiscovery.swift */; };
+		D68867ACCB595EABD81B8403 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
+		D9E19A01A9C08A9B427B73C0 /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
+		DBB0F7F469C6CEE8091A910D /* AudioRoutePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */; };
+		E0B5CF70BE15364E72CFBCF8 /* SwiftSMB in Frameworks */ = {isa = PBXBuildFile; productRef = A45761EA0E1D4C2FF69362DB /* SwiftSMB */; };
+		E282CEA03702FF94DE92CBA5 /* ChineseCloudClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */; };
+		E51ED567A8D088D905485D55 /* HTTPRangeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */; };
+		E52A9AA57FB5784E5FB4EBBA /* PlexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483F341CF13C9DAF8728F0DE /* PlexClient.swift */; };
+		E9D3C3F8D76328E14DF6E8A3 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D837828C6927A928619282B /* LibraryView.swift */; };
+		ED82DB954F43B88C77F7D754 /* OpenSubtitlesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */; };
+		ED93501D6029A16342643310 /* SRTParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E344C69EEF493CFD5BED53 /* SRTParser.swift */; };
+		F12E45816023041A5EA1B7CB /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
+		F16843427F228CA600AB6DC8 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */; };
+		F30C1998C894AD161015302B /* PlaylistResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */; };
+		F3EB64551EF413726B2AF522 /* LucentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822205233E4B2B4CA28AE811 /* LucentApp.swift */; };
+		F44A715877E550CC9273810D /* VLCNetworkBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */; };
+		F5AAFB7344813888BC06F5D8 /* RangeHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172B9DB1756D414D8D930996 /* RangeHTTPServer.swift */; };
+		F66E60E0673B1C0DD7EB0406 /* LucentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822205233E4B2B4CA28AE811 /* LucentApp.swift */; };
+		F7E44F91C7DDDACC2E3A1C6B /* SMBDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B309C00ED20341424CB374F /* SMBDownloader.swift */; };
+		F8A8873847907095F4B21908 /* CastDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CE42EA85280DF860F3293E /* CastDiscovery.swift */; };
+		F8FECDAC62B4D300D0D3DA68 /* MediaEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */; };
+		FC5C608DF64EF81EC0B9AAA4 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */; };
+		FD9FFC032ADD1BDEBCE0454A /* MetadataMatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */; };
+		FEB78EBBBA4CBA8B81D4BA78 /* TMDBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */; };
+		FF142136B68BE44D94BC97DE /* FolderScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeInputStream.swift; sourceTree = "<group>"; };
+		172B9DB1756D414D8D930996 /* RangeHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeHTTPServer.swift; sourceTree = "<group>"; };
+		2054C3EF162365113C3AE02C /* PlexAuthClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexAuthClient.swift; sourceTree = "<group>"; };
+		22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserUploadServer.swift; sourceTree = "<group>"; };
+		3A361B6CDE0BF07018AAFF8D /* VLCKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VLCKit; path = Vendor/VLCKit; sourceTree = SOURCE_ROOT; };
+		3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TMDBService.swift; sourceTree = "<group>"; };
+		4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPRangeReader.swift; sourceTree = "<group>"; };
+		483F341CF13C9DAF8728F0DE /* PlexClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexClient.swift; sourceTree = "<group>"; };
+		558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCNetworkBrowser.swift; sourceTree = "<group>"; };
+		573A54B8D4EF46144B6CCD59 /* Lucent-iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Lucent-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A958243E594A7D86762A57B /* CloudDriveClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudDriveClient.swift; sourceTree = "<group>"; };
+		5B309C00ED20341424CB374F /* SMBDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBDownloader.swift; sourceTree = "<group>"; };
+		6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackSegments.swift; sourceTree = "<group>"; };
+		609E3AE700D13572742EEAF6 /* Lucent-macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lucent-macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPDownloader.swift; sourceTree = "<group>"; };
+		69E21D986157C391CAAD60BE /* KeychainPasswordStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainPasswordStore.swift; sourceTree = "<group>"; };
+		6D837828C6927A928619282B /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuangyaClient.swift; sourceTree = "<group>"; };
+		725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSDPDiscovery.swift; sourceTree = "<group>"; };
+		78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryDatabase.swift; sourceTree = "<group>"; };
+		81937293A1231BB104313284 /* ServerTranscodeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTranscodeClient.swift; sourceTree = "<group>"; };
+		822205233E4B2B4CA28AE811 /* LucentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LucentApp.swift; sourceTree = "<group>"; };
+		8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaEditView.swift; sourceTree = "<group>"; };
+		82B5B09B632BE6F600E0A73D /* PlaybackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackView.swift; sourceTree = "<group>"; };
+		8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleTextDecoder.swift; sourceTree = "<group>"; };
+		8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistResolver.swift; sourceTree = "<group>"; };
+		92CE42EA85280DF860F3293E /* CastDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CastDiscovery.swift; sourceTree = "<group>"; };
+		97DF71622AD5A9D1D13B249D /* SMBScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBScanner.swift; sourceTree = "<group>"; };
+		9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSubtitlesClient.swift; sourceTree = "<group>"; };
+		A783901481863088FDE35E39 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
+		A7C06239CC35CD4002E499AF /* JellyfinClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JellyfinClient.swift; sourceTree = "<group>"; };
+		A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudTokenRefresher.swift; sourceTree = "<group>"; };
+		B0E344C69EEF493CFD5BED53 /* SRTParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SRTParser.swift; sourceTree = "<group>"; };
+		B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderScanner.swift; sourceTree = "<group>"; };
+		B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DLNAClient.swift; sourceTree = "<group>"; };
+		B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaItem.swift; sourceTree = "<group>"; };
+		B873ED80B83D9EE0A7B7916D /* SMBDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBDiscovery.swift; sourceTree = "<group>"; };
+		C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSurface.swift; sourceTree = "<group>"; };
+		C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChineseCloudClient.swift; sourceTree = "<group>"; };
+		C33ECAD42376B61A16E2982A /* Lucent-tvOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Lucent-tvOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C54B97982618CB94DF83B691 /* MediaDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaDetailView.swift; sourceTree = "<group>"; };
+		C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
+		C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVClient.swift; sourceTree = "<group>"; };
+		C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRoutePicker.swift; sourceTree = "<group>"; };
+		CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyClient.swift; sourceTree = "<group>"; };
+		D20E878991AC175C0352DE5E /* MediaNameParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaNameParser.swift; sourceTree = "<group>"; };
+		D3916E7378624863840BC778 /* CloudPlaybackSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudPlaybackSync.swift; sourceTree = "<group>"; };
+		D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleRangeLoader.swift; sourceTree = "<group>"; };
+		DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataMatchView.swift; sourceTree = "<group>"; };
+		EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayerSurface.swift; sourceTree = "<group>"; };
+		F06E4CE71A807F4420ED5937 /* TraktClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TraktClient.swift; sourceTree = "<group>"; };
+		F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleParser.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2F9F2EDC826D4B8A0ECED6F9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4273AB7FEE9A55A3D9016C77 /* SwiftSMB in Frameworks */,
+				D3B4164B0F618D23557FF499 /* VLCKit in Frameworks */,
+				AEA61C4350467EFBBE9FF9A0 /* libsqlite3.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		893EA8969C3FE20EB6E18060 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				37A4558B724E7333B4DC8D99 /* SwiftSMB in Frameworks */,
+				A5E07A428B7911146F9F1BA9 /* VLCKit in Frameworks */,
+				19B721A9980B89798AC6D0AC /* libsqlite3.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F5B706826E0AB21C9EE2FF03 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E0B5CF70BE15364E72CFBCF8 /* SwiftSMB in Frameworks */,
+				08221D60E5B50A2CFCAC975E /* VLCKit in Frameworks */,
+				2E65801DCD9E7C1395BAFC7B /* libsqlite3.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2A9C84545C2F35CEA53AD1CA = {
+			isa = PBXGroup;
+			children = (
+				D58DC4521887DA036879238E /* LucentApp */,
+				696E54D0E5973D216C7BC921 /* Packages */,
+				DFBC46A0FF64B77CEBF5F6E2 /* Frameworks */,
+				7ACB513364E1041EA4BC2321 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		696E54D0E5973D216C7BC921 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				3A361B6CDE0BF07018AAFF8D /* VLCKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		7ACB513364E1041EA4BC2321 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				573A54B8D4EF46144B6CCD59 /* Lucent-iOS.app */,
+				609E3AE700D13572742EEAF6 /* Lucent-macOS.app */,
+				C33ECAD42376B61A16E2982A /* Lucent-tvOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D58DC4521887DA036879238E /* LucentApp */ = {
+			isa = PBXGroup;
+			children = (
+				C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */,
+				22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */,
+				92CE42EA85280DF860F3293E /* CastDiscovery.swift */,
+				C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */,
+				5A958243E594A7D86762A57B /* CloudDriveClient.swift */,
+				D3916E7378624863840BC778 /* CloudPlaybackSync.swift */,
+				A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */,
+				B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */,
+				CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */,
+				B3F30C78A90B99EA99C41F46 /* FolderScanner.swift */,
+				6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */,
+				63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */,
+				4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */,
+				A7C06239CC35CD4002E499AF /* JellyfinClient.swift */,
+				69E21D986157C391CAAD60BE /* KeychainPasswordStore.swift */,
+				78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */,
+				C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */,
+				6D837828C6927A928619282B /* LibraryView.swift */,
+				822205233E4B2B4CA28AE811 /* LucentApp.swift */,
+				C54B97982618CB94DF83B691 /* MediaDetailView.swift */,
+				8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */,
+				B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */,
+				D20E878991AC175C0352DE5E /* MediaNameParser.swift */,
+				DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */,
+				9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */,
+				6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */,
+				82B5B09B632BE6F600E0A73D /* PlaybackView.swift */,
+				C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */,
+				8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */,
+				2054C3EF162365113C3AE02C /* PlexAuthClient.swift */,
+				483F341CF13C9DAF8728F0DE /* PlexClient.swift */,
+				172B9DB1756D414D8D930996 /* RangeHTTPServer.swift */,
+				16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */,
+				81937293A1231BB104313284 /* ServerTranscodeClient.swift */,
+				B873ED80B83D9EE0A7B7916D /* SMBDiscovery.swift */,
+				5B309C00ED20341424CB374F /* SMBDownloader.swift */,
+				97DF71622AD5A9D1D13B249D /* SMBScanner.swift */,
+				B0E344C69EEF493CFD5BED53 /* SRTParser.swift */,
+				725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */,
+				F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */,
+				D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */,
+				8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */,
+				3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */,
+				F06E4CE71A807F4420ED5937 /* TraktClient.swift */,
+				558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */,
+				EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */,
+				C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */,
+			);
+			name = LucentApp;
+			path = Sources/LucentApp;
+			sourceTree = "<group>";
+		};
+		DFBC46A0FF64B77CEBF5F6E2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A783901481863088FDE35E39 /* libsqlite3.tbd */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6DEA580241BD9987329159ED /* Lucent-iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E49A9E64DA99D745B310F736 /* Build configuration list for PBXNativeTarget "Lucent-iOS" */;
+			buildPhases = (
+				9AD983B27C6FFB4F5383B3D8 /* Sources */,
+				2F9F2EDC826D4B8A0ECED6F9 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Lucent-iOS";
+			packageProductDependencies = (
+				E74BB10A9F87D54E1FB3AFB7 /* SwiftSMB */,
+				7BA385AA5448300E666F352F /* VLCKit */,
+			);
+			productName = "Lucent-iOS";
+			productReference = 573A54B8D4EF46144B6CCD59 /* Lucent-iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CDD99C34A2661974FE4C663A /* Lucent-tvOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8C64BC63F89822A678831445 /* Build configuration list for PBXNativeTarget "Lucent-tvOS" */;
+			buildPhases = (
+				83588062EBBDA311E2C3DB77 /* Sources */,
+				F5B706826E0AB21C9EE2FF03 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Lucent-tvOS";
+			packageProductDependencies = (
+				A45761EA0E1D4C2FF69362DB /* SwiftSMB */,
+				FE10C3EC9A6D1D937865F287 /* VLCKit */,
+			);
+			productName = "Lucent-tvOS";
+			productReference = C33ECAD42376B61A16E2982A /* Lucent-tvOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		DC0878ADCDECB37D7DF35D6B /* Lucent-macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 14B9C5A282B985B3D0982F86 /* Build configuration list for PBXNativeTarget "Lucent-macOS" */;
+			buildPhases = (
+				930436BA95F0B5C084315314 /* Sources */,
+				893EA8969C3FE20EB6E18060 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Lucent-macOS";
+			packageProductDependencies = (
+				A2A0FCEF45196BF6968E789B /* SwiftSMB */,
+				1DC72D141EC946D41C51A8C0 /* VLCKit */,
+			);
+			productName = "Lucent-macOS";
+			productReference = 609E3AE700D13572742EEAF6 /* Lucent-macOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		43E0DF3AB31AD7491ACC3BB0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 8FBBB0B78EF5EA9640521572 /* Build configuration list for PBXProject "Lucent" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2A9C84545C2F35CEA53AD1CA;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DE858FD7E9BC1DEAF947320E /* XCRemoteSwiftPackageReference "SwiftSMB" */,
+				A0CB1FC4F0D519840863CBC9 /* XCLocalSwiftPackageReference "Vendor/VLCKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 7ACB513364E1041EA4BC2321 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6DEA580241BD9987329159ED /* Lucent-iOS */,
+				CDD99C34A2661974FE4C663A /* Lucent-tvOS */,
+				DC0878ADCDECB37D7DF35D6B /* Lucent-macOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		83588062EBBDA311E2C3DB77 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DBB0F7F469C6CEE8091A910D /* AudioRoutePicker.swift in Sources */,
+				90949C846CA02AC9DCFEB7A3 /* BrowserUploadServer.swift in Sources */,
+				8FF93BB4B1DD455DBB24D7AF /* CastDiscovery.swift in Sources */,
+				54554A2B5E60309945567759 /* ChineseCloudClient.swift in Sources */,
+				7A4FB3A0E68BA6AF54D9A71C /* CloudDriveClient.swift in Sources */,
+				3001F8CBC1B1602680608D29 /* CloudPlaybackSync.swift in Sources */,
+				701C9105ECB87825CBBAA981 /* CloudTokenRefresher.swift in Sources */,
+				A31DD790DC19987C6735744E /* DLNAClient.swift in Sources */,
+				3A186B8DB9B44811D2C9DCB3 /* EmbyClient.swift in Sources */,
+				96DB0E827B928FDFE85D9FCE /* FolderScanner.swift in Sources */,
+				604FC1F63860F993748F4E65 /* GuangyaClient.swift in Sources */,
+				3839D3A3498A33F1C6CEA1D4 /* HTTPDownloader.swift in Sources */,
+				E51ED567A8D088D905485D55 /* HTTPRangeReader.swift in Sources */,
+				F12E45816023041A5EA1B7CB /* JellyfinClient.swift in Sources */,
+				27FD185DC8B1ACEED0EE4543 /* KeychainPasswordStore.swift in Sources */,
+				1A27FE799E9B5504BC67E52D /* LibraryDatabase.swift in Sources */,
+				76EC073F50D5ADFA72D6C025 /* LibraryStore.swift in Sources */,
+				D3B4630DE06038D6FD15DCE5 /* LibraryView.swift in Sources */,
+				276F4FB00563E76B1972DC06 /* LucentApp.swift in Sources */,
+				ADC8CB3C0786207AA729BA0F /* MediaDetailView.swift in Sources */,
+				5B366F094C185995C56B5AA2 /* MediaEditView.swift in Sources */,
+				0B34F2F2815143B85E83D757 /* MediaItem.swift in Sources */,
+				732CB6E2714E7E7D743ECBAD /* MediaNameParser.swift in Sources */,
+				FD9FFC032ADD1BDEBCE0454A /* MetadataMatchView.swift in Sources */,
+				ED82DB954F43B88C77F7D754 /* OpenSubtitlesClient.swift in Sources */,
+				3CEA08BBEB5FD25555908C31 /* PlaybackSegments.swift in Sources */,
+				C0820D3073B0483AE86F0BC1 /* PlaybackView.swift in Sources */,
+				52DA24B620C2679E23391A6C /* PlayerSurface.swift in Sources */,
+				F30C1998C894AD161015302B /* PlaylistResolver.swift in Sources */,
+				C265556CAC58A2B80ED630FD /* PlexAuthClient.swift in Sources */,
+				7AD47F729412E04FE9473E8B /* PlexClient.swift in Sources */,
+				F5AAFB7344813888BC06F5D8 /* RangeHTTPServer.swift in Sources */,
+				2F839D14DA3B477D68BB7CBE /* RangeInputStream.swift in Sources */,
+				998B844D1D5D6C9E26ADFBFC /* SMBDiscovery.swift in Sources */,
+				26B22739ABECB092DEB4A9EE /* SMBDownloader.swift in Sources */,
+				77DF162EA7CCD833383090C3 /* SMBScanner.swift in Sources */,
+				ED93501D6029A16342643310 /* SRTParser.swift in Sources */,
+				910348E2F21E2C2196CA8DFB /* SSDPDiscovery.swift in Sources */,
+				1059007BB1CA28D76A3C4227 /* ServerTranscodeClient.swift in Sources */,
+				9328D76FA04E18C8F0DB49EE /* SubtitleParser.swift in Sources */,
+				D2A60B5CA9894C662BA216FB /* SubtitleRangeLoader.swift in Sources */,
+				589CB6BD6FF3C661CDD8B964 /* SubtitleTextDecoder.swift in Sources */,
+				52330AB6208321B7AE8CF113 /* TMDBService.swift in Sources */,
+				B921265F08E9F7C38C7AD7DF /* TraktClient.swift in Sources */,
+				2282229B7E8E3D72E8A7D7E1 /* VLCNetworkBrowser.swift in Sources */,
+				3FCDB893B5D7D74E27C89EAB /* VLCPlayerSurface.swift in Sources */,
+				F16843427F228CA600AB6DC8 /* WebDAVClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		930436BA95F0B5C084315314 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				616127BDDA086115FA591085 /* AudioRoutePicker.swift in Sources */,
+				9694C7515277E19017F39C8D /* BrowserUploadServer.swift in Sources */,
+				D5EC1AAD2F0B31B21899F6E2 /* CastDiscovery.swift in Sources */,
+				E282CEA03702FF94DE92CBA5 /* ChineseCloudClient.swift in Sources */,
+				3FA1473ED079B7383BB153B8 /* CloudDriveClient.swift in Sources */,
+				B559F7976013546A53864384 /* CloudPlaybackSync.swift in Sources */,
+				55EC5965D1C18347A00EF9A7 /* CloudTokenRefresher.swift in Sources */,
+				CF23D109BF7022EFD1644563 /* DLNAClient.swift in Sources */,
+				323935CE30B243B89BA0B6AB /* EmbyClient.swift in Sources */,
+				CE7E7F0974487A8A06516740 /* FolderScanner.swift in Sources */,
+				0679BE2A95DF90951A949A3E /* GuangyaClient.swift in Sources */,
+				5CF7B611415823EE852BF4D4 /* HTTPDownloader.swift in Sources */,
+				C2C5C1EE80F5D24A0D5FFA27 /* HTTPRangeReader.swift in Sources */,
+				2DCEA7F7AD5C96800BF5193F /* JellyfinClient.swift in Sources */,
+				2FA45DA09BD71FEF6301239B /* KeychainPasswordStore.swift in Sources */,
+				617863C545A8D6A4B5D8149C /* LibraryDatabase.swift in Sources */,
+				42DAF4BAF307813E9FAC049A /* LibraryStore.swift in Sources */,
+				A02F5485201B86BA9C14EF22 /* LibraryView.swift in Sources */,
+				F66E60E0673B1C0DD7EB0406 /* LucentApp.swift in Sources */,
+				56A55486EC2A517EAE7CA25B /* MediaDetailView.swift in Sources */,
+				619E3E1312F00684E798E499 /* MediaEditView.swift in Sources */,
+				415F68969D3E9EBAF8045A41 /* MediaItem.swift in Sources */,
+				A2446AB9E89B8B86903FCA2C /* MediaNameParser.swift in Sources */,
+				BFA29B2A40876EEE86CB8E44 /* MetadataMatchView.swift in Sources */,
+				6C228A00CA059C7074FA4634 /* OpenSubtitlesClient.swift in Sources */,
+				B577296817B68FFD42BF6B9F /* PlaybackSegments.swift in Sources */,
+				B1C23407343E14E663A2F15D /* PlaybackView.swift in Sources */,
+				58C93097236D0A172422C083 /* PlayerSurface.swift in Sources */,
+				889F157010A2D7735B712DDB /* PlaylistResolver.swift in Sources */,
+				4CE5F6FC77FC94968B22376A /* PlexAuthClient.swift in Sources */,
+				1CF5E0E569682E1491FA51F2 /* PlexClient.swift in Sources */,
+				68AF766FCFCC2AB02664F661 /* RangeHTTPServer.swift in Sources */,
+				86FD8DD938403FD1C8385031 /* RangeInputStream.swift in Sources */,
+				386C1B6DA435DD10B68FFE13 /* SMBDiscovery.swift in Sources */,
+				F7E44F91C7DDDACC2E3A1C6B /* SMBDownloader.swift in Sources */,
+				C5C38BA38A7808E7E97F5D12 /* SMBScanner.swift in Sources */,
+				37F85951C9458A13657BD1E4 /* SRTParser.swift in Sources */,
+				9BCDC684028407BE6657C07D /* SSDPDiscovery.swift in Sources */,
+				46C0D0C08FD7EDCACC6499E9 /* ServerTranscodeClient.swift in Sources */,
+				58A19C0AE760B7FD082A669B /* SubtitleParser.swift in Sources */,
+				ACC39CA5608A1A0F6CAB6F5B /* SubtitleRangeLoader.swift in Sources */,
+				2F7AD42320BE03C976F764B2 /* SubtitleTextDecoder.swift in Sources */,
+				FEB78EBBBA4CBA8B81D4BA78 /* TMDBService.swift in Sources */,
+				2E23E994018A8ACCD0437975 /* TraktClient.swift in Sources */,
+				7E59A363B5F9A13DEB33F3BD /* VLCNetworkBrowser.swift in Sources */,
+				8D32A8E9F585D2006825C2FA /* VLCPlayerSurface.swift in Sources */,
+				49E0AE598069EA8AC533AC56 /* WebDAVClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9AD983B27C6FFB4F5383B3D8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0A386FF7B69A1262B48841C /* AudioRoutePicker.swift in Sources */,
+				9DA79CDA0785D4018DA42968 /* BrowserUploadServer.swift in Sources */,
+				F8A8873847907095F4B21908 /* CastDiscovery.swift in Sources */,
+				58178B3386EE9E2E3B1233B4 /* ChineseCloudClient.swift in Sources */,
+				ACDC7CADA72EEC2BE18850C3 /* CloudDriveClient.swift in Sources */,
+				034911E2616459AD312BDD7F /* CloudPlaybackSync.swift in Sources */,
+				0DD8A08F9F0ACA68D31E2397 /* CloudTokenRefresher.swift in Sources */,
+				92664C72DC5B4A1CF4936547 /* DLNAClient.swift in Sources */,
+				45312F671C1D08F12AEC869B /* EmbyClient.swift in Sources */,
+				FF142136B68BE44D94BC97DE /* FolderScanner.swift in Sources */,
+				0B377D149A34709694EB5E69 /* GuangyaClient.swift in Sources */,
+				00851FA4619CDA27ABEE5D91 /* HTTPDownloader.swift in Sources */,
+				4CC7E8110EA06A8F526938B5 /* HTTPRangeReader.swift in Sources */,
+				D9E19A01A9C08A9B427B73C0 /* JellyfinClient.swift in Sources */,
+				C6DC3ED7D59B57311DE0C80E /* KeychainPasswordStore.swift in Sources */,
+				5FB8E4C9ECD8D47CB03D11FB /* LibraryDatabase.swift in Sources */,
+				BF6AF5E36888B8CB380BA194 /* LibraryStore.swift in Sources */,
+				E9D3C3F8D76328E14DF6E8A3 /* LibraryView.swift in Sources */,
+				F3EB64551EF413726B2AF522 /* LucentApp.swift in Sources */,
+				D58F7DBBB1088587F04DF25C /* MediaDetailView.swift in Sources */,
+				F8FECDAC62B4D300D0D3DA68 /* MediaEditView.swift in Sources */,
+				2242731EE1403E39B713B796 /* MediaItem.swift in Sources */,
+				5A0AC15023AD2BB3ABE19028 /* MediaNameParser.swift in Sources */,
+				003BF4DAF08E93334E94569C /* MetadataMatchView.swift in Sources */,
+				3074513BCECF1172B498BF9B /* OpenSubtitlesClient.swift in Sources */,
+				74D2D1A701B0FA8FAB5D7791 /* PlaybackSegments.swift in Sources */,
+				0EB0D332BF33DF1250B6BD9F /* PlaybackView.swift in Sources */,
+				03DCE1EC646A3EE113A1E3B9 /* PlayerSurface.swift in Sources */,
+				528CDC034C23C9CA4059B8E8 /* PlaylistResolver.swift in Sources */,
+				0EA81EB0DCEE6AAE2A663E7E /* PlexAuthClient.swift in Sources */,
+				E52A9AA57FB5784E5FB4EBBA /* PlexClient.swift in Sources */,
+				2802006C2955C8841486AF6E /* RangeHTTPServer.swift in Sources */,
+				33EA6EFA269DB0EA5B441703 /* RangeInputStream.swift in Sources */,
+				CDDCD06C4F45328E895CB880 /* SMBDiscovery.swift in Sources */,
+				C945AE24C8CAD877BC4AE660 /* SMBDownloader.swift in Sources */,
+				C85B175361549ECE9F84D249 /* SMBScanner.swift in Sources */,
+				0823CA4E2E1B599213B16355 /* SRTParser.swift in Sources */,
+				75AFC385B3BA0EFD4E51C4C0 /* SSDPDiscovery.swift in Sources */,
+				D68867ACCB595EABD81B8403 /* ServerTranscodeClient.swift in Sources */,
+				C405FED6D5FB1409B73F2553 /* SubtitleParser.swift in Sources */,
+				0AB699AFF06CA41B870025DD /* SubtitleRangeLoader.swift in Sources */,
+				8322DA1654ACE3485EFABDDC /* SubtitleTextDecoder.swift in Sources */,
+				C61662E63F06D1FC49841991 /* TMDBService.swift in Sources */,
+				CE7FB509EBB4C3F0B9F0E654 /* TraktClient.swift in Sources */,
+				F44A715877E550CC9273810D /* VLCNetworkBrowser.swift in Sources */,
+				ABE520145F9575B037CDCE0C /* VLCPlayerSurface.swift in Sources */,
+				FC5C608DF64EF81EC0B9AAA4 /* WebDAVClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2436A09E91D5AF9533BA6E05 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Generated/iOS.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = "Generated/iOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		50729ABD1514ACFC7D706457 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGN_ENTITLEMENTS = Generated/tvOS.entitlements;
+				INFOPLIST_FILE = "Generated/tvOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app.tvos;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Release;
+		};
+		50E361DB36128B020441F723 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Generated/macOS.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				INFOPLIST_FILE = "Generated/macOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app.macos;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		656E07D260B8916631E4D661 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Generated/iOS.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = "Generated/iOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		7DDC0A1D57AFDC11FA3070C5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Generated/macOS.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				INFOPLIST_FILE = "Generated/macOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app.macos;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		A00311C57C21CAB6981BF607 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Release;
+		};
+		C565EEC0EE14114CA9766B94 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGN_ENTITLEMENTS = Generated/tvOS.entitlements;
+				INFOPLIST_FILE = "Generated/tvOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app.tvos;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Debug;
+		};
+		E892E765F68CB552A20AD7B6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		14B9C5A282B985B3D0982F86 /* Build configuration list for PBXNativeTarget "Lucent-macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7DDC0A1D57AFDC11FA3070C5 /* Debug */,
+				50E361DB36128B020441F723 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8C64BC63F89822A678831445 /* Build configuration list for PBXNativeTarget "Lucent-tvOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C565EEC0EE14114CA9766B94 /* Debug */,
+				50729ABD1514ACFC7D706457 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8FBBB0B78EF5EA9640521572 /* Build configuration list for PBXProject "Lucent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E892E765F68CB552A20AD7B6 /* Debug */,
+				A00311C57C21CAB6981BF607 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E49A9E64DA99D745B310F736 /* Build configuration list for PBXNativeTarget "Lucent-iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2436A09E91D5AF9533BA6E05 /* Debug */,
+				656E07D260B8916631E4D661 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A0CB1FC4F0D519840863CBC9 /* XCLocalSwiftPackageReference "Vendor/VLCKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/VLCKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DE858FD7E9BC1DEAF947320E /* XCRemoteSwiftPackageReference "SwiftSMB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RuiNelson/SwiftSMB.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.3.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1DC72D141EC946D41C51A8C0 /* VLCKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VLCKit;
+		};
+		7BA385AA5448300E666F352F /* VLCKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VLCKit;
+		};
+		A2A0FCEF45196BF6968E789B /* SwiftSMB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DE858FD7E9BC1DEAF947320E /* XCRemoteSwiftPackageReference "SwiftSMB" */;
+			productName = SwiftSMB;
+		};
+		A45761EA0E1D4C2FF69362DB /* SwiftSMB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DE858FD7E9BC1DEAF947320E /* XCRemoteSwiftPackageReference "SwiftSMB" */;
+			productName = SwiftSMB;
+		};
+		E74BB10A9F87D54E1FB3AFB7 /* SwiftSMB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DE858FD7E9BC1DEAF947320E /* XCRemoteSwiftPackageReference "SwiftSMB" */;
+			productName = SwiftSMB;
+		};
+		FE10C3EC9A6D1D937865F287 /* VLCKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VLCKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 43E0DF3AB31AD7491ACC3BB0 /* Project object */;
+}

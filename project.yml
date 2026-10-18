@@ -1,0 +1,104 @@
+name: Lucent
+options:
+  bundleIdPrefix: com.lucent
+  deploymentTarget:
+    iOS: '17.0'
+    tvOS: '17.0'
+    macOS: '14.0'
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+packages:
+  SwiftSMB:
+    url: https://github.com/RuiNelson/SwiftSMB.git
+    exactVersion: 3.3.1
+  VLCKit:
+    path: Vendor/VLCKit
+targets:
+  Lucent-iOS:
+    type: application
+    platform: iOS
+    sources: [Sources/LucentApp]
+    dependencies:
+      - package: SwiftSMB
+        products: [SwiftSMB]
+      - package: VLCKit
+        products: [VLCKit]
+      - sdk: libsqlite3.tbd
+    info:
+      path: Generated/iOS-Info.plist
+      properties:
+        CFBundleDisplayName: Lucent
+        UIBackgroundModes: [audio]
+        NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源。
+        NSBonjourServices: [_smb._tcp]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: Generated/iOS.entitlements
+      properties:
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.lucent.app]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lucent.app.ios
+        TARGETED_DEVICE_FAMILY: '1,2'
+  Lucent-tvOS:
+    type: application
+    platform: tvOS
+    sources: [Sources/LucentApp]
+    dependencies:
+      - package: SwiftSMB
+        products: [SwiftSMB]
+      - package: VLCKit
+        products: [VLCKit]
+      - sdk: libsqlite3.tbd
+    info:
+      path: Generated/tvOS-Info.plist
+      properties:
+        CFBundleDisplayName: Lucent
+        NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源。
+        NSBonjourServices: [_smb._tcp]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: Generated/tvOS.entitlements
+      properties:
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.lucent.app]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lucent.app.tvos
+  Lucent-macOS:
+    type: application
+    platform: macOS
+    sources: [Sources/LucentApp]
+    dependencies:
+      - package: SwiftSMB
+        products: [SwiftSMB]
+      - package: VLCKit
+        products: [VLCKit]
+      - sdk: libsqlite3.tbd
+    info:
+      path: Generated/macOS-Info.plist
+      properties:
+        CFBundleDisplayName: Lucent
+        NSBonjourServices: [_smb._tcp]
+        NSLocalNetworkUsageDescription: Lucent 需要发现和访问你添加的局域网媒体片源。
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: Generated/macOS.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.lucent.app]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lucent.app.macos
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        ENABLE_USER_SELECTED_FILES: readonly

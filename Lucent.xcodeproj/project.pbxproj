@@ -22,6 +22,7 @@
 		0EB0D332BF33DF1250B6BD9F /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
 		0F543795E1691477C27AE762 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95723DE6607ECC25204574AD /* MobileHomeView.swift */; };
 		1059007BB1CA28D76A3C4227 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
+		1241121A356327C0A0D5E9B1 /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432A898696BEFBEED0B6F342 /* TVHomeView.swift */; };
 		19B721A9980B89798AC6D0AC /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
 		1A27FE799E9B5504BC67E52D /* LibraryDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */; };
 		1CF5E0E569682E1491FA51F2 /* PlexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483F341CF13C9DAF8728F0DE /* PlexClient.swift */; };
@@ -106,6 +107,7 @@
 		A2446AB9E89B8B86903FCA2C /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
 		A31DD790DC19987C6735744E /* DLNAClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */; };
 		A5E07A428B7911146F9F1BA9 /* VLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1DC72D141EC946D41C51A8C0 /* VLCKit */; };
+		A980057E2E49EACBD650E5EF /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432A898696BEFBEED0B6F342 /* TVHomeView.swift */; };
 		ABE520145F9575B037CDCE0C /* VLCPlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */; };
 		ACC39CA5608A1A0F6CAB6F5B /* SubtitleRangeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */; };
 		ACDC7CADA72EEC2BE18850C3 /* CloudDriveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A958243E594A7D86762A57B /* CloudDriveClient.swift */; };
@@ -140,6 +142,7 @@
 		D68867ACCB595EABD81B8403 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
 		D9E19A01A9C08A9B427B73C0 /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
 		DBB0F7F469C6CEE8091A910D /* AudioRoutePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */; };
+		DCBC6C96F6D9FB9B730FD55B /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432A898696BEFBEED0B6F342 /* TVHomeView.swift */; };
 		E0B5CF70BE15364E72CFBCF8 /* SwiftSMB in Frameworks */ = {isa = PBXBuildFile; productRef = A45761EA0E1D4C2FF69362DB /* SwiftSMB */; };
 		E234741AB7CD5562C6DD1FE0 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95723DE6607ECC25204574AD /* MobileHomeView.swift */; };
 		E282CEA03702FF94DE92CBA5 /* ChineseCloudClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */; };
@@ -172,6 +175,7 @@
 		22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserUploadServer.swift; sourceTree = "<group>"; };
 		3A361B6CDE0BF07018AAFF8D /* VLCKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VLCKit; path = Vendor/VLCKit; sourceTree = SOURCE_ROOT; };
 		3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TMDBService.swift; sourceTree = "<group>"; };
+		432A898696BEFBEED0B6F342 /* TVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVHomeView.swift; sourceTree = "<group>"; };
 		4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPRangeReader.swift; sourceTree = "<group>"; };
 		483F341CF13C9DAF8728F0DE /* PlexClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexClient.swift; sourceTree = "<group>"; };
 		558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCNetworkBrowser.swift; sourceTree = "<group>"; };
@@ -333,6 +337,7 @@
 				8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */,
 				3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */,
 				F06E4CE71A807F4420ED5937 /* TraktClient.swift */,
+				432A898696BEFBEED0B6F342 /* TVHomeView.swift */,
 				558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */,
 				EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */,
 				C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */,
@@ -498,6 +503,7 @@
 				D2A60B5CA9894C662BA216FB /* SubtitleRangeLoader.swift in Sources */,
 				589CB6BD6FF3C661CDD8B964 /* SubtitleTextDecoder.swift in Sources */,
 				52330AB6208321B7AE8CF113 /* TMDBService.swift in Sources */,
+				DCBC6C96F6D9FB9B730FD55B /* TVHomeView.swift in Sources */,
 				B921265F08E9F7C38C7AD7DF /* TraktClient.swift in Sources */,
 				2282229B7E8E3D72E8A7D7E1 /* VLCNetworkBrowser.swift in Sources */,
 				3FCDB893B5D7D74E27C89EAB /* VLCPlayerSurface.swift in Sources */,
@@ -554,6 +560,7 @@
 				ACC39CA5608A1A0F6CAB6F5B /* SubtitleRangeLoader.swift in Sources */,
 				2F7AD42320BE03C976F764B2 /* SubtitleTextDecoder.swift in Sources */,
 				FEB78EBBBA4CBA8B81D4BA78 /* TMDBService.swift in Sources */,
+				A980057E2E49EACBD650E5EF /* TVHomeView.swift in Sources */,
 				2E23E994018A8ACCD0437975 /* TraktClient.swift in Sources */,
 				7E59A363B5F9A13DEB33F3BD /* VLCNetworkBrowser.swift in Sources */,
 				8D32A8E9F585D2006825C2FA /* VLCPlayerSurface.swift in Sources */,
@@ -610,6 +617,7 @@
 				0AB699AFF06CA41B870025DD /* SubtitleRangeLoader.swift in Sources */,
 				8322DA1654ACE3485EFABDDC /* SubtitleTextDecoder.swift in Sources */,
 				C61662E63F06D1FC49841991 /* TMDBService.swift in Sources */,
+				1241121A356327C0A0D5E9B1 /* TVHomeView.swift in Sources */,
 				CE7FB509EBB4C3F0B9F0E654 /* TraktClient.swift in Sources */,
 				F44A715877E550CC9273810D /* VLCNetworkBrowser.swift in Sources */,
 				ABE520145F9575B037CDCE0C /* VLCPlayerSurface.swift in Sources */,

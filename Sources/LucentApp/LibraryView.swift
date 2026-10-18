@@ -9,6 +9,9 @@ struct LibraryView: View {
     private enum MobileTab { case home, sources, search }
     @State private var mobileTab: MobileTab = .home
     #endif
+    #if os(tvOS)
+    @State private var tvShowLibrary = false
+    #endif
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var smbDiscovery = SMBDiscovery()
@@ -149,6 +152,13 @@ struct LibraryView: View {
         Group {
             #if os(iOS)
             mobileShell
+            #elseif os(tvOS)
+            if tvShowLibrary {
+                navigationBody
+            } else {
+                TVHomeView(showLibrary: { tvShowLibrary = true })
+                    .environmentObject(library)
+            }
             #else
             navigationBody
             #endif
@@ -264,8 +274,15 @@ struct LibraryView: View {
                 .frame(maxWidth: .infinity)
             }
             .navigationTitle("Lucent")
+            #if !os(tvOS)
             .searchable(text: $search, prompt: "搜索媒体库")
+            #endif
             .toolbar {
+                #if os(tvOS)
+                ToolbarItem(placement: .automatic) {
+                    Button("首页", systemImage: "house.fill") { tvShowLibrary = false }
+                }
+                #endif
                 ToolbarItem(placement: .automatic) {
                     Menu(library.activeProfile?.name ?? "资料", systemImage: "person.crop.circle") {
                         ForEach(library.viewerProfiles) { profile in

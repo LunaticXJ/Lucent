@@ -37,6 +37,7 @@
 		2DCEA7F7AD5C96800BF5193F /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
 		2E23E994018A8ACCD0437975 /* TraktClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06E4CE71A807F4420ED5937 /* TraktClient.swift */; };
 		2E65801DCD9E7C1395BAFC7B /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
+		2F64A83D2E317D74C642A84C /* SeriesDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AB85696E2E34BC7503E9981 /* SeriesDetailView.swift */; };
 		2F7AD42320BE03C976F764B2 /* SubtitleTextDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */; };
 		2F839D14DA3B477D68BB7CBE /* RangeInputStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */; };
 		2FA45DA09BD71FEF6301239B /* KeychainPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E21D986157C391CAAD60BE /* KeychainPasswordStore.swift */; };
@@ -84,6 +85,7 @@
 		6C228A00CA059C7074FA4634 /* OpenSubtitlesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */; };
 		701C9105ECB87825CBBAA981 /* CloudTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */; };
 		732CB6E2714E7E7D743ECBAD /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
+		743E8549341012A9D8401BC0 /* SeriesDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AB85696E2E34BC7503E9981 /* SeriesDetailView.swift */; };
 		74D2D1A701B0FA8FAB5D7791 /* PlaybackSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */; };
 		75AFC385B3BA0EFD4E51C4C0 /* SSDPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */; };
 		76EC073F50D5ADFA72D6C025 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */; };
@@ -109,6 +111,7 @@
 		9D5512829091AFD9A06F5F77 /* EmbyBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC543FDAD77781D6C1FB5B9E /* EmbyBrowserView.swift */; };
 		9DA79CDA0785D4018DA42968 /* BrowserUploadServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22141246AB6F71B026B4C846 /* BrowserUploadServer.swift */; };
 		9DB4BD6B2AB2DB9B83C248F6 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A989709453124F9315EDAAF6 /* MacHomeView.swift */; };
+		9E7A92AF1D19265836793319 /* SeriesDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AB85696E2E34BC7503E9981 /* SeriesDetailView.swift */; };
 		A02F5485201B86BA9C14EF22 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D837828C6927A928619282B /* LibraryView.swift */; };
 		A2446AB9E89B8B86903FCA2C /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
 		A31DD790DC19987C6735744E /* DLNAClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DD91B3DA60405055CE6ADC /* DLNAClient.swift */; };
@@ -196,6 +199,7 @@
 		609E3AE700D13572742EEAF6 /* Lucent-macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lucent-macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPDownloader.swift; sourceTree = "<group>"; };
 		69E21D986157C391CAAD60BE /* KeychainPasswordStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainPasswordStore.swift; sourceTree = "<group>"; };
+		6AB85696E2E34BC7503E9981 /* SeriesDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesDetailView.swift; sourceTree = "<group>"; };
 		6D837828C6927A928619282B /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuangyaClient.swift; sourceTree = "<group>"; };
 		725A13EA48912AEB196DCC82 /* SSDPDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSDPDiscovery.swift; sourceTree = "<group>"; };
@@ -341,6 +345,7 @@
 				483F341CF13C9DAF8728F0DE /* PlexClient.swift */,
 				172B9DB1756D414D8D930996 /* RangeHTTPServer.swift */,
 				16F5C616899AB5082A1D56C5 /* RangeInputStream.swift */,
+				6AB85696E2E34BC7503E9981 /* SeriesDetailView.swift */,
 				81937293A1231BB104313284 /* ServerTranscodeClient.swift */,
 				B873ED80B83D9EE0A7B7916D /* SMBDiscovery.swift */,
 				5B309C00ED20341424CB374F /* SMBDownloader.swift */,
@@ -516,6 +521,7 @@
 				77DF162EA7CCD833383090C3 /* SMBScanner.swift in Sources */,
 				ED93501D6029A16342643310 /* SRTParser.swift in Sources */,
 				910348E2F21E2C2196CA8DFB /* SSDPDiscovery.swift in Sources */,
+				9E7A92AF1D19265836793319 /* SeriesDetailView.swift in Sources */,
 				1059007BB1CA28D76A3C4227 /* ServerTranscodeClient.swift in Sources */,
 				9328D76FA04E18C8F0DB49EE /* SubtitleParser.swift in Sources */,
 				D2A60B5CA9894C662BA216FB /* SubtitleRangeLoader.swift in Sources */,
@@ -576,6 +582,7 @@
 				C5C38BA38A7808E7E97F5D12 /* SMBScanner.swift in Sources */,
 				37F85951C9458A13657BD1E4 /* SRTParser.swift in Sources */,
 				9BCDC684028407BE6657C07D /* SSDPDiscovery.swift in Sources */,
+				2F64A83D2E317D74C642A84C /* SeriesDetailView.swift in Sources */,
 				46C0D0C08FD7EDCACC6499E9 /* ServerTranscodeClient.swift in Sources */,
 				58A19C0AE760B7FD082A669B /* SubtitleParser.swift in Sources */,
 				ACC39CA5608A1A0F6CAB6F5B /* SubtitleRangeLoader.swift in Sources */,
@@ -636,6 +643,7 @@
 				C85B175361549ECE9F84D249 /* SMBScanner.swift in Sources */,
 				0823CA4E2E1B599213B16355 /* SRTParser.swift in Sources */,
 				75AFC385B3BA0EFD4E51C4C0 /* SSDPDiscovery.swift in Sources */,
+				743E8549341012A9D8401BC0 /* SeriesDetailView.swift in Sources */,
 				D68867ACCB595EABD81B8403 /* ServerTranscodeClient.swift in Sources */,
 				C405FED6D5FB1409B73F2553 /* SubtitleParser.swift in Sources */,
 				0AB699AFF06CA41B870025DD /* SubtitleRangeLoader.swift in Sources */,

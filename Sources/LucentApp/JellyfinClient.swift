@@ -32,6 +32,13 @@ struct JellyfinItem: Decodable, Sendable {
         let primary: String?
         enum CodingKeys: String, CodingKey { case primary = "Primary" }
     }
+    struct Person: Decodable, Sendable, Identifiable {
+        let id: String?
+        let name: String
+        let role: String?
+        var stableID: String { id ?? name }
+        enum CodingKeys: String, CodingKey { case id = "Id", name = "Name", role = "Role" }
+    }
     struct UserData: Decodable, Sendable {
         let played: Bool?
         let isFavorite: Bool?
@@ -51,6 +58,9 @@ struct JellyfinItem: Decodable, Sendable {
     let isFolder: Bool?
     let mediaType: String?
     let seriesName: String?
+    let seriesId: String?
+    let genres: [String]?
+    let people: [Person]?
     let parentIndexNumber: Int?
     let indexNumber: Int?
     let productionYear: Int?
@@ -67,6 +77,7 @@ struct JellyfinItem: Decodable, Sendable {
         case id = "Id", name = "Name", type = "Type"
         case isFolder = "IsFolder", mediaType = "MediaType"
         case seriesName = "SeriesName"
+        case seriesId = "SeriesId", genres = "Genres", people = "People"
         case parentIndexNumber = "ParentIndexNumber"
         case indexNumber = "IndexNumber"
         case productionYear = "ProductionYear"
@@ -79,6 +90,9 @@ struct JellyfinItem: Decodable, Sendable {
     }
 
     var identity: MediaIdentity {
+        if type == "Series" {
+            return .episode(series: name, season: 1, number: 0, name: nil)
+        }
         if type == "Episode", let seriesName {
             return .episode(series: seriesName, season: parentIndexNumber ?? 0,
                             number: indexNumber ?? 0, name: name)

@@ -34,7 +34,13 @@ private struct EmbyBrowserPageView: View {
     var body: some View {
         List {
             ForEach(entries, id: \.id) { entry in
-                if entry.isFolder == true {
+                if entry.type == "Series" {
+                    Button {
+                        selectedItem = library.openEmbyItem(sourceID: source.id, remote: entry)
+                    } label: {
+                        Label(entry.name, systemImage: "tv")
+                    }
+                } else if entry.isFolder == true {
                     NavigationLink {
                         EmbyBrowserPageView(source: source, parentID: entry.id, title: entry.name)
                     } label: {

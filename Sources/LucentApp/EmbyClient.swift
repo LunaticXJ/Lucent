@@ -225,6 +225,10 @@ enum EmbyClient {
 }
 
 enum ServerEpisodeClient {
+    struct SeriesPage: Sendable {
+        let series: JellyfinItem
+        let episodes: [JellyfinItem]
+    }
     private struct Page: Decodable {
         let items: [JellyfinItem]
         let totalRecordCount: Int
@@ -244,7 +248,8 @@ enum ServerEpisodeClient {
         let (detailData, detailResponse) = try await URLSession.shared.data(for: detail)
         guard (detailResponse as? HTTPURLResponse)?.statusCode == 200,
               let json = try JSONSerialization.jsonObject(with: detailData) as? [String: Any],
-              let seriesID = json["SeriesId"] as? String, !seriesID.isEmpty else { return [] }
+              let seriesID = (json["SeriesId"] as? String) ??
+                ((json["Type"] as? String) == "Series" ? itemID : nil), !seriesID.isEmpty else { return [] }
 
         var episodes: [JellyfinItem] = []
         repeat {
@@ -275,6 +280,32 @@ enum ServerEpisodeClient {
             let rhs = ($1.parentIndexNumber ?? 0, $1.indexNumber ?? 0, $1.name)
             return lhs < rhs
         }
+    }
+
+    static func seriesPage(baseAddress: String, userID: String, itemID: String,
+                           token: String) async throws -> SeriesPage? {
+        guard let base = URL(string: baseAddress) else { throw EmbyError.invalidResponse }
+        var request = URLRequest(url: base.appendingPathComponent("Users")
+            .appendingPathComponent(userID).appendingPathComponent("Items")
+            .appendingPathComponent(itemID))
+        request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+        request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw EmbyError.requestFailed }
+        let selected = try JSONDecoder().decode(JellyfinItem.self, from: data)
+        guard let seriesID = selected.seriesId ?? (selected.type == "Series" ? selected.id : nil) else { return nil }
+        var seriesURL = URLComponents(url: base.appendingPathComponent("Users").appendingPathComponent(userID)
+            .appendingPathComponent("Items").appendingPathComponent(seriesID),
+            resolvingAgainstBaseURL: false)!
+        seriesURL.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview"),
+                                URLQueryItem(name: "EnableUserData", value: "true")]
+        request.url = seriesURL.url
+        let (seriesData, seriesResponse) = try await URLSession.shared.data(for: request)
+        guard (seriesResponse as? HTTPURLResponse)?.statusCode == 200 else { throw EmbyError.requestFailed }
+        let series = try JSONDecoder().decode(JellyfinItem.self, from: seriesData)
+        let episodes = try await episodes(baseAddress: baseAddress, userID: userID,
+                                          itemID: itemID, token: token)
+        return SeriesPage(series: series, episodes: episodes)
     }
 }
 

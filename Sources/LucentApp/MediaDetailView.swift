@@ -71,6 +71,108 @@ struct MediaDetailView: View {
         NavigationStack {
             Group {
                 if let item {
+                    if item.identity?.seriesName != nil {
+                        #if os(iOS)
+                        SeriesDetailView(item: item, onPlay: { selected in
+                            selectedServerMediaSourceID = nil
+                            selectedPlexPartID = nil
+                            selectedPlexMediaIndex = 0
+                            selectedAudioStreamIndex = nil
+                            selectedSubtitleStreamIndex = nil
+                            forceRemoteVersion = false
+                            selectedTranscodeBitrate = nil
+                            playingItem = selected
+                        })
+                        #else
+                        legacyDetail(item)
+                        #endif
+                    } else {
+                        legacyDetail(item)
+                    }
+                } else {
+                    ContentUnavailableView("影片已移除", systemImage: "film")
+                }
+            }
+            .navigationTitle(item?.identity?.seriesName == nil ? "影片详情" : "")
+            #if os(iOS)
+            .toolbar(item?.identity?.seriesName == nil ? .visible : .hidden, for: .navigationBar)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+            }
+            #if os(iOS)
+            .fullScreenCover(item: $playingItem) { item in
+                playbackContent(for: item)
+            }
+            #else
+            .sheet(item: $playingItem) { item in
+                playbackContent(for: item)
+            }
+            #endif
+            .task(id: itemID) { await loadServerVersions() }
+            .sheet(item: $editingItem) { item in
+                MediaEditView(item: item).environmentObject(library)
+            }
+            .sheet(isPresented: $showMetadata) {
+                if let item {
+                    MetadataMatchView(item: item).environmentObject(library)
+                }
+            }
+            .sheet(isPresented: $showExtraPicker) {
+                NavigationStack {
+                    List {
+                        ForEach(library.visibleItems.filter {
+                            $0.id != itemID &&
+                            (extraSearch.isEmpty || $0.title.localizedCaseInsensitiveContains(extraSearch))
+                        }) { candidate in
+                            let included = item?.extraItemIDs?.contains(candidate.id) == true
+                            Button("\(included ? "✓ " : "")\(candidate.title)") {
+                                library.setExtra(parentID: itemID, extraID: candidate.id,
+                                                 included: !included)
+                            }
+                        }
+                    }
+                    .searchable(text: $extraSearch, prompt: "搜索附加片段")
+                    .navigationTitle("管理附加片段")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showExtraPicker = false }
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showOnlineSubtitles) { onlineSubtitleSheet }
+            .alert("无法完成操作", isPresented: Binding(
+                get: { library.errorMessage != nil },
+                set: { if !$0 { library.errorMessage = nil } }
+            )) {
+                Button("好") { library.errorMessage = nil }
+            } message: {
+                Text(library.errorMessage ?? "未知错误")
+            }
+            .task(id: "\(itemID.uuidString)|\(item?.metadata?.posterPath ?? "")|\(item?.serverPosterKey ?? "")") {
+                await library.ensurePoster(id: itemID)
+            }
+            .task(id: item?.metadata?.providerID) {
+                extras = nil
+                guard let item, let id = item.metadata?.providerID,
+                      let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else { return }
+                extras = try? await TMDBService.extras(id: id,
+                                                       television: item.identity?.seriesName != nil,
+                                                       token: token)
+            }
+            #if !os(tvOS)
+            .fileImporter(isPresented: $showSubtitleImporter, allowedContentTypes: [.item]) { result in
+                switch result {
+                case .success(let url): library.importSubtitle(id: itemID, from: url)
+                case .failure(let error): library.errorMessage = error.localizedDescription
+                }
+            }
+            #endif
+        }
+    }
+
+    private func legacyDetail(_ item: MediaItem) -> some View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 24) {
                             if let localURL = library.posterURL(for: item) {
@@ -380,84 +482,6 @@ struct MediaDetailView: View {
                         .padding(24)
                         .frame(maxWidth: .infinity)
                     }
-                } else {
-                    ContentUnavailableView("影片已移除", systemImage: "film")
-                }
-            }
-            .navigationTitle("影片详情")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
-            }
-            #if os(iOS)
-            .fullScreenCover(item: $playingItem) { item in
-                playbackContent(for: item)
-            }
-            #else
-            .sheet(item: $playingItem) { item in
-                playbackContent(for: item)
-            }
-            #endif
-            .task(id: itemID) { await loadServerVersions() }
-            .sheet(item: $editingItem) { item in
-                MediaEditView(item: item).environmentObject(library)
-            }
-            .sheet(isPresented: $showMetadata) {
-                if let item {
-                    MetadataMatchView(item: item).environmentObject(library)
-                }
-            }
-            .sheet(isPresented: $showExtraPicker) {
-                NavigationStack {
-                    List {
-                        ForEach(library.visibleItems.filter {
-                            $0.id != itemID &&
-                            (extraSearch.isEmpty || $0.title.localizedCaseInsensitiveContains(extraSearch))
-                        }) { candidate in
-                            let included = item?.extraItemIDs?.contains(candidate.id) == true
-                            Button("\(included ? "✓ " : "")\(candidate.title)") {
-                                library.setExtra(parentID: itemID, extraID: candidate.id,
-                                                 included: !included)
-                            }
-                        }
-                    }
-                    .searchable(text: $extraSearch, prompt: "搜索附加片段")
-                    .navigationTitle("管理附加片段")
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { showExtraPicker = false }
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showOnlineSubtitles) { onlineSubtitleSheet }
-            .alert("无法完成操作", isPresented: Binding(
-                get: { library.errorMessage != nil },
-                set: { if !$0 { library.errorMessage = nil } }
-            )) {
-                Button("好") { library.errorMessage = nil }
-            } message: {
-                Text(library.errorMessage ?? "未知错误")
-            }
-            .task(id: "\(itemID.uuidString)|\(item?.metadata?.posterPath ?? "")|\(item?.serverPosterKey ?? "")") {
-                await library.ensurePoster(id: itemID)
-            }
-            .task(id: item?.metadata?.providerID) {
-                extras = nil
-                guard let item, let id = item.metadata?.providerID,
-                      let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else { return }
-                extras = try? await TMDBService.extras(id: id,
-                                                       television: item.identity?.seriesName != nil,
-                                                       token: token)
-            }
-            #if !os(tvOS)
-            .fileImporter(isPresented: $showSubtitleImporter, allowedContentTypes: [.item]) { result in
-                switch result {
-                case .success(let url): library.importSubtitle(id: itemID, from: url)
-                case .failure(let error): library.errorMessage = error.localizedDescription
-                }
-            }
-            #endif
-        }
     }
 
     private var onlineSubtitleSheet: some View {

@@ -31,6 +31,15 @@ targets:
         CFBundleDisplayName: Lucent
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源。
         NSBonjourServices: [_smb._tcp]
         NSAppTransportSecurity:

@@ -157,6 +157,8 @@ struct MobileHomeView: View {
                             ForEach(library.embySources) { option in
                                 Button(option.name) { selectedSourceID = option.id }
                             }
+                            Divider()
+                            Button("管理片源", systemImage: "externaldrive") { showSources() }
                         } label: {
                             Label(source.name, systemImage: "play.square.stack.fill")
                                 .font(.caption.weight(.semibold))
@@ -171,15 +173,6 @@ struct MobileHomeView: View {
                             .background(.regularMaterial, in: Capsule())
                     }
                     Spacer()
-                    Button {
-                        if let source { browserRoute = HomeBrowserRoute(source: source, parentID: nil, title: nil) }
-                        else { showSources() }
-                    } label: {
-                        Image(systemName: "square.grid.2x2.fill")
-                            .frame(width: 42, height: 42)
-                            .background(.regularMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("浏览片源")
                 }
                 .foregroundStyle(HomePalette.ink)
                 .padding(.top, 64)
@@ -240,7 +233,7 @@ struct MobileHomeView: View {
         .frame(width: geometry.size.width, height: geometry.size.height)
         .clipped()
         }
-        .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 540 : 430)
+        .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 540 : 400)
     }
 
     private var continueSection: some View {

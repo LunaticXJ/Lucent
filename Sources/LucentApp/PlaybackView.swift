@@ -1170,6 +1170,86 @@ private enum PlaybackError: LocalizedError {
     }
 }
 
+#if os(iOS)
+@MainActor private enum EpisodeCardCache {
+    static let images = NSCache<NSString, UIImage>()
+}
+
+private struct EpisodeCardArtwork: View {
+    @EnvironmentObject private var library: LibraryStore
+    let itemID: String
+    let storedItem: MediaItem?
+    let currentLocation: MediaLocation
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.18, green: 0.23, blue: 0.29),
+                                    Color(red: 0.08, green: 0.11, blue: 0.17)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: "film.stack")
+                    .font(.system(size: 28, weight: .ultraLight))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+        }
+        .clipped()
+        .task(id: itemID) { await loadArtwork() }
+    }
+
+    private func loadArtwork() async {
+        if let storedItem, let url = library.posterURL(for: storedItem),
+           let local = UIImage(contentsOfFile: url.path) {
+            image = local
+            return
+        }
+        let source: (URL, UUID)?
+        switch currentLocation {
+        case .embyItem(let sourceID, _):
+            source = library.embySources.first(where: { $0.id == sourceID })
+                .flatMap { URL(string: $0.baseAddress).map { ($0, sourceID) } }
+        case .jellyfinItem(let sourceID, _):
+            source = library.jellyfinSources.first(where: { $0.id == sourceID })
+                .flatMap { URL(string: $0.baseAddress).map { ($0, sourceID) } }
+        default:
+            source = nil
+        }
+        guard let (base, sourceID) = source else { return }
+        let key = "\(sourceID)|\(itemID)" as NSString
+        if let cached = EpisodeCardCache.images.object(forKey: key) {
+            image = cached
+            return
+        }
+        let token: String?
+        switch currentLocation {
+        case .embyItem: token = try? KeychainPasswordStore.embyToken(for: sourceID)
+        case .jellyfinItem: token = try? KeychainPasswordStore.jellyfinToken(for: sourceID)
+        default: token = nil
+        }
+        guard let token, !token.isEmpty else { return }
+        for imagePath in ["Backdrop/0", "Primary"] {
+            var imageURL = base.appendingPathComponent("Items")
+                .appendingPathComponent(itemID).appendingPathComponent("Images")
+            for component in imagePath.split(separator: "/") {
+                imageURL.appendPathComponent(String(component))
+            }
+            var components = URLComponents(url: imageURL, resolvingAgainstBaseURL: false)!
+            components.queryItems = [URLQueryItem(name: "maxWidth", value: "500")]
+            var request = URLRequest(url: components.url!)
+            request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  data.count < 5_000_000, let loaded = UIImage(data: data) else { continue }
+            EpisodeCardCache.images.setObject(loaded, forKey: key)
+            image = loaded
+            return
+        }
+    }
+}
+#endif
+
 struct PlaybackView: View {
     private struct EpisodeChoice: Identifiable {
         let id: String
@@ -1192,6 +1272,7 @@ struct PlaybackView: View {
     @State private var showDiagnostics = false
     @State private var controlsLocked = false
     @State private var showEpisodeList = false
+    @State private var selectedEpisodeSeason: Int?
     @State private var episodeChoices: [EpisodeChoice] = []
     @State private var episodeLoading = false
     @State private var episodeError: String?
@@ -1217,6 +1298,9 @@ struct PlaybackView: View {
         self.onContinue = onContinue
         self.onSelectEpisode = onSelectEpisode
         self.transcodeBitrate = transcodeBitrate
+        if case .episode(_, let season, _, _) = item.identity {
+            _selectedEpisodeSeason = State(initialValue: season)
+        }
         _session = StateObject(wrappedValue: PlaybackSession(
             item: item, serverMediaSourceID: serverMediaSourceID,
             serverContainer: serverContainer, serverDolbyVision: serverDolbyVision,
@@ -1252,19 +1336,24 @@ struct PlaybackView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             VStack(spacing: 0) {
-                if !controlsLocked { playbackHeader }
+                if !controlsLocked && !showEpisodeList { playbackHeader }
                 Spacer(minLength: 0)
-                HStack {
-                    roundControl("锁定或解锁控制", systemImage: controlsLocked ? "lock.fill" : "lock.open") {
-                        controlsLocked.toggle()
+                if !showEpisodeList {
+                    HStack {
+                        roundControl("锁定或解锁控制", systemImage: controlsLocked ? "lock.fill" : "lock.open") {
+                            controlsLocked.toggle()
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.horizontal, 28)
                 }
-                .padding(.horizontal, 28)
                 Spacer(minLength: 0)
-                if !controlsLocked { playbackFooter }
+                if !controlsLocked && !showEpisodeList { playbackFooter }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #if os(iOS)
+            if showEpisodeList { episodeCarousel }
+            #endif
         }
         .ignoresSafeArea(edges: .vertical)
         .background(.black)
@@ -1276,9 +1365,9 @@ struct PlaybackView: View {
                                      stalls: session.stallCount,
                                      failure: session.message)
         }
-        .sheet(isPresented: $showEpisodeList) {
-            episodeList
-        }
+        #if !os(iOS)
+        .sheet(isPresented: $showEpisodeList) { episodeList }
+        #endif
         .task(id: item.id) { await loadEpisodeChoices() }
         .onAppear {
             #if os(iOS)
@@ -1347,6 +1436,123 @@ struct PlaybackView: View {
         }
         .preferredColorScheme(.dark)
     }
+
+    #if os(iOS)
+    private var episodeCarousel: some View {
+        ZStack {
+            Color.black.opacity(0.48)
+                .ignoresSafeArea()
+                .onTapGesture { showEpisodeList = false }
+            VStack(spacing: 0) {
+                playbackHeader
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 14) {
+                        Text("选集")
+                            .font(.system(size: 16, weight: .semibold))
+                        Menu {
+                            Button("全部剧集") { selectedEpisodeSeason = nil }
+                            ForEach(Array(Set(episodeChoices.map(\.season))).sorted(), id: \.self) { season in
+                                Button(season == 0 ? "特别篇" : "第 \(season) 季") {
+                                    selectedEpisodeSeason = season
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(selectedEpisodeSeason.map { $0 == 0 ? "特别篇" : "第 \($0) 季" } ?? "全部剧集")
+                                Image(systemName: "chevron.down").font(.caption2)
+                            }
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.82))
+                        }
+                        Spacer()
+                        if episodeLoading { ProgressView().tint(.white) }
+                        Text("\(filteredEpisodeChoices.count) 集")
+                            .font(.caption).foregroundStyle(.white.opacity(0.65))
+                        Button("关闭选集", systemImage: "xmark") { showEpisodeList = false }
+                            .labelStyle(.iconOnly)
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                            .background(.white.opacity(0.15), in: Circle())
+                    }
+                    .padding(.horizontal, 28)
+                    if let episodeError {
+                        Text(episodeError)
+                            .font(.caption).foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 28)
+                    }
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(alignment: .top, spacing: 15) {
+                                ForEach(filteredEpisodeChoices) { choice in
+                                    Button { selectEpisode(choice) } label: {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            EpisodeCardArtwork(itemID: choice.id,
+                                                               storedItem: choice.item,
+                                                               currentLocation: item.location)
+                                                .frame(width: 190, height: 107)
+                                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                                .overlay {
+                                                    RoundedRectangle(cornerRadius: 12)
+                                                        .strokeBorder(choice.id == currentEpisodeID || choice.item?.id == item.id
+                                                                      ? Color.green : .clear, lineWidth: 2)
+                                                }
+                                                .overlay(alignment: .bottomTrailing) {
+                                                    if choice.id == currentEpisodeID || choice.item?.id == item.id {
+                                                        Image(systemName: "waveform")
+                                                            .font(.system(size: 13, weight: .semibold))
+                                                            .padding(8)
+                                                            .background(.black.opacity(0.68), in: Circle())
+                                                            .padding(5)
+                                                    }
+                                                }
+                                            Text(choice.title)
+                                                .font(.system(size: 13, weight: .medium))
+                                                .lineLimit(1)
+                                                .frame(width: 190, alignment: .leading)
+                                            Text(choice.season == 0
+                                                 ? "特别篇 · 第 \(choice.number) 集"
+                                                 : "第 \(choice.season) 季 · 第 \(choice.number) 集")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(.white.opacity(0.62))
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .id(choice.id)
+                                }
+                            }
+                            .padding(.horizontal, 28)
+                        }
+                        .onAppear { proxy.scrollTo(selectedEpisodeChoiceID, anchor: .center) }
+                        .onChange(of: episodeChoices.map(\.id)) { _, _ in
+                            proxy.scrollTo(selectedEpisodeChoiceID, anchor: .center)
+                        }
+                        .onChange(of: selectedEpisodeSeason) { _, _ in
+                            if let first = filteredEpisodeChoices.first {
+                                proxy.scrollTo(first.id, anchor: .leading)
+                            }
+                        }
+                    }
+                    .frame(height: 164)
+                }
+                .padding(.top, 18)
+                .padding(.bottom, 20)
+                .background(.linearGradient(colors: [.clear, .black.opacity(0.72), .black.opacity(0.95)],
+                                            startPoint: .top, endPoint: .bottom))
+            }
+        }
+        .transition(.opacity)
+    }
+
+    private var filteredEpisodeChoices: [EpisodeChoice] {
+        episodeChoices.filter { selectedEpisodeSeason == nil || $0.season == selectedEpisodeSeason }
+    }
+
+    private var selectedEpisodeChoiceID: String {
+        filteredEpisodeChoices.first(where: { $0.id == currentEpisodeID || $0.item?.id == item.id })?.id
+            ?? filteredEpisodeChoices.first?.id ?? currentEpisodeID
+    }
+    #endif
 
     private var currentEpisodeID: String {
         switch item.location {

@@ -3,10 +3,12 @@ import SwiftUI
 struct EmbyBrowserView: View {
     @Environment(\.dismiss) private var dismiss
     let source: EmbySource
+    var parentID: String? = nil
+    var title: String? = nil
 
     var body: some View {
         NavigationStack {
-            EmbyBrowserPageView(source: source, parentID: nil, title: source.name)
+            EmbyBrowserPageView(source: source, parentID: parentID, title: title ?? source.name)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("完成") { dismiss() }

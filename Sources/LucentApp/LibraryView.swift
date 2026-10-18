@@ -5,6 +5,10 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     private enum SortOrder { case newest, title }
     private enum MediaFilter { case all, unwatched, favorites }
+    #if os(iOS)
+    private enum MobileTab { case home, sources, search }
+    @State private var mobileTab: MobileTab = .home
+    #endif
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var smbDiscovery = SMBDiscovery()
@@ -142,7 +146,13 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        navigationBody
+        Group {
+            #if os(iOS)
+            mobileShell
+            #else
+            navigationBody
+            #endif
+        }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
                     library.refreshFolders()
@@ -160,6 +170,59 @@ struct LibraryView: View {
                 library.scheduleTraktSync()
             }
     }
+
+    #if os(iOS)
+    private var mobileShell: some View {
+        Group {
+            switch mobileTab {
+            case .home:
+                MobileHomeView(showSources: { mobileTab = .sources })
+                    .environmentObject(library)
+            case .sources:
+                navigationBody
+            case .search:
+                MobileSearchView().environmentObject(library)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 10) {
+                HStack(spacing: 2) {
+                    mobileTabButton(.home, title: "首页", symbol: "play.rectangle.fill")
+                    mobileTabButton(.sources, title: "片源", symbol: "externaldrive.fill")
+                }
+                .padding(6)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.55), lineWidth: 1))
+                Button { mobileTab = .search } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(mobileTab == .search ? Color.white : Color.primary)
+                        .frame(width: 54, height: 54)
+                        .background(mobileTab == .search ? Color.blue : Color.clear,
+                                    in: Circle())
+                        .background(.regularMaterial, in: Circle())
+                }
+                .accessibilityLabel("搜索")
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func mobileTabButton(_ tab: MobileTab, title: String, symbol: String) -> some View {
+        Button { mobileTab = tab } label: {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(mobileTab == tab ? Color.white : Color.primary)
+                .padding(.horizontal, 17)
+                .frame(height: 42)
+                .background(mobileTab == tab ? Color.blue : Color.clear, in: Capsule())
+        }
+        .accessibilityLabel(title)
+    }
+    #endif
 
     private var navigationBody: some View {
         NavigationStack {

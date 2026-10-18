@@ -47,6 +47,7 @@ struct JellyfinItem: Decodable, Sendable {
     let parentIndexNumber: Int?
     let indexNumber: Int?
     let productionYear: Int?
+    let communityRating: Double?
     let runTimeTicks: Int64?
     let userData: UserData?
     let overview: String?
@@ -62,6 +63,7 @@ struct JellyfinItem: Decodable, Sendable {
         case parentIndexNumber = "ParentIndexNumber"
         case indexNumber = "IndexNumber"
         case productionYear = "ProductionYear"
+        case communityRating = "CommunityRating"
         case runTimeTicks = "RunTimeTicks"
         case userData = "UserData"
         case overview = "Overview"

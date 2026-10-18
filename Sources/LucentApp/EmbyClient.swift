@@ -50,6 +50,84 @@ enum EmbyClient {
         return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
     }
 
+    static func latest(source: EmbySource, token: String, limit: Int = 12) async throws -> [JellyfinItem] {
+        var request = try makeRequest(baseAddress: source.baseAddress,
+                                      path: "Users/\(source.userID)/Items/Latest", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie"),
+            URLQueryItem(name: "EnableUserData", value: "true"),
+            URLQueryItem(name: "Fields", value: "Overview")
+        ]
+        request.url = components.url
+        return try JSONDecoder().decode([JellyfinItem].self, from: await fetch(request))
+    }
+
+    static func resume(source: EmbySource, token: String, limit: Int = 12) async throws -> BrowsePage {
+        var request = try makeRequest(baseAddress: source.baseAddress,
+                                      path: "Users/\(source.userID)/Items", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "Filters", value: "IsResumable"),
+            URLQueryItem(name: "SortBy", value: "DatePlayed"),
+            URLQueryItem(name: "SortOrder", value: "Descending"),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Episode,Video"),
+            URLQueryItem(name: "EnableUserData", value: "true")
+        ]
+        request.url = components.url
+        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
+        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+    }
+
+    static func featured(source: EmbySource, token: String, parentID: String,
+                         itemTypes: String, limit: Int = 12) async throws -> BrowsePage {
+        var request = try makeRequest(baseAddress: source.baseAddress,
+                                      path: "Users/\(source.userID)/Items", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "ParentId", value: parentID),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: itemTypes),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "SortBy", value: "DateCreated"),
+            URLQueryItem(name: "SortOrder", value: "Descending"),
+            URLQueryItem(name: "EnableUserData", value: "true")
+        ]
+        request.url = components.url
+        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
+        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+    }
+
+    static func search(source: EmbySource, token: String, term: String,
+                       limit: Int = 50) async throws -> BrowsePage {
+        var request = try makeRequest(baseAddress: source.baseAddress,
+                                      path: "Users/\(source.userID)/Items", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "SearchTerm", value: term),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Episode,Series,Video"),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "EnableUserData", value: "true")
+        ]
+        request.url = components.url
+        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
+        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+    }
+
+    static func artwork(source: EmbySource, token: String, itemID: String,
+                        backdrop: Bool, maxWidth: Int) async throws -> Data {
+        let path = "Items/\(itemID)/Images/" + (backdrop ? "Backdrop/0" : "Primary")
+        var request = try makeRequest(baseAddress: source.baseAddress, path: path, token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "maxWidth", value: String(maxWidth))]
+        request.url = components.url
+        return try await fetch(request)
+    }
+
     static func authenticate(baseAddress: String, username: String, password: String) async throws -> (token: String, userID: String) {
         guard !username.isEmpty else { throw EmbyError.invalidResponse }
         var request = try makeRequest(baseAddress: baseAddress, path: "Users/AuthenticateByName", token: "")

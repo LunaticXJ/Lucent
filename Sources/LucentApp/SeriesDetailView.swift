@@ -62,6 +62,7 @@ struct SeriesDetailView: View {
     @State private var showAllEpisodes = false
     @State private var loading = false
     @State private var loadError: String?
+    @State private var overviewExpanded = false
 
     private var server: (base: String, user: String, token: String, sourceID: UUID, emby: Bool)? {
         switch item.location {
@@ -109,8 +110,16 @@ struct SeriesDetailView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         if let summary = page?.series.overview ?? item.metadata?.summary ?? item.serverSummary,
                            !summary.isEmpty {
-                            Text(summary).font(.subheadline).foregroundStyle(.white.opacity(0.85))
-                                .lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text(summary).font(.subheadline).foregroundStyle(.white.opacity(0.85))
+                                    .lineSpacing(4).lineLimit(overviewExpanded ? nil : 4)
+                                if summary.count > 110 {
+                                    Button(overviewExpanded ? "收起简介" : "展开简介") {
+                                        withAnimation(.easeInOut(duration: 0.2)) { overviewExpanded.toggle() }
+                                    }
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                                }
+                            }
                         }
                         episodeSection
                         castSection
@@ -149,7 +158,7 @@ struct SeriesDetailView: View {
                         Image(systemName: "star.fill").foregroundStyle(.yellow)
                         Text(rating.formatted(.number.precision(.fractionLength(1))))
                     }
-                    if let year = page?.series.productionYear { Text("·  \(year)") }
+                    if let year = page?.series.productionYear { Text("·  \(String(year))") }
                     if let genres = page?.series.genres, !genres.isEmpty {
                         Text("·  " + genres.prefix(3).joined(separator: "、")).lineLimit(1)
                     }
@@ -185,7 +194,8 @@ struct SeriesDetailView: View {
             .padding(.horizontal, 28).padding(.bottom, 12).frame(maxWidth: 660)
             VStack {
                 HStack {
-                    Button { dismiss() } label: { Image(systemName: "chevron.left") }
+                    Button { dismiss() } label: { Image(systemName: "chevron.left")
+                        .frame(width: 46, height: 46).background(.black.opacity(0.46), in: Circle()) }
                     Spacer()
                     Menu {
                         Button(item.watched ? "标记为未观看" : "标记为已看完") {
@@ -193,7 +203,8 @@ struct SeriesDetailView: View {
                             else { library.markWatched(id: item.id) }
                         }
                         Button(item.isFavorite ? "取消收藏" : "收藏") { library.toggleFavorite(id: item.id) }
-                    } label: { Image(systemName: "ellipsis") }
+                    } label: { Image(systemName: "ellipsis")
+                        .frame(width: 46, height: 46).background(.black.opacity(0.46), in: Circle()) }
                 }
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
@@ -226,8 +237,10 @@ struct SeriesDetailView: View {
                 }
                 .disabled(seasons.isEmpty)
                 Spacer()
-                Button("查看全部", systemImage: "chevron.right") { showAllEpisodes = true }
-                    .labelStyle(.titleAndIcon).font(.subheadline.weight(.semibold))
+                Button { showAllEpisodes = true } label: {
+                    HStack(spacing: 3) { Text("查看全部"); Image(systemName: "chevron.right") }
+                }
+                    .font(.subheadline.weight(.semibold))
                     .disabled(episodes.isEmpty)
             }
             .font(.title3.bold()).foregroundStyle(.white)

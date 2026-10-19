@@ -16,8 +16,10 @@ enum HTTPRangeReader {
         }
         var request = original
         request.timeoutInterval = 25
-        request.setValue("bytes=\(offset)-\(offset + UInt64(length) - 1)", forHTTPHeaderField: "Range")
-        let delegate = LimitedRangeDelegate(maximumBytes: length, originalHost: url.host)
+        let range = "bytes=\(offset)-\(offset + UInt64(length) - 1)"
+        request.setValue(range, forHTTPHeaderField: "Range")
+        let delegate = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
+                                            range: range)
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: queue)
@@ -57,14 +59,17 @@ enum HTTPRangeReader {
 private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     let semaphore = DispatchSemaphore(value: 0)
     private let maximumBytes: Int
-    private let originalHost: String?
+    private let originalURL: URL
+    private let range: String
+    private var redirectCount = 0
     private var bytes = Data()
     private var response: URLResponse?
     private var error: Error?
 
-    init(maximumBytes: Int, originalHost: String?) {
+    init(maximumBytes: Int, originalURL: URL, range: String) {
         self.maximumBytes = maximumBytes
-        self.originalHost = originalHost
+        self.originalURL = originalURL
+        self.range = range
     }
 
     var result: (Data?, URLResponse?, Error?) { (bytes, response, error) }
@@ -98,7 +103,32 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
                     willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest,
                     completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(request.url?.host == originalHost ? request : nil)
+        guard let destination = request.url,
+              let scheme = destination.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              redirectCount < 5 else {
+            completionHandler(nil)
+            return
+        }
+        redirectCount += 1
+        let sameOrigin = destination.scheme?.caseInsensitiveCompare(originalURL.scheme ?? "") == .orderedSame &&
+            destination.host?.caseInsensitiveCompare(originalURL.host ?? "") == .orderedSame &&
+            destination.port == originalURL.port
+        // Remote media servers may redirect static streams to a CDN. Keep the
+        // byte range, but never forward the server's authorization to that host.
+        guard sameOrigin || scheme == "https" else {
+            completionHandler(nil)
+            return
+        }
+        var redirected = request
+        if !sameOrigin {
+            for name in ["Authorization", "Proxy-Authorization", "Cookie", "X-Emby-Token",
+                         "X-Emby-Authorization", "X-Jellyfin-Token", "X-Plex-Token"] {
+                redirected.setValue(nil, forHTTPHeaderField: name)
+            }
+        }
+        redirected.setValue(range, forHTTPHeaderField: "Range")
+        completionHandler(redirected)
     }
 }
 

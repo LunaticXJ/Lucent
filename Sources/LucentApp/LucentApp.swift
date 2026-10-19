@@ -4,16 +4,24 @@ import UIKit
 
 final class LucentOrientationDelegate: NSObject, UIApplicationDelegate {
     static var playbackIsPresented = false
+    private static var browsingOrientations: UIInterfaceOrientationMask {
+        UIDevice.current.userInterfaceIdiom == .phone ? .portrait : .allButUpsideDown
+    }
 
     func application(_ application: UIApplication,
                      supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        Self.playbackIsPresented ? .landscape : .allButUpsideDown
+        Self.playbackIsPresented ? .landscape : Self.browsingOrientations
     }
 
     static func setPlaybackPresented(_ presented: Bool) {
         playbackIsPresented = presented
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: presented ? .landscape : .allButUpsideDown))
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {
+            return
+        }
+        (scene.windows.first(where: \.isKeyWindow) ?? scene.windows.first)?
+            .rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: presented ? .landscape : browsingOrientations))
     }
 }
 #endif

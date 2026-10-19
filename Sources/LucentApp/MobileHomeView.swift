@@ -297,32 +297,39 @@ struct MobileHomeView: View {
                                 browserRoute = HomeBrowserRoute(source: source, parentID: view.id,
                                                                title: view.name)
                             } label: {
-                                VStack(alignment: .leading, spacing: 8) {
+                                ZStack(alignment: .bottomLeading) {
                                     if let first = shelves.first(where: { $0.id == view.id })?.items.first {
                                         EmbyArtwork(source: source, itemID: first.id,
                                                     backdrop: true, width: 500)
                                             .frame(width: HomePalette.categoryWidth,
                                                    height: HomePalette.isPad ? 145 : 120)
                                             .clipped()
-                                            .clipShape(RoundedRectangle(cornerRadius: 16))
                                     } else {
                                         LinearGradient(colors: [.init(red: 0.34, green: 0.51, blue: 0.52),
                                                                 .init(red: 0.18, green: 0.27, blue: 0.36)],
                                                        startPoint: .topLeading, endPoint: .bottomTrailing)
                                             .frame(width: HomePalette.categoryWidth,
                                                    height: HomePalette.isPad ? 145 : 120)
-                                            .clipShape(RoundedRectangle(cornerRadius: 16))
                                     }
+                                    LinearGradient(colors: [.clear, .black.opacity(0.82)],
+                                                   startPoint: .center, endPoint: .bottom)
+                                        .frame(width: HomePalette.categoryWidth,
+                                               height: HomePalette.isPad ? 145 : 120)
                                     Text(view.name)
                                         .font(.system(size: HomePalette.isPad ? 16 : 13,
-                                                      weight: .medium))
-                                        .foregroundStyle(HomePalette.ink)
+                                                      weight: .semibold))
+                                        .foregroundStyle(.white)
                                         .multilineTextAlignment(.leading)
-                                        .frame(width: HomePalette.categoryWidth,
+                                        .lineLimit(2)
+                                        .minimumScaleFactor(0.85)
+                                        .frame(width: HomePalette.categoryWidth - 24,
                                                alignment: .leading)
                                         .fixedSize(horizontal: false, vertical: true)
+                                        .padding(12)
                                 }
-                                .frame(width: HomePalette.categoryWidth, alignment: .leading)
+                                .frame(width: HomePalette.categoryWidth,
+                                       height: HomePalette.isPad ? 145 : 120)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
                             }
                             .buttonStyle(.plain)
                         }

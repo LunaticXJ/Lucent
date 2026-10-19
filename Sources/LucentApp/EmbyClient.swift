@@ -35,6 +35,9 @@ enum EmbyClient {
             [.name, .added, .release, .played, .year, .imdb, .critics,
              .playCount, .boxOffice, .random, .rating, .resolution]
         }
+        static var mixedOptions: [Self] {
+            [.name, .added, .release, .imdb, .critics, .playCount, .random]
+        }
     }
     enum BrowseFacet { case genre(String), studio(String) }
     struct BrowsePage: Sendable {

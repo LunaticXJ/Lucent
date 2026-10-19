@@ -39,9 +39,10 @@ private struct EmbyBrowserPageView: View {
     var catalogType: CatalogType? = nil
     var facet: EmbyClient.BrowseFacet? = nil
 
-    enum CatalogType { case series, movies }
+    enum CatalogType { case series, movies, mixed }
     private enum Section: String, CaseIterable {
-        case programs = "节目", genres = "风格", studios = "工作室", folders = "文件夹"
+        case programs = "节目", movies = "电影", genres = "风格"
+        case studios = "工作室", folders = "文件夹"
     }
 
     @State private var section: Section = .programs
@@ -59,6 +60,30 @@ private struct EmbyBrowserPageView: View {
     private var activeCatalog: CatalogType? { catalogType ?? detectedCatalog }
     private var isCatalogPage: Bool { activeCatalog != nil }
     private var libraryID: String? { catalogLibraryID ?? parentID }
+    private var sections: [Section] {
+        switch activeCatalog {
+        case .series: [.programs, .genres, .studios, .folders]
+        case .movies: [.programs, .genres, .studios, .folders]
+        case .mixed: [.programs, .movies, .genres, .folders]
+        case nil: []
+        }
+    }
+    private var sortOptions: [EmbyClient.BrowseSort] {
+        switch activeCatalog {
+        case .series: EmbyClient.BrowseSort.seriesOptions
+        case .movies: EmbyClient.BrowseSort.movieOptions
+        case .mixed: EmbyClient.BrowseSort.mixedOptions
+        case nil: []
+        }
+    }
+    private var itemType: String? {
+        switch activeCatalog {
+        case .series: "Series"
+        case .movies: "Movie"
+        case .mixed: section == .movies ? "Movie" : "Movie,Series,Video"
+        case nil: nil
+        }
+    }
 
     var body: some View {
         Group {
@@ -94,8 +119,7 @@ private struct EmbyBrowserPageView: View {
                               systemImage: ascending ? "arrow.up" : "arrow.down")
                     }
                     Divider()
-                    ForEach(activeCatalog == .movies ? EmbyClient.BrowseSort.movieOptions :
-                            EmbyClient.BrowseSort.seriesOptions) { option in
+                    ForEach(sortOptions) { option in
                         Button {
                             sort = option
                             Task { await reload() }
@@ -121,7 +145,7 @@ private struct EmbyBrowserPageView: View {
 
             if facet == nil {
                 HStack(spacing: 2) {
-                    ForEach(Section.allCases, id: \.self) { option in
+                    ForEach(sections, id: \.self) { option in
                         Button {
                             guard section != option else { return }
                             section = option
@@ -145,8 +169,8 @@ private struct EmbyBrowserPageView: View {
             }
 
             ScrollView {
-                if section == .programs || facet != nil ||
-                    (section == .folders && activeCatalog == .movies) {
+                if section == .programs || section == .movies || facet != nil ||
+                    (section == .folders && activeCatalog != .series) {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 14),
                                         GridItem(.flexible(), spacing: 14),
                                         GridItem(.flexible(), spacing: 14)],
@@ -168,7 +192,7 @@ private struct EmbyBrowserPageView: View {
                                 } label: {
                                     SeriesPosterTile(source: source, entry: entry,
                                                      folder: false,
-                                                     showUnplayed: activeCatalog == .series)
+                                                     showUnplayed: entry.type == "Series")
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -270,6 +294,7 @@ private struct EmbyBrowserPageView: View {
             switch detail.collectionType?.lowercased() {
             case "tvshows": detectedCatalog = .series
             case "movies": detectedCatalog = .movies
+            case "mixed", "homevideos": detectedCatalog = .mixed
             default: break
             }
         }
@@ -323,7 +348,8 @@ private struct EmbyBrowserPageView: View {
                 page = try await EmbyClient.categories(source: source, token: token,
                                                        parentID: libraryID,
                                                        kind: section == .genres ? "Genres" : "Studios",
-                                                       itemType: activeCatalog == .movies ? "Movie" : "Series",
+                                                       itemType: activeCatalog == .movies ? "Movie" :
+                                                           activeCatalog == .series ? "Series" : "Movie,Series,Video",
                                                        startIndex: nextStartIndex)
             } else if isCatalogPage, section == .folders, facet == nil {
                 let all = try await EmbyClient.browse(source: source, token: token,
@@ -335,8 +361,7 @@ private struct EmbyBrowserPageView: View {
                 page = try await EmbyClient.browse(source: source, token: token,
                                                    parentID: parentID,
                                                    startIndex: nextStartIndex,
-                                                   itemType: activeCatalog == .movies ? "Movie" :
-                                                       activeCatalog == .series ? "Series" : nil,
+                                                   itemType: itemType,
                                                    sort: sort, ascending: ascending,
                                                    facet: facet)
             }

@@ -79,6 +79,7 @@ final class PlaybackSession: ObservableObject {
     private var lastSkippedSegmentID: String?
     private var endObserver: NSObjectProtocol?
     private var playbackErrorObserver: NSObjectProtocol?
+    private var playerItemStatusObservation: NSKeyValueObservation?
     private var stallObserver: NSObjectProtocol?
     private var lastProgressSave = Date.distantPast
     private var resumeOverride: Double?
@@ -89,6 +90,8 @@ final class PlaybackSession: ObservableObject {
     private let mediaFeatures: PlaybackMediaFeatures
     private let forceRemoteVersion: Bool
     private let transcodeBitrate: Int?
+    private var automaticTranscodeBitrate: Int?
+    private var directPlaybackFailure: String?
     private var audioStreamIndex: Int?
     private var subtitleStreamIndex: Int?
     private let plexPartID: Int?
@@ -280,9 +283,37 @@ final class PlaybackSession: ObservableObject {
                                          offset: offset, length: length,
                                          mediaSourceID: self.serverMediaSourceID)
             }
+            let mediaSourceID = serverMediaSourceID
             smbServer = server
             loadingTask = Task { [weak self] in
+                defer { self?.loadingTask = nil }
                 do {
+                    // Emby may redirect the original file to an unavailable remote
+                    // storage host. Check the first byte before handing the URL to a
+                    // player, so a failed direct stream can use Emby's HLS route.
+                    do {
+                        _ = try await Task.detached(priority: .userInitiated) {
+                            try EmbyClient.readRange(source: source, token: token, itemID: itemID,
+                                                     offset: 0, length: 1,
+                                                     mediaSourceID: mediaSourceID)
+                        }.value
+                    } catch {
+                        guard !Task.isCancelled, let self else { server.stop(); return }
+                        self.directPlaybackFailure = error.localizedDescription
+                        self.automaticTranscodeBitrate = 8_000_000
+                        server.stop()
+                        self.smbServer = nil
+                        guard let fallback = ServerTranscodeClient.emby(
+                            baseAddress: source.baseAddress, itemID: itemID, token: token,
+                            mediaSourceID: self.serverMediaSourceID, bitrate: 8_000_000,
+                            audioIndex: self.audioStreamIndex,
+                            subtitleIndex: self.subtitleStreamIndex) else {
+                            self.message = "直连失败：\(error.localizedDescription)；无法创建 Emby 转码地址。"
+                            return
+                        }
+                        self.play(url: fallback)
+                        return
+                    }
                     let url = try await server.start()
                     guard !Task.isCancelled else { server.stop(); return }
                     self?.play(url: url)
@@ -290,7 +321,6 @@ final class PlaybackSession: ObservableObject {
                     self?.message = "无法播放 Emby 视频：\(error.localizedDescription)"
                     server.stop()
                 }
-                self?.loadingTask = nil
             }
             return
         }
@@ -393,7 +423,7 @@ final class PlaybackSession: ObservableObject {
         let vlcRoute = needsVLC || hasNativeSubtitle || hasExternalAudio
         var report = PlaybackDiagnostics()
         report.engine = vlcRoute ? .vlc : .native
-        if transcodeBitrate != nil {
+        if transcodeBitrate != nil || automaticTranscodeBitrate != nil {
             report.delivery = "服务器转码 HLS"
         } else {
             switch item.location {
@@ -402,14 +432,15 @@ final class PlaybackSession: ObservableObject {
             default: report.delivery = "远程文件直连"
             }
         }
-        report.container = transcodeBitrate == nil ?
+        report.container = transcodeBitrate == nil && automaticTranscodeBitrate == nil ?
             (mediaFeatures.container ?? serverContainer ?? url.pathExtension).uppercased() : "HLS"
-        report.videoCodec = transcodeBitrate == nil ? (mediaFeatures.videoCodec ?? "待识别") : "服务器决定"
-        report.audioCodec = transcodeBitrate == nil ? (mediaFeatures.audioCodec ?? "待识别") : "服务器决定"
-        report.dynamicRange = transcodeBitrate == nil ? (mediaFeatures.dynamicRange ?? "待识别") : "由服务器处理"
+        report.videoCodec = transcodeBitrate == nil && automaticTranscodeBitrate == nil ? (mediaFeatures.videoCodec ?? "待识别") : "服务器决定"
+        report.audioCodec = transcodeBitrate == nil && automaticTranscodeBitrate == nil ? (mediaFeatures.audioCodec ?? "待识别") : "服务器决定"
+        report.dynamicRange = transcodeBitrate == nil && automaticTranscodeBitrate == nil ? (mediaFeatures.dynamicRange ?? "待识别") : "由服务器处理"
         report.resolution = mediaFeatures.resolution ?? "待识别"
         report.requestedDolbyVision = serverDolbyVision
-        report.routeReason = transcodeBitrate != nil ? "已选择服务器转码画质" :
+        report.routeReason = automaticTranscodeBitrate != nil ? "直连中断，已自动切换 Emby 转码" :
+            transcodeBitrate != nil ? "已选择服务器转码画质" :
             needsVLC ? "容器或协议需由 VLCKit 处理" :
             hasNativeSubtitle ? "外挂位图或样式字幕需由 VLCKit 处理" :
             hasExternalAudio ? "外挂音轨需由 VLCKit 处理" :
@@ -428,6 +459,15 @@ final class PlaybackSession: ObservableObject {
         let playerItem = AVPlayerItem(url: url)
         playerItem.preferredPeakBitRate = preferredPeakBitRate
         player.replaceCurrentItem(with: playerItem)
+        playerItemStatusObservation = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            let detail = item.error?.localizedDescription ?? "无法载入视频流。"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let source = self.directPlaybackFailure.map { "（直连也失败：\($0)）" } ?? ""
+                self.message = "播放失败：\(detail)\(source)"
+            }
+        }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main
         ) { [weak self] _ in
@@ -438,7 +478,11 @@ final class PlaybackSession: ObservableObject {
         ) { [weak self] notification in
             let detail = (notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?
                 .localizedDescription ?? "服务器未能提供所选画质。"
-            Task { @MainActor [weak self] in self?.message = "播放失败：\(detail)" }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let source = self.directPlaybackFailure.map { "（直连也失败：\($0)）" } ?? ""
+                self.message = "播放失败：\(detail)\(source)"
+            }
         }
         stallObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemPlaybackStalled, object: playerItem, queue: .main
@@ -570,6 +614,7 @@ final class PlaybackSession: ObservableObject {
     }
 
     private func prepareForReplacement() {
+        playerItemStatusObservation = nil
         seekPreviewTask?.cancel()
         seekPreviewTask = nil
         seekPreview = nil
@@ -867,6 +912,7 @@ final class PlaybackSession: ObservableObject {
     }
 
     func close() {
+        playerItemStatusObservation = nil
         #if canImport(VLCKit)
         vlcTimer?.invalidate()
         vlcTimer = nil
@@ -1078,7 +1124,8 @@ final class PlaybackSession: ObservableObject {
 
     private func record(_ seconds: Double) {
         if let failure = player.currentItem?.error {
-            message = "播放失败：\(failure.localizedDescription)"
+            let source = directPlaybackFailure.map { "（直连也失败：\($0)）" } ?? ""
+            message = "播放失败：\(failure.localizedDescription)\(source)"
         }
         guard seconds.isFinite, seconds >= 0 else { return }
         let duration = player.currentItem?.duration.seconds

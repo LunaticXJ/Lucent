@@ -2,7 +2,7 @@
 import SwiftUI
 import UIKit
 
-private struct SeriesArtwork: View {
+struct SeriesArtwork: View {
     let baseAddress: String?
     let token: String?
     let itemID: String?
@@ -14,6 +14,9 @@ private struct SeriesArtwork: View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+            } else if let fallback, fallback.isFileURL,
+                      let local = UIImage(contentsOfFile: fallback.path) {
+                Image(uiImage: local).resizable().scaledToFill()
             } else if let fallback {
                 AsyncImage(url: fallback) { image in image.resizable().scaledToFill() }
                     placeholder: { Rectangle().fill(.white.opacity(0.08)) }

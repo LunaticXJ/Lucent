@@ -63,6 +63,7 @@ struct MediaDetailView: View {
     @State private var selectedSubtitleStreamIndex: Int?
     @State private var selectedPlexPartID: Int?
     @State private var selectedPlexMediaIndex = 0
+    @State private var showAdvancedMovieDetails = false
     let itemID: UUID
 
     private var item: MediaItem? { library.visibleItems.first { $0.id == itemID } }
@@ -87,18 +88,40 @@ struct MediaDetailView: View {
                         legacyDetail(item)
                         #endif
                     } else {
+                        #if os(iOS)
+                        MovieDetailView(item: item, onPlay: { selected in
+                            selectedServerMediaSourceID = nil
+                            selectedPlexPartID = nil
+                            selectedPlexMediaIndex = 0
+                            selectedAudioStreamIndex = nil
+                            selectedSubtitleStreamIndex = nil
+                            forceRemoteVersion = false
+                            selectedTranscodeBitrate = nil
+                            playingItem = selected
+                        }, onMore: { showAdvancedMovieDetails = true })
+                        #else
                         legacyDetail(item)
+                        #endif
                     }
                 } else {
                     ContentUnavailableView("影片已移除", systemImage: "film")
                 }
             }
-            .navigationTitle(item?.identity?.seriesName == nil ? "影片详情" : "")
+            .navigationTitle("")
             #if os(iOS)
-            .toolbar(item?.identity?.seriesName == nil ? .visible : .hidden, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+            }
+            .sheet(isPresented: $showAdvancedMovieDetails) {
+                if let item {
+                    NavigationStack {
+                        legacyDetail(item)
+                            .navigationTitle("更多选项")
+                            .toolbar { Button("完成") { showAdvancedMovieDetails = false } }
+                    }
+                }
             }
             #if os(iOS)
             .fullScreenCover(item: $playingItem) { item in

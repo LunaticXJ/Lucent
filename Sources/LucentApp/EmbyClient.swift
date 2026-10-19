@@ -224,6 +224,24 @@ enum EmbyClient {
     }
 }
 
+enum ServerDetailClient {
+    static func item(baseAddress: String, userID: String, itemID: String,
+                     token: String) async throws -> JellyfinItem {
+        guard let base = URL(string: baseAddress) else { throw EmbyError.invalidResponse }
+        var components = URLComponents(url: base.appendingPathComponent("Users")
+            .appendingPathComponent(userID).appendingPathComponent("Items")
+            .appendingPathComponent(itemID), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview,MediaSources"),
+                                 URLQueryItem(name: "EnableUserData", value: "true")]
+        var request = URLRequest(url: components.url!)
+        request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+        request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw EmbyError.requestFailed }
+        return try JSONDecoder().decode(JellyfinItem.self, from: data)
+    }
+}
+
 enum ServerEpisodeClient {
     struct SeriesPage: Sendable {
         let series: JellyfinItem

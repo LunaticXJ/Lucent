@@ -22,9 +22,10 @@ struct JellyfinItem: Decodable, Sendable {
         let name: String?
         let container: String?
         let bitrate: Int?
+        let size: Int64?
         let mediaStreams: [Stream]?
         enum CodingKeys: String, CodingKey {
-            case id = "Id", name = "Name", container = "Container", bitrate = "Bitrate"
+            case id = "Id", name = "Name", container = "Container", bitrate = "Bitrate", size = "Size"
             case mediaStreams = "MediaStreams"
         }
     }
@@ -36,8 +37,11 @@ struct JellyfinItem: Decodable, Sendable {
         let id: String?
         let name: String
         let role: String?
+        let primaryImageTag: String?
         var stableID: String { id ?? name }
-        enum CodingKeys: String, CodingKey { case id = "Id", name = "Name", role = "Role" }
+        enum CodingKeys: String, CodingKey {
+            case id = "Id", name = "Name", role = "Role", primaryImageTag = "PrimaryImageTag"
+        }
     }
     struct UserData: Decodable, Sendable {
         let played: Bool?
@@ -64,6 +68,7 @@ struct JellyfinItem: Decodable, Sendable {
     let parentIndexNumber: Int?
     let indexNumber: Int?
     let productionYear: Int?
+    let premiereDate: String?
     let communityRating: Double?
     let runTimeTicks: Int64?
     let userData: UserData?
@@ -81,6 +86,7 @@ struct JellyfinItem: Decodable, Sendable {
         case parentIndexNumber = "ParentIndexNumber"
         case indexNumber = "IndexNumber"
         case productionYear = "ProductionYear"
+        case premiereDate = "PremiereDate"
         case communityRating = "CommunityRating"
         case runTimeTicks = "RunTimeTicks"
         case userData = "UserData"

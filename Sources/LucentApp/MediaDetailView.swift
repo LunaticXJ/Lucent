@@ -63,7 +63,7 @@ struct MediaDetailView: View {
     @State private var selectedSubtitleStreamIndex: Int?
     @State private var selectedPlexPartID: Int?
     @State private var selectedPlexMediaIndex = 0
-    @State private var showAdvancedMovieDetails = false
+    @State private var advancedDetailItem: MediaItem?
     let itemID: UUID
 
     private var item: MediaItem? { library.visibleItems.first { $0.id == itemID } }
@@ -83,7 +83,7 @@ struct MediaDetailView: View {
                             forceRemoteVersion = false
                             selectedTranscodeBitrate = nil
                             playingItem = selected
-                        })
+                        }, onMore: { selected in advancedDetailItem = selected })
                         #else
                         legacyDetail(item)
                         #endif
@@ -98,7 +98,7 @@ struct MediaDetailView: View {
                             forceRemoteVersion = false
                             selectedTranscodeBitrate = nil
                             playingItem = selected
-                        }, onMore: { showAdvancedMovieDetails = true })
+                        }, onMore: { advancedDetailItem = item })
                         #else
                         legacyDetail(item)
                         #endif
@@ -114,14 +114,15 @@ struct MediaDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
             }
-            .sheet(isPresented: $showAdvancedMovieDetails) {
-                if let item {
-                    NavigationStack {
-                        legacyDetail(item)
-                            .navigationTitle("更多选项")
-                            .toolbar { Button("完成") { showAdvancedMovieDetails = false } }
-                    }
+            .sheet(item: $advancedDetailItem) { selected in
+                NavigationStack {
+                    legacyDetail(selected)
+                        .navigationTitle("更多选项")
+                        .toolbar { Button("完成") { advancedDetailItem = nil } }
                 }
+            }
+            .task(id: advancedDetailItem?.id) {
+                if let selected = advancedDetailItem { await loadServerVersions(for: selected) }
             }
             #if os(iOS)
             .fullScreenCover(item: $playingItem) { item in
@@ -574,8 +575,9 @@ struct MediaDetailView: View {
         .environmentObject(library)
     }
 
-    private func loadServerVersions() async {
-        guard let item else { return }
+    private func loadServerVersions(for overrideItem: MediaItem? = nil) async {
+        guard let item = overrideItem ?? item else { return }
+        serverVersions = []
         do {
             switch item.location {
             case .jellyfinItem(let sourceID, let itemID):

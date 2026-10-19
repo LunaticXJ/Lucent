@@ -58,6 +58,7 @@ struct SeriesDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let item: MediaItem
     let onPlay: (MediaItem) -> Void
+    let onMore: (MediaItem) -> Void
 
     @State private var page: ServerEpisodeClient.SeriesPage?
     @State private var season = 1
@@ -99,6 +100,17 @@ struct SeriesDetailView: View {
         episodes.first { ($0.userData?.playbackPositionTicks ?? 0) > 0 && $0.userData?.played != true } ??
         episodes.first { $0.userData?.played != true } ?? episodes.first
     }
+    private var activeSource: JellyfinItem.MediaSource? { activeEpisode?.mediaSources?.first }
+    private var activeStreams: [JellyfinItem.MediaSource.Stream] { activeSource?.mediaStreams ?? [] }
+    private var activeVideo: JellyfinItem.MediaSource.Stream? {
+        activeStreams.first { $0.type == "Video" }
+    }
+    private var activeAudio: [JellyfinItem.MediaSource.Stream] {
+        activeStreams.filter { $0.type == "Audio" }
+    }
+    private var activeSubtitles: [JellyfinItem.MediaSource.Stream] {
+        activeStreams.filter { $0.type == "Subtitle" }
+    }
     private var seriesName: String { page?.series.name ?? item.identity?.seriesName ?? item.title }
     private var isSeriesEntry: Bool {
         if case .episode(_, _, let number, _) = item.identity { return number == 0 }
@@ -126,6 +138,7 @@ struct SeriesDetailView: View {
                         }
                         episodeSection
                         castSection
+                        mediaSection
                     }
                     .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 48)
                     .frame(maxWidth: 780)
@@ -161,7 +174,7 @@ struct SeriesDetailView: View {
                         Image(systemName: "star.fill").foregroundStyle(.yellow)
                         Text(rating.formatted(.number.precision(.fractionLength(1))))
                     }
-                    if let year = page?.series.productionYear { Text("·  \(String(year))") }
+                    if let date = displayDate { Text("·  " + date) }
                     if let genres = page?.series.genres, !genres.isEmpty {
                         Text("·  " + genres.prefix(3).joined(separator: "、")).lineLimit(1)
                     }
@@ -190,7 +203,10 @@ struct SeriesDetailView: View {
                     Button { library.toggleFavorite(id: item.id) } label: {
                         Image(systemName: item.isFavorite ? "heart.fill" : "heart")
                     }
-                    Button { library.markWatched(id: item.id) } label: { Image(systemName: "flag") }
+                    Button {
+                        if item.watched { library.markUnwatched(id: item.id) }
+                        else { library.markWatched(id: item.id) }
+                    } label: { Image(systemName: "flag") }
                 }
                 .font(.title3).foregroundStyle(.white.opacity(0.86)).padding(.top, 8)
             }
@@ -206,6 +222,14 @@ struct SeriesDetailView: View {
                             else { library.markWatched(id: item.id) }
                         }
                         Button(item.isFavorite ? "取消收藏" : "收藏") { library.toggleFavorite(id: item.id) }
+                        Button("更多播放选项与资料", systemImage: "slider.horizontal.3") {
+                            if let episode = activeEpisode, let selected = mediaItem(for: episode) {
+                                onMore(selected)
+                            } else if !isSeriesEntry {
+                                onMore(item)
+                            }
+                        }
+                        .disabled(isSeriesEntry && activeEpisode == nil)
                     } label: { Image(systemName: "ellipsis")
                         .frame(width: 46, height: 46).background(.black.opacity(0.46), in: Circle()) }
                 }
@@ -222,10 +246,26 @@ struct SeriesDetailView: View {
 
     private var details: String {
         let minutes = Int((activeEpisode?.runTimeTicks.map { Double($0) / 10_000_000 } ?? item.duration ?? 0) / 60)
+        let size = activeSource?.size.map { String(format: "%.2f GB", Double($0) / 1_000_000_000) }
+        let resolution: String? = {
+            guard let width = activeVideo?.width else { return nil }
+            if width >= 3840 { return "4K" }
+            if width >= 1920 { return "1080p" }
+            if width >= 1280 { return "720p" }
+            return nil
+        }()
         return ["共 \(max(seasons.count, 1)) 季", minutes > 0 ? "\(minutes) 分钟" : nil,
                 !episodes.isEmpty ? "\(episodes.count) 集" : nil,
-                activeEpisode?.mediaSources?.first?.mediaStreams?.contains(where: { ($0.width ?? 0) >= 3840 }) == true ? "4K" : nil]
+                size, resolution, activeVideo?.codec?.uppercased()]
             .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var displayDate: String? {
+        if let raw = page?.series.premiereDate, raw.count >= 10 {
+            return String(raw.prefix(10)).replacingOccurrences(of: "-", with: "/")
+        }
+        if let year = page?.series.productionYear { return String(year) }
+        return nil
     }
 
     private var episodeSection: some View {
@@ -320,9 +360,20 @@ struct SeriesDetailView: View {
                     HStack(alignment: .top, spacing: 13) {
                         ForEach(Array(people.prefix(16)), id: \.stableID) { person in
                             VStack(alignment: .leading, spacing: 5) {
-                                SeriesArtwork(baseAddress: server?.base, token: server?.token,
-                                              itemID: person.id, backdrop: false, fallback: nil)
-                                    .frame(width: 88, height: 112).clipShape(RoundedRectangle(cornerRadius: 13))
+                                Group {
+                                    if person.primaryImageTag != nil {
+                                        SeriesArtwork(baseAddress: server?.base, token: server?.token,
+                                                      itemID: person.id, backdrop: false, fallback: nil)
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 13)
+                                            .fill(.white.opacity(0.12))
+                                            .overlay(Text(String(person.name.prefix(1)))
+                                                .font(.title2.weight(.medium))
+                                                .foregroundStyle(.white.opacity(0.8)))
+                                    }
+                                }
+                                .frame(width: 88, height: 112)
+                                .clipShape(RoundedRectangle(cornerRadius: 13))
                                 Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
                                 if let role = person.role {
                                     Text(role).font(.caption2).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
@@ -333,6 +384,47 @@ struct SeriesDetailView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var mediaSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("当前分集音视频字幕")
+                .font(.title3.bold())
+                .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 9) {
+                if let episode = activeEpisode {
+                    infoRow("分集", "第 \(episode.parentIndexNumber ?? 0) 季 · 第 \(episode.indexNumber ?? 0) 集 · \(episode.name)")
+                }
+                if let video = activeVideo {
+                    infoRow("视频", [video.width.map(String.init), video.height.map { "× \($0)" },
+                                    video.codec?.uppercased(), video.videoRangeType]
+                        .compactMap { $0 }.joined(separator: " "))
+                }
+                if !activeAudio.isEmpty {
+                    infoRow("音轨", activeAudio.compactMap { $0.displayTitle ?? $0.language ?? $0.codec }
+                        .joined(separator: " · "))
+                }
+                if !activeSubtitles.isEmpty {
+                    infoRow("字幕", activeSubtitles.compactMap { $0.displayTitle ?? $0.language }
+                        .joined(separator: " · "))
+                }
+                if let container = activeSource?.container {
+                    infoRow("封装", container.uppercased())
+                }
+                if activeEpisode == nil { Text("暂无媒体流信息").foregroundStyle(.white.opacity(0.65)) }
+            }
+            .font(.subheadline)
+            .padding(17)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label).foregroundStyle(.white.opacity(0.6)).frame(width: 40, alignment: .leading)
+            Text(value).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -359,14 +451,25 @@ struct SeriesDetailView: View {
     }
 
     private func play(_ episode: JellyfinItem?) {
-        guard let episode, let server else {
+        guard let episode else {
             if !isSeriesEntry { onPlay(item) }
             return
         }
-        let selected = server.emby
+        if let selected = mediaItem(for: episode) { onPlay(selected) }
+    }
+
+    private func mediaItem(for episode: JellyfinItem) -> MediaItem? {
+        guard let server else { return nil }
+        var selected = server.emby
             ? library.openEmbyItem(sourceID: server.sourceID, remote: episode)
             : library.openJellyfinItem(sourceID: server.sourceID, remote: episode)
-        onPlay(selected)
+        if let ticks = episode.userData?.playbackPositionTicks {
+            selected.position = Double(ticks) / 10_000_000
+        }
+        if let duration = episode.runTimeTicks {
+            selected.duration = Double(duration) / 10_000_000
+        }
+        return selected
     }
 
     private func clock(_ seconds: Double) -> String {

@@ -1,6 +1,13 @@
 import Foundation
 
 enum EmbyClient {
+    static func featuredItemTypes(for view: JellyfinItem) -> String {
+        switch view.collectionType?.lowercased() {
+        case "movies": "Movie"
+        case "tvshows": "Series"
+        default: "Movie,Series,Video"
+        }
+    }
     enum BrowseSort: String, CaseIterable, Identifiable {
         case name = "SortName", added = "DateCreated", release = "PremiereDate"
         case year = "ProductionYear", imdb = "CommunityRating", critics = "CriticRating"

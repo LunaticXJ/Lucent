@@ -324,6 +324,13 @@ struct TVHomeView: View {
     private func posterSection(_ shelf: TVHomeShelf) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             heading(shelf.view.name, count: nil)
+            if shelf.items.isEmpty, let source {
+                Button("打开媒体库查看全部") {
+                    browserRoute = TVBrowserRoute(source: source, parentID: shelf.view.id,
+                                                 title: shelf.view.name)
+                }
+                .padding(.horizontal, TVPalette.horizontalInset)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 26) {
                     if let source {
@@ -395,16 +402,20 @@ struct TVHomeView: View {
             continuing = resumePage?.items ?? []
             continuingTotal = resumePage?.totalCount ?? continuing.count
             views = (try? await viewsRequest.items) ?? []
-            var loaded: [TVHomeShelf] = []
-            for view in views.prefix(3) {
-                let types = view.name.contains("电影") ? "Movie" : "Series"
-                if let page = try? await EmbyClient.featured(source: source, token: token,
-                                                             parentID: view.id, itemTypes: types),
-                   !page.items.isEmpty {
-                    loaded.append(TVHomeShelf(view: view, items: page.items))
+            let fetched = await withTaskGroup(of: (String, [JellyfinItem]).self) { group in
+                for view in views {
+                    group.addTask {
+                        let page = try? await EmbyClient.featured(
+                            source: source, token: token, parentID: view.id,
+                            itemTypes: EmbyClient.featuredItemTypes(for: view))
+                        return (view.id, page?.items ?? [])
+                    }
                 }
+                var results: [String: [JellyfinItem]] = [:]
+                for await (id, items) in group { results[id] = items }
+                return results
             }
-            shelves = loaded
+            shelves = views.map { TVHomeShelf(view: $0, items: fetched[$0.id] ?? []) }
         } catch {
             errorMessage = "读取 Emby 首页失败：\(error.localizedDescription)"
         }

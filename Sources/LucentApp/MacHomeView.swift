@@ -303,6 +303,11 @@ struct MacHomeView: View {
                                                title: shelf.view.name)
             } label: { heading(shelf.view.name, count: nil) }
                 .buttonStyle(.plain)
+            if shelf.items.isEmpty {
+                Text("打开媒体库查看全部")
+                    .font(.subheadline)
+                    .foregroundStyle(MacPalette.muted)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(shelf.items, id: \.id) { item in
@@ -373,16 +378,20 @@ struct MacHomeView: View {
             continuing = resumePage?.items ?? []
             continuingTotal = resumePage?.totalCount ?? continuing.count
             views = (try? await viewsRequest.items) ?? []
-            var loaded: [MacShelf] = []
-            for view in views.prefix(3) {
-                let types = view.name.contains("电影") ? "Movie" : "Series"
-                if let page = try? await EmbyClient.featured(source: source, token: token,
-                                                             parentID: view.id, itemTypes: types),
-                   !page.items.isEmpty {
-                    loaded.append(MacShelf(view: view, items: page.items))
+            let fetched = await withTaskGroup(of: (String, [JellyfinItem]).self) { group in
+                for view in views {
+                    group.addTask {
+                        let page = try? await EmbyClient.featured(
+                            source: source, token: token, parentID: view.id,
+                            itemTypes: EmbyClient.featuredItemTypes(for: view))
+                        return (view.id, page?.items ?? [])
+                    }
                 }
+                var results: [String: [JellyfinItem]] = [:]
+                for await (id, items) in group { results[id] = items }
+                return results
             }
-            shelves = loaded
+            shelves = views.map { MacShelf(view: $0, items: fetched[$0.id] ?? []) }
         } catch {
             errorMessage = "读取首页失败：\(error.localizedDescription)"
         }

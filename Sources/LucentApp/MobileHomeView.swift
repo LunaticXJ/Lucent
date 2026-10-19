@@ -351,6 +351,12 @@ struct MobileHomeView: View {
                 heading(shelf.view.name, count: nil)
             }
             .buttonStyle(.plain)
+            if shelf.items.isEmpty {
+                Text("打开媒体库查看全部")
+                    .font(.subheadline)
+                    .foregroundStyle(HomePalette.muted)
+                    .padding(.horizontal, HomePalette.inset)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     if let source {
@@ -440,16 +446,20 @@ struct MobileHomeView: View {
             if views.isEmpty && latest.isEmpty && continuing.isEmpty {
                 errorMessage = "服务器暂时无法提供首页内容，请在片源中浏览目录。"
             }
-            var loadedShelves: [HomeShelf] = []
-            for view in views.prefix(3) {
-                let types = view.name.contains("电影") ? "Movie" : "Series"
-                if let page = try? await EmbyClient.featured(source: source, token: token,
-                                                             parentID: view.id, itemTypes: types),
-                   !page.items.isEmpty {
-                    loadedShelves.append(HomeShelf(view: view, items: page.items))
+            let fetched = await withTaskGroup(of: (String, [JellyfinItem]).self) { group in
+                for view in views {
+                    group.addTask {
+                        let page = try? await EmbyClient.featured(
+                            source: source, token: token, parentID: view.id,
+                            itemTypes: EmbyClient.featuredItemTypes(for: view))
+                        return (view.id, page?.items ?? [])
+                    }
                 }
+                var results: [String: [JellyfinItem]] = [:]
+                for await (id, items) in group { results[id] = items }
+                return results
             }
-            shelves = loadedShelves
+            shelves = views.map { HomeShelf(view: $0, items: fetched[$0.id] ?? []) }
         } catch {
             errorMessage = "无法读取推荐内容：\(error.localizedDescription)"
         }

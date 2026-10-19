@@ -216,5 +216,11 @@ enum KeychainPasswordStore {
 
 private enum KeychainError: LocalizedError {
     case status(OSStatus)
-    var errorDescription: String? { "无法访问系统钥匙串。" }
+    var errorDescription: String? {
+        switch self {
+        case .status(let code):
+            let detail = SecCopyErrorMessageString(code, nil) as String? ?? "未知错误"
+            return "无法访问系统钥匙串（\(code)：\(detail)）。"
+        }
+    }
 }

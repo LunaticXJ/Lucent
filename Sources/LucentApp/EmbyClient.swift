@@ -1,6 +1,42 @@
 import Foundation
 
 enum EmbyClient {
+    enum BrowseSort: String, CaseIterable, Identifiable {
+        case name = "SortName", added = "DateCreated", release = "PremiereDate"
+        case year = "ProductionYear", imdb = "CommunityRating", critics = "CriticRating"
+        case played = "DatePlayed", latestEpisodeAdded = "DateLastMediaAdded"
+        case latestEpisodeReleased = "DateLastMediaPublished", playCount = "PlayCount"
+        case random = "Random", rating = "OfficialRating"
+        case boxOffice = "Revenue", resolution = "Resolution"
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .name: "名称"
+            case .added: "添加日期"
+            case .release: "发行日期"
+            case .year: "年份"
+            case .imdb: "IMDb评分"
+            case .critics: "影评人评分"
+            case .played: "播放日期"
+            case .latestEpisodeAdded: "最后一集添加日期"
+            case .latestEpisodeReleased: "最后一集发行日期"
+            case .playCount: "播放次数"
+            case .random: "随机"
+            case .rating: "分级"
+            case .boxOffice: "票房"
+            case .resolution: "分辨率"
+            }
+        }
+        static var seriesOptions: [Self] {
+            [.name, .added, .release, .year, .imdb, .critics, .played,
+             .latestEpisodeAdded, .latestEpisodeReleased, .playCount, .random, .rating]
+        }
+        static var movieOptions: [Self] {
+            [.name, .added, .release, .played, .year, .imdb, .critics,
+             .playCount, .boxOffice, .random, .rating, .resolution]
+        }
+    }
+    enum BrowseFacet { case genre(String), studio(String) }
     struct BrowsePage: Sendable {
         let items: [JellyfinItem]
         let totalCount: Int
@@ -29,7 +65,9 @@ enum EmbyClient {
     }
 
     static func browse(source: EmbySource, token: String, parentID: String?,
-                       startIndex: Int = 0, limit: Int = 100) async throws -> BrowsePage {
+                       startIndex: Int = 0, limit: Int = 100,
+                       itemType: String? = nil, sort: BrowseSort = .name,
+                       ascending: Bool = true, facet: BrowseFacet? = nil) async throws -> BrowsePage {
         let path = parentID == nil ? "Users/\(source.userID)/Views" : "Users/\(source.userID)/Items"
         var request = try makeRequest(baseAddress: source.baseAddress, path: path, token: token)
         if let parentID {
@@ -39,13 +77,42 @@ enum EmbyClient {
                 URLQueryItem(name: "Recursive", value: "false"),
                 URLQueryItem(name: "StartIndex", value: String(startIndex)),
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview,MediaSources"),
+                URLQueryItem(name: "Fields", value: "Overview,MediaSources,MediaStreams,DateCreated,Genres,Studios"),
                 URLQueryItem(name: "EnableUserData", value: "true"),
-                URLQueryItem(name: "SortBy", value: "SortName"),
-                URLQueryItem(name: "SortOrder", value: "Ascending")
+                URLQueryItem(name: "SortBy", value: sort.rawValue),
+                URLQueryItem(name: "SortOrder", value: ascending ? "Ascending" : "Descending")
             ]
+            if let itemType {
+                components.queryItems?.removeAll { $0.name == "Recursive" }
+                components.queryItems?.append(URLQueryItem(name: "Recursive", value: "true"))
+                components.queryItems?.append(URLQueryItem(name: "IncludeItemTypes", value: itemType))
+            }
+            switch facet {
+            case .genre(let id): components.queryItems?.append(URLQueryItem(name: "GenreIds", value: id))
+            case .studio(let id): components.queryItems?.append(URLQueryItem(name: "StudioIds", value: id))
+            case nil: break
+            }
             request.url = components.url
         }
+        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
+        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+    }
+
+    static func categories(source: EmbySource, token: String, parentID: String,
+                           kind: String, itemType: String = "Series",
+                           startIndex: Int = 0, limit: Int = 100) async throws -> BrowsePage {
+        var request = try makeRequest(baseAddress: source.baseAddress, path: kind, token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "UserId", value: source.userID),
+            URLQueryItem(name: "ParentId", value: parentID),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: itemType),
+            URLQueryItem(name: "SortBy", value: "SortName"),
+            URLQueryItem(name: "StartIndex", value: String(startIndex)),
+            URLQueryItem(name: "Limit", value: String(limit))
+        ]
+        request.url = components.url
         let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
         return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
     }

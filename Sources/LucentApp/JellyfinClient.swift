@@ -48,11 +48,13 @@ struct JellyfinItem: Decodable, Sendable {
         let isFavorite: Bool?
         let playbackPositionTicks: Int64?
         let lastPlayedDate: String?
+        let unplayedItemCount: Int?
         enum CodingKeys: String, CodingKey {
             case played = "Played"
             case isFavorite = "IsFavorite"
             case playbackPositionTicks = "PlaybackPositionTicks"
             case lastPlayedDate = "LastPlayedDate"
+            case unplayedItemCount = "UnplayedItemCount"
         }
     }
 
@@ -69,6 +71,7 @@ struct JellyfinItem: Decodable, Sendable {
     let indexNumber: Int?
     let productionYear: Int?
     let premiereDate: String?
+    let endDate: String?
     let communityRating: Double?
     let runTimeTicks: Int64?
     let userData: UserData?
@@ -77,6 +80,9 @@ struct JellyfinItem: Decodable, Sendable {
     let path: String?
     let container: String?
     let mediaSources: [MediaSource]?
+    let collectionType: String?
+    let criticRating: Double?
+    let officialRating: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id", name = "Name", type = "Type"
@@ -87,12 +93,15 @@ struct JellyfinItem: Decodable, Sendable {
         case indexNumber = "IndexNumber"
         case productionYear = "ProductionYear"
         case premiereDate = "PremiereDate"
+        case endDate = "EndDate"
         case communityRating = "CommunityRating"
         case runTimeTicks = "RunTimeTicks"
         case userData = "UserData"
         case overview = "Overview"
         case imageTags = "ImageTags"
         case path = "Path", container = "Container", mediaSources = "MediaSources"
+        case collectionType = "CollectionType", criticRating = "CriticRating"
+        case officialRating = "OfficialRating"
     }
 
     var identity: MediaIdentity {

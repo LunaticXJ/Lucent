@@ -5,6 +5,7 @@ import Network
 final class RangeHTTPServer: @unchecked Sendable {
     private let readRange: @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult
     private let asyncReadRange: (@Sendable (UInt64, Int) async throws -> SMBScanner.RangeResult)?
+    private let onReadFailure: (@Sendable (Error) -> Void)?
     private let fileExtension: String
     private let token = UUID().uuidString
     private let queue = DispatchQueue(label: "com.lucent.range-http")
@@ -17,16 +18,19 @@ final class RangeHTTPServer: @unchecked Sendable {
     init(source: SMBSource, password: String?, path: String) {
         fileExtension = Self.safeExtension((path as NSString).pathExtension)
         asyncReadRange = nil
+        onReadFailure = nil
         readRange = { offset, length in
             try SMBScanner.readRange(source: source, password: password, path: path,
                                      offset: offset, length: length)
         }
     }
 
-    init(fileExtension: String, readRange: @escaping @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult) {
+    init(fileExtension: String, readRange: @escaping @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult,
+         onReadFailure: (@Sendable (Error) -> Void)? = nil) {
         self.fileExtension = Self.safeExtension(fileExtension)
         self.readRange = readRange
         asyncReadRange = nil
+        self.onReadFailure = onReadFailure
     }
 
     init(fileExtension: String,
@@ -34,6 +38,7 @@ final class RangeHTTPServer: @unchecked Sendable {
         self.fileExtension = Self.safeExtension(fileExtension)
         readRange = { _, _ in throw RangeHTTPError.asyncOnly }
         self.asyncReadRange = asyncReadRange
+        onReadFailure = nil
     }
 
     func makeInputStream() -> RangeInputStream {
@@ -239,6 +244,7 @@ final class RangeHTTPServer: @unchecked Sendable {
                 if attempt < 2 { Thread.sleep(forTimeInterval: 0.25 * Double(1 << attempt)) }
             }
         }
+        onReadFailure?(lastError)
         throw lastError
     }
 

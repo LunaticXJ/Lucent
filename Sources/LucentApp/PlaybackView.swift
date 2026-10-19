@@ -85,6 +85,7 @@ final class PlaybackSession: ObservableObject {
     private var resumeOverride: Double?
     private let item: MediaItem
     private let serverMediaSourceID: String?
+    private var activeEmbyMediaSourceID: String?
     private let serverContainer: String?
     private let serverDolbyVision: Bool
     private let mediaFeatures: PlaybackMediaFeatures
@@ -278,23 +279,32 @@ final class PlaybackSession: ObservableObject {
                 message = "Emby 片源或令牌不可用。"
                 return
             }
-            let mediaSourceID = serverMediaSourceID
-            let server = RangeHTTPServer(fileExtension: serverContainer ?? item.serverFileExtension ?? "mp4",
-                readRange: { offset, length in
-                    try EmbyClient.readRange(source: source, token: token, itemID: itemID,
-                                             offset: offset, length: length,
-                                             mediaSourceID: mediaSourceID)
-                }, onReadFailure: { [weak self] error in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.smbServer != nil else { return }
-                        self.fallbackFromDirectEmby(source: source, token: token,
-                                                    itemID: itemID, failure: error)
-                    }
-                })
-            smbServer = server
             loadingTask = Task { [weak self] in
                 defer { self?.loadingTask = nil }
+                var activeServer: RangeHTTPServer?
                 do {
+                    let versions = try? await EmbyClient.versions(source: source, token: token, itemID: itemID)
+                    guard !Task.isCancelled, let self else { return }
+                    let selected = versions?.first(where: { $0.id == self.serverMediaSourceID })
+                        ?? versions?.first
+                    let mediaSourceID = self.serverMediaSourceID ?? selected?.id
+                    self.activeEmbyMediaSourceID = mediaSourceID
+                    let container = selected?.container ?? self.serverContainer
+                        ?? self.item.serverFileExtension ?? "mp4"
+                    let server = RangeHTTPServer(fileExtension: container,
+                        readRange: { offset, length in
+                            try EmbyClient.readRange(source: source, token: token, itemID: itemID,
+                                                     offset: offset, length: length,
+                                                     mediaSourceID: mediaSourceID)
+                        }, onReadFailure: { [weak self] error in
+                            Task { @MainActor [weak self] in
+                                guard let self, self.smbServer != nil else { return }
+                                self.fallbackFromDirectEmby(source: source, token: token,
+                                                            itemID: itemID, failure: error)
+                            }
+                        })
+                    activeServer = server
+                    self.smbServer = server
                     // Emby may redirect the original file to an unavailable remote
                     // storage host. Check the first byte before handing the URL to a
                     // player, so a failed direct stream can use Emby's HLS route.
@@ -305,17 +315,17 @@ final class PlaybackSession: ObservableObject {
                                                      mediaSourceID: mediaSourceID)
                         }.value
                     } catch {
-                        guard !Task.isCancelled, let self else { server.stop(); return }
+                        guard !Task.isCancelled else { server.stop(); return }
                         self.fallbackFromDirectEmby(source: source, token: token,
                                                     itemID: itemID, failure: error)
                         return
                     }
                     let url = try await server.start()
                     guard !Task.isCancelled else { server.stop(); return }
-                    self?.play(url: url)
+                    self.play(url: url)
                 } catch {
                     self?.message = "无法播放 Emby 视频：\(error.localizedDescription)"
-                    server.stop()
+                    activeServer?.stop()
                 }
             }
             return
@@ -410,7 +420,7 @@ final class PlaybackSession: ObservableObject {
         smbServer = nil
         guard let fallback = ServerTranscodeClient.emby(
             baseAddress: source.baseAddress, itemID: itemID, token: token,
-            mediaSourceID: serverMediaSourceID, bitrate: 8_000_000,
+            mediaSourceID: activeEmbyMediaSourceID ?? serverMediaSourceID, bitrate: 8_000_000,
             audioIndex: audioStreamIndex, subtitleIndex: subtitleStreamIndex) else {
             message = "直连失败：\(failure.localizedDescription)；无法创建 Emby 转码地址。"
             return

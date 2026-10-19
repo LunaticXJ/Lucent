@@ -301,6 +301,9 @@ struct MobileHomeView: View {
                                     if let first = shelves.first(where: { $0.id == view.id })?.items.first {
                                         EmbyArtwork(source: source, itemID: first.id,
                                                     backdrop: true, width: 500)
+                                            .frame(width: HomePalette.categoryWidth,
+                                                   height: HomePalette.isPad ? 145 : 120)
+                                            .clipped()
                                     } else {
                                         LinearGradient(colors: [.init(red: 0.34, green: 0.51, blue: 0.52),
                                                                 .init(red: 0.18, green: 0.27, blue: 0.36)],
@@ -309,9 +312,15 @@ struct MobileHomeView: View {
                                     LinearGradient(colors: [.clear, .black.opacity(0.72)],
                                                    startPoint: .center, endPoint: .bottom)
                                     Text(view.name)
-                                        .font(.title3.bold())
+                                        .font(.system(size: HomePalette.isPad ? 18 : 15,
+                                                      weight: .semibold))
                                         .foregroundStyle(.white)
-                                        .padding(16)
+                                        .lineLimit(2)
+                                        .minimumScaleFactor(0.85)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(width: HomePalette.categoryWidth - 24,
+                                               alignment: .leading)
+                                        .padding(12)
                                 }
                                 .frame(width: HomePalette.categoryWidth,
                                        height: HomePalette.isPad ? 145 : 120)

@@ -1,6 +1,8 @@
 import Foundation
 
 enum HTTPRangeReader {
+    private static let compatibleOrigins = CompatibleOriginCache()
+
     static func read(url: URL, headers: [String: String], offset: UInt64,
                      length: Int) throws -> SMBScanner.RangeResult {
         var request = URLRequest(url: url)
@@ -18,11 +20,49 @@ enum HTTPRangeReader {
         request.timeoutInterval = 25
         let range = "bytes=\(offset)-\(offset + UInt64(length) - 1)"
         request.setValue(range, forHTTPHeaderField: "Range")
+        // 115 signs its CDN redirects for the client's User-Agent. Keep a stable
+        // value on the Emby request and every redirected range request.
+        let userAgent = request.value(forHTTPHeaderField: "User-Agent") ?? "Python-urllib/3.9"
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        let origin = "\(url.scheme?.lowercased() ?? "")://\(url.host?.lowercased() ?? ""):\(url.port ?? 0)"
+        if compatibleOrigins.contains(origin) {
+            let compatible = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
+                                                  range: range, userAgent: userAgent)
+            do {
+                return try perform(request: request, offset: offset, length: length,
+                                   delegate: compatible, tls12: true)
+            } catch {
+                compatibleOrigins.remove(origin)
+            }
+        }
         let delegate = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
-                                            range: range)
+                                            range: range, userAgent: userAgent)
+        do {
+            return try perform(request: request, offset: offset, length: length,
+                               delegate: delegate, tls12: false)
+        } catch {
+            // Some 115 CDN edges drop TLS 1.3 handshakes. Retry only this
+            // destination using TLS 1.2, obtaining a fresh signed redirect.
+            guard delegate.redirectedTo115 else { throw error }
+            let retry = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
+                                             range: range, userAgent: userAgent)
+            let result = try perform(request: request, offset: offset, length: length,
+                                     delegate: retry, tls12: true)
+            compatibleOrigins.insert(origin)
+            return result
+        }
+    }
+
+    private static func perform(request: URLRequest, offset: UInt64, length: Int,
+                                delegate: LimitedRangeDelegate, tls12: Bool) throws -> SMBScanner.RangeResult {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
-        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: queue)
+        let configuration = URLSessionConfiguration.ephemeral
+        if tls12 {
+            configuration.tlsMaximumSupportedProtocolVersion = .TLSv12
+            configuration.connectionProxyDictionary = [:]
+        }
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
         let task = session.dataTask(with: request)
         task.resume()
         guard delegate.semaphore.wait(timeout: .now() + 30) == .success else {
@@ -56,20 +96,32 @@ enum HTTPRangeReader {
     }
 }
 
+private final class CompatibleOriginCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var origins = Set<String>()
+
+    func contains(_ origin: String) -> Bool { lock.withLock { origins.contains(origin) } }
+    func insert(_ origin: String) { lock.withLock { _ = origins.insert(origin) } }
+    func remove(_ origin: String) { lock.withLock { _ = origins.remove(origin) } }
+}
+
 private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     let semaphore = DispatchSemaphore(value: 0)
     private let maximumBytes: Int
     private let originalURL: URL
     private let range: String
+    private let userAgent: String
     private var redirectCount = 0
+    private(set) var redirectedTo115 = false
     private var bytes = Data()
     private var response: URLResponse?
     private var error: Error?
 
-    init(maximumBytes: Int, originalURL: URL, range: String) {
+    init(maximumBytes: Int, originalURL: URL, range: String, userAgent: String) {
         self.maximumBytes = maximumBytes
         self.originalURL = originalURL
         self.range = range
+        self.userAgent = userAgent
     }
 
     var result: (Data?, URLResponse?, Error?) { (bytes, response, error) }
@@ -78,8 +130,18 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
                     didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         self.response = response
-        guard let http = response as? HTTPURLResponse, http.statusCode == 206,
-              response.expectedContentLength < 0 || response.expectedContentLength <= Int64(maximumBytes) else {
+        guard let http = response as? HTTPURLResponse else {
+            error = HTTPRangeError.unsupported
+            completionHandler(.cancel)
+            return
+        }
+        guard http.statusCode == 206 else {
+            error = HTTPRangeError.httpStatus(http.statusCode)
+            completionHandler(.cancel)
+            return
+        }
+        guard response.expectedContentLength < 0 || response.expectedContentLength <= Int64(maximumBytes) else {
+            error = HTTPRangeError.unsupported
             completionHandler(.cancel)
             return
         }
@@ -95,7 +157,7 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        self.error = error
+        self.error = self.error ?? error
         semaphore.signal()
     }
 
@@ -111,6 +173,9 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
             return
         }
         redirectCount += 1
+        if destination.host?.lowercased().hasSuffix(".115cdn.net") == true {
+            redirectedTo115 = true
+        }
         let sameOrigin = destination.scheme?.caseInsensitiveCompare(originalURL.scheme ?? "") == .orderedSame &&
             destination.host?.caseInsensitiveCompare(originalURL.host ?? "") == .orderedSame &&
             destination.port == originalURL.port
@@ -128,17 +193,19 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
             }
         }
         redirected.setValue(range, forHTTPHeaderField: "Range")
+        redirected.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         completionHandler(redirected)
     }
 }
 
 private enum HTTPRangeError: LocalizedError {
-    case invalidRange, timeout, unsupported
+    case invalidRange, timeout, unsupported, httpStatus(Int)
     var errorDescription: String? {
         switch self {
         case .invalidRange: "无效的视频读取范围。"
         case .timeout: "视频服务器响应超时。"
         case .unsupported: "服务器未正确支持视频范围读取。"
+        case .httpStatus(let code): "视频源返回 HTTP \(code)。"
         }
     }
 }

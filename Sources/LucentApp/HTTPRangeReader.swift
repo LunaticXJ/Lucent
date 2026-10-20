@@ -2,6 +2,7 @@ import Foundation
 
 enum HTTPRangeReader {
     private static let compatibleOrigins = CompatibleOriginCache()
+    private static let signedRedirects = SignedRedirectCache()
 
     static func read(url: URL, headers: [String: String], offset: UInt64,
                      length: Int) throws -> SMBScanner.RangeResult {
@@ -25,12 +26,31 @@ enum HTTPRangeReader {
         let userAgent = request.value(forHTTPHeaderField: "User-Agent") ?? "Python-urllib/3.9"
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         let origin = "\(url.scheme?.lowercased() ?? "")://\(url.host?.lowercased() ?? ""):\(url.port ?? 0)"
+        let redirectKey = url.absoluteString + "|" +
+            (request.value(forHTTPHeaderField: "X-Emby-Token") ?? "")
+        if let cachedURL = signedRedirects.url(for: redirectKey) {
+            var cachedRequest = URLRequest(url: cachedURL)
+            cachedRequest.timeoutInterval = request.timeoutInterval
+            cachedRequest.setValue(range, forHTTPHeaderField: "Range")
+            cachedRequest.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            let cachedDelegate = LimitedRangeDelegate(maximumBytes: length, originalURL: cachedURL,
+                                                      range: range, userAgent: userAgent)
+            if let result = try? perform(request: cachedRequest, offset: offset, length: length,
+                                         delegate: cachedDelegate, bypassProxy: true, tls12: false) {
+                return result
+            }
+            signedRedirects.remove(redirectKey)
+        }
         if compatibleOrigins.contains(origin) {
             let compatible = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
                                                   range: range, userAgent: userAgent)
             do {
-                return try perform(request: request, offset: offset, length: length,
-                                   delegate: compatible, tls12: true)
+                let result = try perform(request: request, offset: offset, length: length,
+                                         delegate: compatible, bypassProxy: true, tls12: false)
+                if let redirect = compatible.signedRedirectURL {
+                    signedRedirects.insert(redirect, for: redirectKey)
+                }
+                return result
             } catch {
                 compatibleOrigins.remove(origin)
             }
@@ -38,30 +58,47 @@ enum HTTPRangeReader {
         let delegate = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
                                             range: range, userAgent: userAgent)
         do {
-            return try perform(request: request, offset: offset, length: length,
-                               delegate: delegate, tls12: false)
+            let result = try perform(request: request, offset: offset, length: length,
+                                     delegate: delegate, bypassProxy: false, tls12: false)
+            if let redirect = delegate.signedRedirectURL {
+                signedRedirects.insert(redirect, for: redirectKey)
+            }
+            return result
         } catch {
-            // Some 115 CDN edges drop TLS 1.3 handshakes. Retry only this
-            // destination using TLS 1.2, obtaining a fresh signed redirect.
             guard delegate.redirectedTo115 else { throw error }
             let retry = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
                                              range: range, userAgent: userAgent)
-            let result = try perform(request: request, offset: offset, length: length,
-                                     delegate: retry, tls12: true)
-            compatibleOrigins.insert(origin)
-            return result
+            do {
+                let result = try perform(request: request, offset: offset, length: length,
+                                         delegate: retry, bypassProxy: true, tls12: false)
+                compatibleOrigins.insert(origin)
+                if let redirect = retry.signedRedirectURL {
+                    signedRedirects.insert(redirect, for: redirectKey)
+                }
+                return result
+            } catch {
+                // A few CDN edges also reject TLS 1.3. Refresh the signed URL
+                // once more and retry without the system proxy over TLS 1.2.
+                let legacy = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
+                                                  range: range, userAgent: userAgent)
+                let result = try perform(request: request, offset: offset, length: length,
+                                         delegate: legacy, bypassProxy: true, tls12: true)
+                if let redirect = legacy.signedRedirectURL {
+                    signedRedirects.insert(redirect, for: redirectKey)
+                }
+                return result
+            }
         }
     }
 
     private static func perform(request: URLRequest, offset: UInt64, length: Int,
-                                delegate: LimitedRangeDelegate, tls12: Bool) throws -> SMBScanner.RangeResult {
+                                delegate: LimitedRangeDelegate, bypassProxy: Bool,
+                                tls12: Bool) throws -> SMBScanner.RangeResult {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         let configuration = URLSessionConfiguration.ephemeral
-        if tls12 {
-            configuration.tlsMaximumSupportedProtocolVersion = .TLSv12
-            configuration.connectionProxyDictionary = [:]
-        }
+        if bypassProxy { configuration.connectionProxyDictionary = [:] }
+        if tls12 { configuration.tlsMaximumSupportedProtocolVersion = .TLSv12 }
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
         let task = session.dataTask(with: request)
         task.resume()
@@ -105,6 +142,27 @@ private final class CompatibleOriginCache: @unchecked Sendable {
     func remove(_ origin: String) { lock.withLock { _ = origins.remove(origin) } }
 }
 
+private final class SignedRedirectCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: (URL, Date)] = [:]
+
+    func url(for key: String) -> URL? {
+        lock.withLock {
+            guard let entry = entries[key], entry.1 > Date() else {
+                entries.removeValue(forKey: key)
+                return nil
+            }
+            return entry.0
+        }
+    }
+
+    func insert(_ url: URL, for key: String) {
+        lock.withLock { entries[key] = (url, Date().addingTimeInterval(30)) }
+    }
+
+    func remove(_ key: String) { lock.withLock { entries.removeValue(forKey: key) } }
+}
+
 private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     let semaphore = DispatchSemaphore(value: 0)
     private let maximumBytes: Int
@@ -113,6 +171,7 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
     private let userAgent: String
     private var redirectCount = 0
     private(set) var redirectedTo115 = false
+    private(set) var signedRedirectURL: URL?
     private var bytes = Data()
     private var response: URLResponse?
     private var error: Error?
@@ -175,6 +234,7 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
         redirectCount += 1
         if destination.host?.lowercased().hasSuffix(".115cdn.net") == true {
             redirectedTo115 = true
+            signedRedirectURL = destination
         }
         let sameOrigin = destination.scheme?.caseInsensitiveCompare(originalURL.scheme ?? "") == .orderedSame &&
             destination.host?.caseInsensitiveCompare(originalURL.host ?? "") == .orderedSame &&

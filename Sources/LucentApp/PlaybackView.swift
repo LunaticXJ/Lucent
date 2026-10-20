@@ -54,6 +54,9 @@ final class PlaybackSession: ObservableObject {
     #if canImport(VLCKit)
     let vlcPlayer = VLCMediaPlayer(options: ["--keystore=memory", "--quiet"])
     private var vlcTimer: Timer?
+    // VLCKit's stream close callback can outlive media replacement. Keep the
+    // callback object alive until the playback session itself is released.
+    private var vlcInputStreams: [InputStream] = []
     private var vlcResumePosition: Double = 0
     private var nativeSubtitleURL: URL?
     private var externalAudioURL: URL?
@@ -158,10 +161,19 @@ final class PlaybackSession: ObservableObject {
                       let token = try? KeychainPasswordStore.embyToken(for: sourceID) else {
                     message = "Emby 授权不可用。"; return
                 }
-                url = ServerTranscodeClient.emby(baseAddress: source.baseAddress,
-                    itemID: itemID, token: token, mediaSourceID: serverMediaSourceID,
-                    bitrate: transcodeBitrate, audioIndex: audioStreamIndex,
-                    subtitleIndex: subtitleStreamIndex)
+                loadingTask = Task { [weak self] in
+                    defer { self?.loadingTask = nil }
+                    do {
+                        let stream = try await EmbyClient.transcodingURL(
+                            source: source, token: token, itemID: itemID,
+                            mediaSourceID: self?.serverMediaSourceID, bitrate: transcodeBitrate)
+                        guard !Task.isCancelled else { return }
+                        self?.play(url: stream)
+                    } catch {
+                        self?.message = "Emby 转码不可用：\(error.localizedDescription)"
+                    }
+                }
+                return
             case .plexItem(let sourceID, let ratingKey, _):
                 guard let source = library.plexSources.first(where: { $0.id == sourceID }),
                       let token = try? KeychainPasswordStore.plexToken(for: sourceID) else {
@@ -414,18 +426,44 @@ final class PlaybackSession: ObservableObject {
                                         itemID: String, failure: Error) {
         guard automaticTranscodeBitrate == nil, smbServer != nil else { return }
         directPlaybackFailure = failure.localizedDescription
-        automaticTranscodeBitrate = 8_000_000
+        startEmbyTranscode(source: source, token: token, itemID: itemID,
+                           bitrate: 8_000_000, originalFailure: failure)
+    }
+
+    func selectEmbyTranscodeBitrate(_ bitrate: Int) {
+        guard case .embyItem(let sourceID, let itemID) = item.location,
+              let source = library?.embySources.first(where: { $0.id == sourceID }),
+              let token = try? KeychainPasswordStore.embyToken(for: sourceID),
+              !token.isEmpty else {
+            message = "Emby 授权不可用。"
+            return
+        }
+        directPlaybackFailure = nil
+        startEmbyTranscode(source: source, token: token, itemID: itemID,
+                           bitrate: bitrate, originalFailure: nil)
+    }
+
+    private func startEmbyTranscode(source: EmbySource, token: String, itemID: String,
+                                    bitrate: Int, originalFailure: Error?) {
+        loadingTask?.cancel()
+        automaticTranscodeBitrate = bitrate
         if currentTime.isFinite, currentTime > 0 { resumeOverride = currentTime }
         smbServer?.stop()
         smbServer = nil
-        guard let fallback = ServerTranscodeClient.emby(
-            baseAddress: source.baseAddress, itemID: itemID, token: token,
-            mediaSourceID: activeEmbyMediaSourceID ?? serverMediaSourceID, bitrate: 8_000_000,
-            audioIndex: audioStreamIndex, subtitleIndex: subtitleStreamIndex) else {
-            message = "直连失败：\(failure.localizedDescription)；无法创建 Emby 转码地址。"
-            return
+        let mediaSourceID = activeEmbyMediaSourceID ?? serverMediaSourceID
+        loadingTask = Task { [weak self] in
+            defer { self?.loadingTask = nil }
+            do {
+                let fallback = try await EmbyClient.transcodingURL(
+                    source: source, token: token, itemID: itemID,
+                    mediaSourceID: mediaSourceID, bitrate: bitrate)
+                guard !Task.isCancelled else { return }
+                self?.play(url: fallback)
+            } catch {
+                let prefix = originalFailure.map { "直连失败：\($0.localizedDescription)；" } ?? ""
+                self?.message = "\(prefix)Emby 转码不可用：\(error.localizedDescription)"
+            }
         }
-        play(url: fallback)
     }
 
     private func play(url: URL) {
@@ -711,7 +749,9 @@ final class PlaybackSession: ObservableObject {
     private func playWithVLC(url: URL) {
         let media: VLCMedia?
         if let smbServer, smbServer.supportsSynchronousInputStream {
-            media = VLCMedia(stream: smbServer.makeInputStream())
+            let input = smbServer.makeInputStream()
+            vlcInputStreams.append(input)
+            media = VLCMedia(stream: input)
         } else {
             var playbackURL = url
             let directory = url.lastPathComponent.uppercased()
@@ -749,7 +789,7 @@ final class PlaybackSession: ObservableObject {
             finishCurrentPlayback()
             return
         }
-        let seconds = Double(vlcPlayer.time.intValue) / 1000
+        let seconds = (vlcPlayer.time.value?.doubleValue ?? 0) / 1000
         guard seconds.isFinite, seconds >= 0 else { return }
         currentTime = seconds
         if vlcPlayer.isPlaying {
@@ -771,10 +811,10 @@ final class PlaybackSession: ObservableObject {
             isBuffering = false
             lastVLCProgressAt = Date()
         }
-        let mediaDuration = Double(vlcPlayer.media?.length.intValue ?? 0) / 1000
+        let mediaDuration = (vlcPlayer.media?.length.value?.doubleValue ?? 0) / 1000
         if mediaDuration.isFinite, mediaDuration > 0 { duration = mediaDuration }
         if vlcResumePosition > 0, vlcPlayer.isPlaying {
-            vlcPlayer.time = VLCTime(int: Int32(min(vlcResumePosition * 1000, Double(Int32.max))))
+            vlcPlayer.time = VLCTime(number: NSNumber(value: Int64(vlcResumePosition * 1000)))
             vlcResumePosition = 0
         }
         if !nativeSubtitleAttached, vlcPlayer.isPlaying, let nativeSubtitleURL {
@@ -877,9 +917,9 @@ final class PlaybackSession: ObservableObject {
     func skip(by seconds: Double) {
         #if canImport(VLCKit)
         if useVLC {
-            let current = Double(vlcPlayer.time.intValue) / 1000
+            let current = (vlcPlayer.time.value?.doubleValue ?? 0) / 1000
             let target = max(0, current + seconds)
-            vlcPlayer.time = VLCTime(int: Int32(min(target * 1000, Double(Int32.max))))
+            seek(to: target)
             return
         }
         #endif
@@ -896,7 +936,7 @@ final class PlaybackSession: ObservableObject {
         let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
         #if canImport(VLCKit)
         if useVLC {
-            vlcPlayer.time = VLCTime(int: Int32(min(target * 1000, Double(Int32.max))))
+            vlcPlayer.time = VLCTime(number: NSNumber(value: Int64(target * 1000)))
             currentTime = target
             return
         }
@@ -2006,6 +2046,15 @@ struct PlaybackView: View {
                         ForEach([20, 10, 5, 2], id: \.self) { megabits in
                             Button("最高 \(megabits) Mbps") {
                                 session.setPreferredPeakBitRate(Double(megabits) * 1_000_000)
+                            }
+                        }
+                    }
+                }
+                if case .embyItem = item.location {
+                    Menu("Emby 转码") {
+                        ForEach([2, 5, 8, 12, 20], id: \.self) { megabits in
+                            Button("最高 \(megabits) Mbps") {
+                                session.selectEmbyTranscodeBitrate(megabits * 1_000_000)
                             }
                         }
                     }

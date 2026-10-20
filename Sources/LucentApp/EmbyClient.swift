@@ -67,6 +67,20 @@ enum EmbyClient {
             case items = "Items", totalRecordCount = "TotalRecordCount"
         }
     }
+    private struct PlaybackInfo: Decodable {
+        struct Source: Decodable {
+            let id: String?
+            let transcodingURL: String?
+            enum CodingKeys: String, CodingKey {
+                case id = "Id", transcodingURL = "TranscodingUrl"
+            }
+        }
+        let mediaSources: [Source]?
+        let playSessionID: String?
+        enum CodingKeys: String, CodingKey {
+            case mediaSources = "MediaSources", playSessionID = "PlaySessionId"
+        }
+    }
 
     static func validateUser(baseAddress: String, token: String, userID: String) async throws {
         let user = try JSONDecoder().decode(User.self, from: await fetch(makeRequest(baseAddress: baseAddress,
@@ -268,6 +282,95 @@ enum EmbyClient {
         return try JSONDecoder().decode(JellyfinItem.self, from: await fetch(request)).mediaSources ?? []
     }
 
+    static func transcodingURL(source: EmbySource, token: String, itemID: String,
+                               mediaSourceID: String?, bitrate: Int) async throws -> URL {
+        var request = try makeRequest(baseAddress: source.baseAddress,
+                                      path: "Items/\(itemID)/PlaybackInfo", token: token)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body: [String: Any] = [
+            "UserId": source.userID,
+            "EnableDirectPlay": false,
+            "EnableDirectStream": false,
+            "EnableTranscoding": true,
+            "AllowVideoStreamCopy": false,
+            "AllowAudioStreamCopy": false,
+            "MaxStreamingBitrate": bitrate
+        ]
+        if let mediaSourceID { body["MediaSourceId"] = mediaSourceID }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let info = try JSONDecoder().decode(PlaybackInfo.self, from: await fetch(request))
+        guard let selected = info.mediaSources?.first(where: { $0.id == mediaSourceID })
+            ?? info.mediaSources?.first else { throw EmbyError.invalidResponse }
+        if let value = selected.transcodingURL, !value.isEmpty,
+           let url = playbackURL(value, baseAddress: source.baseAddress, token: token) {
+            try await verifyHLSPlaylist(at: url)
+            return url
+        }
+        guard let base = URL(string: source.baseAddress) else { throw EmbyError.invalidResponse }
+        var components = URLComponents(url: base.appendingPathComponent("Videos")
+            .appendingPathComponent(itemID).appendingPathComponent("master.m3u8"),
+            resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "api_key", value: token),
+            URLQueryItem(name: "Static", value: "false"),
+            URLQueryItem(name: "MaxStreamingBitrate", value: String(bitrate)),
+            URLQueryItem(name: "VideoCodec", value: "h264"),
+            URLQueryItem(name: "AudioCodec", value: "aac"),
+            URLQueryItem(name: "AllowVideoStreamCopy", value: "false"),
+            URLQueryItem(name: "AllowAudioStreamCopy", value: "false")
+        ]
+        if let id = selected.id ?? mediaSourceID {
+            components?.queryItems?.append(URLQueryItem(name: "MediaSourceId", value: id))
+        }
+        if let id = info.playSessionID {
+            components?.queryItems?.append(URLQueryItem(name: "PlaySessionId", value: id))
+        }
+        guard let url = components?.url else { throw EmbyError.invalidResponse }
+        try await verifyHLSPlaylist(at: url)
+        return url
+    }
+
+    private static func verifyHLSPlaylist(at url: URL) async throws {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let response = response as? HTTPURLResponse else { throw EmbyError.invalidResponse }
+        guard (200..<300).contains(response.statusCode) else {
+            let redirected = response.url?.host != url.host ? "（已跳转至外部存储）" : ""
+            throw EmbyError.invalidTranscode("HTTP \(response.statusCode)\(redirected)")
+        }
+        var prefix: [UInt8] = []
+        for try await byte in bytes {
+            prefix.append(byte)
+            if prefix.count == 64 { break }
+        }
+        let marker = String(decoding: prefix, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard marker.hasPrefix("#EXTM3U") else {
+            let type = response.value(forHTTPHeaderField: "Content-Type")?.components(separatedBy: ";").first ?? "未知格式"
+            throw EmbyError.invalidTranscode("服务器返回了 \(type)，不是 HLS 清单")
+        }
+    }
+
+    private static func playbackURL(_ value: String, baseAddress: String, token: String) -> URL? {
+        guard let base = URL(string: baseAddress) else { return nil }
+        let url: URL?
+        if let absolute = URL(string: value), absolute.scheme != nil {
+            url = absolute
+        } else {
+            let path = value.hasPrefix("/") ? String(value.dropFirst()) : value
+            let prefix = base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            url = URL(string: prefix + "/" + path)
+        }
+        guard let url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        if components.queryItems?.contains(where: { $0.name.caseInsensitiveCompare("api_key") == .orderedSame }) != true {
+            components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "api_key", value: token)]
+        }
+        return components.url
+    }
+
     private static func streamURL(source: EmbySource, itemID: String,
                                   mediaSourceID: String? = nil) -> URL? {
         guard let base = URL(string: source.baseAddress) else { return nil }
@@ -405,11 +508,12 @@ enum ServerEpisodeClient {
 }
 
 private enum EmbyError: LocalizedError {
-    case requestFailed, invalidResponse
+    case requestFailed, invalidResponse, invalidTranscode(String)
     var errorDescription: String? {
         switch self {
         case .requestFailed: "Emby 请求失败，请检查地址和访问令牌。"
         case .invalidResponse: "Emby 返回了无法识别的数据。"
+        case .invalidTranscode(let detail): "Emby 转码流不可用：\(detail)。"
         }
     }
 }

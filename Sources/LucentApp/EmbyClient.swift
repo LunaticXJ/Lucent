@@ -71,8 +71,10 @@ enum EmbyClient {
         struct Source: Decodable {
             let id: String?
             let transcodingURL: String?
+            let supportsTranscoding: Bool?
             enum CodingKeys: String, CodingKey {
                 case id = "Id", transcodingURL = "TranscodingUrl"
+                case supportsTranscoding = "SupportsTranscoding"
             }
         }
         let mediaSources: [Source]?
@@ -302,10 +304,16 @@ enum EmbyClient {
         let info = try JSONDecoder().decode(PlaybackInfo.self, from: await fetch(request))
         guard let selected = info.mediaSources?.first(where: { $0.id == mediaSourceID })
             ?? info.mediaSources?.first else { throw EmbyError.invalidResponse }
+        guard selected.supportsTranscoding != false else {
+            throw EmbyError.invalidTranscode("服务器未开放该媒体的转码权限")
+        }
         if let value = selected.transcodingURL, !value.isEmpty,
            let url = playbackURL(value, baseAddress: source.baseAddress, token: token) {
             try await verifyHLSPlaylist(at: url)
             return url
+        }
+        guard selected.supportsTranscoding == true else {
+            throw EmbyError.invalidTranscode("服务器未提供转码地址")
         }
         guard let base = URL(string: source.baseAddress) else { throw EmbyError.invalidResponse }
         var components = URLComponents(url: base.appendingPathComponent("Videos")

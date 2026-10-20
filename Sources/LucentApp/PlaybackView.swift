@@ -2051,9 +2051,9 @@ struct PlaybackView: View {
                     }
                 }
                 if case .embyItem = item.location {
-                    Menu("Emby 转码") {
+                    Menu("尝试 Emby 转码") {
                         ForEach([2, 5, 8, 12, 20], id: \.self) { megabits in
-                            Button("最高 \(megabits) Mbps") {
+                            Button("请求码率上限 \(megabits) Mbps") {
                                 session.selectEmbyTranscodeBitrate(megabits * 1_000_000)
                             }
                         }

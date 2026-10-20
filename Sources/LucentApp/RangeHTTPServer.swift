@@ -188,10 +188,26 @@ final class RangeHTTPServer: @unchecked Sendable {
                 var headers = "HTTP/1.1 \(status)\r\nContent-Type: \(self.contentType)\r\nAccept-Ranges: bytes\r\nContent-Length: \(length)\r\nConnection: close\r\n"
                 if partial { headers += "Content-Range: bytes \(requested.start)-\(requested.end)/\(size)\r\n" }
                 headers += "\r\n"
-                connection.send(content: Data(headers.utf8), completion: .contentProcessed { error in
-                    if error != nil || headOnly { connection.cancel() }
-                    else { self.sendBytes(connection, offset: requested.start, end: requested.end) }
-                })
+                if headOnly {
+                    connection.send(content: Data(headers.utf8), completion: .contentProcessed { _ in connection.cancel() })
+                } else {
+                    // Do not advertise a successful response until the upstream
+                    // source has actually supplied the first block. Otherwise a
+                    // failed signed CDN redirect looks like endless buffering.
+                    let firstLength = Int(min(1_048_576, length))
+                    let first = try await self.readWithRetryAsync(offset: requested.start, length: firstLength)
+                    guard !first.data.isEmpty, UInt64(first.data.count) <= length else {
+                        self.sendError(connection, status: "502 Bad Gateway")
+                        return
+                    }
+                    var response = Data(headers.utf8)
+                    response.append(first.data)
+                    let next = requested.start + UInt64(first.data.count)
+                    connection.send(content: response, completion: .contentProcessed { error in
+                        if error != nil || next > requested.end { connection.cancel() }
+                        else { self.sendBytes(connection, offset: next, end: requested.end) }
+                    })
+                }
             } catch {
                 self.sendError(connection, status: "502 Bad Gateway")
             }

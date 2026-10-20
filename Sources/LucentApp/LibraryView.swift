@@ -123,6 +123,9 @@ struct LibraryView: View {
     @State private var editingPlex: PlexSource?
     @State private var replacementToken = ""
     @State private var replacingToken = false
+    @State private var embyReplacementUsesToken = false
+    @State private var embyReplacementUsername = ""
+    @State private var embyReplacementPassword = ""
     @State private var editedSMBUsername = ""
     @State private var editedSMBPassword = ""
     @State private var replaceSMBPassword = false
@@ -1273,8 +1276,11 @@ struct LibraryView: View {
                     Spacer()
                     Button("浏览", systemImage: "chevron.right") { browsingEmby = source }
                     Menu {
-                        Button("更新访问令牌") {
+                        Button("更新登录凭据") {
                             replacementToken = ""
+                            embyReplacementUsername = ""
+                            embyReplacementPassword = ""
+                            embyReplacementUsesToken = false
                             editingEmby = source
                         }
                         Button("移除服务器及播放记录", role: .destructive) { library.removeEmby(id: source.id) }
@@ -1587,22 +1593,41 @@ struct LibraryView: View {
         NavigationStack {
             Form {
                 Text(source.name).font(.headline)
-                SecureField("新访问令牌", text: $replacementToken)
+                Toggle("使用访问令牌", isOn: $embyReplacementUsesToken)
+                if embyReplacementUsesToken {
+                    SecureField("新访问令牌", text: $replacementToken)
+                } else {
+                    TextField("用户名", text: $embyReplacementUsername)
+                    SecureField("密码", text: $embyReplacementPassword)
+                }
+                Text("重新登录后保留此服务器的媒体与播放记录。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 if replacingToken { ProgressView() }
             }
-            .navigationTitle("更新 Emby 令牌")
+            .navigationTitle("更新 Emby 登录")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { editingEmby = nil } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存并扫描") {
+                    Button("保存") {
                         replacingToken = true
                         Task {
-                            let updated = await library.updateEmbyToken(id: source.id, token: replacementToken)
+                            let updated: Bool
+                            if embyReplacementUsesToken {
+                                updated = await library.updateEmbyToken(id: source.id, token: replacementToken)
+                            } else {
+                                updated = await library.updateEmbyLogin(id: source.id,
+                                    username: embyReplacementUsername, password: embyReplacementPassword)
+                            }
                             replacingToken = false
-                            if updated { replacementToken = ""; editingEmby = nil }
+                            if updated {
+                                replacementToken = ""
+                                embyReplacementPassword = ""
+                                editingEmby = nil
+                            }
                         }
                     }
-                    .disabled(replacingToken || replacementToken.isEmpty)
+                    .disabled(replacingToken || (embyReplacementUsesToken ?
+                        replacementToken.isEmpty : embyReplacementUsername.isEmpty))
                 }
             }
         }

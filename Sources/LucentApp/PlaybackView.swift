@@ -1,5 +1,6 @@
 import AVKit
 import Combine
+import os
 import SwiftUI
 import VLCKit
 
@@ -21,8 +22,20 @@ struct ServerPlaybackTracks {
     static let empty = ServerPlaybackTracks(audio: [], subtitles: [])
 }
 
+enum PlaybackEnginePreference: String, CaseIterable {
+    case automatic, system, mpv
+    var title: String {
+        switch self {
+        case .automatic: "自动选择"
+        case .system: "AVPlayer"
+        case .mpv: "MPV"
+        }
+    }
+}
+
 @MainActor
 final class PlaybackSession: ObservableObject {
+    private static let diagnosticLog = Logger(subsystem: "com.lucent.app", category: "PlaybackSeek")
     @Published var message: String?
     @Published var playbackRate: Float = 1
     @Published var preferredPeakBitRate: Double = 0
@@ -46,11 +59,25 @@ final class PlaybackSession: ObservableObject {
     @Published var isBuffering = false
     @Published var stallCount = 0
     @Published var useVLC = false
+    @Published var useMPV = false
+    @Published private(set) var mpvVideoReady = false
+    @Published private(set) var enginePreference = PlaybackEnginePreference(
+        rawValue: UserDefaults.standard.string(forKey: "lucent.playbackEngine") ?? "") ?? .automatic
     @Published private(set) var discTitles: [String] = []
     @Published private(set) var isOpticalMedia = false
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     let player = AVPlayer()
+    private var mpvEngineStorage: MPVPlaybackEngine?
+    var mpvEngine: MPVPlaybackEngine? {
+        if mpvEngineStorage == nil { mpvEngineStorage = MPVPlaybackEngine() }
+        return mpvEngineStorage
+    }
+    private var mpvTimer: Timer?
+    private var mpvResumePosition: Double = 0
+    private var mpvAttachedSubtitle = false
+    private var mpvAttachedAudio = false
+    private var activePlaybackURL: URL?
     #if canImport(VLCKit)
     let vlcPlayer = VLCMediaPlayer(options: ["--keystore=memory", "--quiet"])
     private var vlcTimer: Timer?
@@ -303,7 +330,7 @@ final class PlaybackSession: ObservableObject {
                     self.activeEmbyMediaSourceID = mediaSourceID
                     let container = selected?.container ?? self.serverContainer
                         ?? self.item.serverFileExtension ?? "mp4"
-                    let server = RangeHTTPServer(fileExtension: container,
+                    let server = RangeHTTPServer(fileExtension: container, maxReadAttempts: 1,
                         readRange: { offset, length in
                             try EmbyClient.readRange(source: source, token: token, itemID: itemID,
                                                      offset: offset, length: length,
@@ -479,12 +506,18 @@ final class PlaybackSession: ObservableObject {
         }
         isOpticalMedia = ["VIDEO_TS", "BDMV"].contains(url.lastPathComponent.uppercased())
             || url.pathExtension.lowercased() == "iso"
-        let needsVLC = Self.needsVLC(url)
+        let needsExtendedEngine = Self.needsExtendedEngine(url)
         let hasNativeSubtitle = nativeSubtitleURL != nil
         let hasExternalAudio = externalAudioURL != nil
-        let vlcRoute = needsVLC || hasNativeSubtitle || hasExternalAudio
+        let extendedRoute = needsExtendedEngine || hasNativeSubtitle || hasExternalAudio
+        #if canImport(VLCKit)
+        let opticalFallback = isOpticalMedia && enginePreference != .mpv
+        #else
+        let opticalFallback = false
+        #endif
+        let mpvRoute = !opticalFallback && (enginePreference == .mpv || (enginePreference == .automatic && extendedRoute))
         var report = PlaybackDiagnostics()
-        report.engine = vlcRoute ? .vlc : .native
+        report.engine = opticalFallback ? .vlc : (mpvRoute ? .mpv : .native)
         if transcodeBitrate != nil || automaticTranscodeBitrate != nil {
             report.delivery = "服务器转码 HLS"
         } else {
@@ -501,20 +534,25 @@ final class PlaybackSession: ObservableObject {
         report.dynamicRange = transcodeBitrate == nil && automaticTranscodeBitrate == nil ? (mediaFeatures.dynamicRange ?? "待识别") : "由服务器处理"
         report.resolution = mediaFeatures.resolution ?? "待识别"
         report.requestedDolbyVision = serverDolbyVision
-        report.routeReason = automaticTranscodeBitrate != nil ? "直连中断，已自动切换 Emby 转码" :
+        report.routeReason = opticalFallback ? "光盘菜单暂由 VLC 播放" :
+            automaticTranscodeBitrate != nil ? "直连中断，已自动切换 Emby 转码" :
             transcodeBitrate != nil ? "已选择服务器转码画质" :
-            needsVLC ? "容器或协议需由 VLCKit 处理" :
-            hasNativeSubtitle ? "外挂位图或样式字幕需由 VLCKit 处理" :
-            hasExternalAudio ? "外挂音轨需由 VLCKit 处理" :
+            enginePreference == .mpv ? "用户选择 MPV" :
+            needsExtendedEngine ? "容器或协议需由 MPV 处理" :
+            hasNativeSubtitle ? "外挂位图或样式字幕需由 MPV 处理" :
+            hasExternalAudio ? "外挂音轨需由 MPV 处理" :
             serverDolbyVision ? "优先使用系统播放器保留兼容的杜比视界流" :
             "容器适合系统播放器直连"
         diagnostics = report
-        if vlcRoute {
-            #if canImport(VLCKit)
+        activePlaybackURL = url
+        #if canImport(VLCKit)
+        if opticalFallback {
             playWithVLC(url: url)
-            #else
-            message = "当前版本缺少 MKV 等格式所需的播放内核。"
-            #endif
+            return
+        }
+        #endif
+        if mpvRoute {
+            playWithMPV(url: url)
             return
         }
         player.allowsExternalPlayback = true
@@ -691,6 +729,13 @@ final class PlaybackSession: ObservableObject {
         tracksTask = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
+        mpvTimer?.invalidate()
+        mpvTimer = nil
+        if useMPV { mpvEngine?.stop() }
+        useMPV = false
+        mpvVideoReady = false
+        mpvAttachedSubtitle = false
+        mpvAttachedAudio = false
         #if canImport(VLCKit)
         vlcTimer?.invalidate()
         vlcTimer = nil
@@ -704,7 +749,7 @@ final class PlaybackSession: ObservableObject {
         didFinish = false
     }
 
-    private static func needsVLC(_ url: URL) -> Bool {
+    private static func needsExtendedEngine(_ url: URL) -> Bool {
         if ["VIDEO_TS", "BDMV"].contains(url.lastPathComponent.uppercased()) { return true }
         if url.isFileURL, url.pathExtension.lowercased() == "m3u8" { return true }
         if ["ftp", "ftps", "sftp", "nfs"].contains(url.scheme?.lowercased() ?? "") { return true }
@@ -743,6 +788,60 @@ final class PlaybackSession: ObservableObject {
 
     private static func usesNativeSubtitle(_ fileExtension: String) -> Bool {
         ["ass", "ssa", "sup"].contains(fileExtension.lowercased())
+    }
+
+    private func playWithMPV(url: URL) {
+        guard let mpvEngine else {
+            message = "MPV 播放内核无法初始化。"
+            return
+        }
+        mpvResumePosition = resumeOverride ?? (item.watched ? 0 : item.position)
+        resumeOverride = nil
+        useMPV = true
+        mpvEngine.load(url)
+        mpvTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.tickMPV() }
+        }
+    }
+
+    private func tickMPV() {
+        guard useMPV, let mpvEngine else { return }
+        mpvEngine.pollEvents()
+        if let playbackError = mpvEngine.playbackError { message = playbackError }
+        if mpvEngine.ended { didFinish = true; return }
+        let mediaDuration = mpvEngine.duration
+        let videoReady = mpvEngine.hasVideoOutput && mpvEngine.time > 0.1
+        if mpvVideoReady != videoReady { mpvVideoReady = videoReady }
+        if mediaDuration.isFinite, mediaDuration > 0 { duration = mediaDuration }
+        if mpvResumePosition > 0, duration > 0, mpvEngine.isSeekable {
+            mpvEngine.seek(to: mpvResumePosition)
+            mpvResumePosition = 0
+        }
+        let seconds = mpvEngine.time
+        guard seconds.isFinite, seconds >= 0 else { return }
+        currentTime = seconds
+        isBuffering = mpvEngine.isBuffering
+        if !mpvAttachedSubtitle, let nativeSubtitleURL, duration > 0 {
+            mpvEngine.addSubtitle(nativeSubtitleURL)
+            mpvAttachedSubtitle = true
+        }
+        if !mpvAttachedAudio, let externalAudioURL, duration > 0 {
+            mpvEngine.addAudio(externalAudioURL)
+            mpvAttachedAudio = true
+        }
+        let availableAudio = mpvEngine.trackNames(type: "audio")
+        let availableSubtitles = mpvEngine.trackNames(type: "sub")
+        if audioOptions != availableAudio { audioOptions = availableAudio }
+        if subtitleOptions != availableSubtitles { subtitleOptions = availableSubtitles }
+        let subtitleTime = seconds - subtitleDelay
+        subtitleText = subtitlesEnabled
+            ? (subtitleCues.first { $0.start <= subtitleTime && subtitleTime < $0.end }?.text ?? "")
+            : ""
+        if Date().timeIntervalSince(lastProgressSave) >= 5 {
+            library?.updateProgress(id: item.id, position: seconds, duration: duration)
+            lastProgressSave = Date()
+        }
+        applyAutomaticSkip(at: seconds)
     }
 
     #if canImport(VLCKit)
@@ -813,8 +912,8 @@ final class PlaybackSession: ObservableObject {
         }
         let mediaDuration = (vlcPlayer.media?.length.value?.doubleValue ?? 0) / 1000
         if mediaDuration.isFinite, mediaDuration > 0 { duration = mediaDuration }
-        if vlcResumePosition > 0, vlcPlayer.isPlaying {
-            vlcPlayer.time = VLCTime(number: NSNumber(value: Int64(vlcResumePosition * 1000)))
+        if vlcResumePosition > 0, duration > 0, vlcPlayer.isPlaying {
+            seek(to: vlcResumePosition)
             vlcResumePosition = 0
         }
         if !nativeSubtitleAttached, vlcPlayer.isPlaying, let nativeSubtitleURL {
@@ -872,6 +971,7 @@ final class PlaybackSession: ObservableObject {
     #endif
 
     func selectChapter(_ chapter: PlaybackChapter) {
+        if useMPV { seek(to: chapter.start); return }
         #if canImport(VLCKit)
         if useVLC { vlcPlayer.currentChapterIndex = Int32(chapter.index) }
         else { player.seek(to: CMTime(seconds: chapter.start, preferredTimescale: 600)) }
@@ -897,6 +997,7 @@ final class PlaybackSession: ObservableObject {
     }
 
     func setAspectRatio(_ ratio: String?) {
+        if useMPV { mpvEngine?.setAspectRatio(ratio); return }
         #if canImport(VLCKit)
         guard useVLC else { return }
         vlcPlayer.videoAspectRatio = ratio
@@ -915,6 +1016,7 @@ final class PlaybackSession: ObservableObject {
     #endif
 
     func skip(by seconds: Double) {
+        if useMPV { seek(to: (mpvEngine?.time ?? currentTime) + seconds); return }
         #if canImport(VLCKit)
         if useVLC {
             let current = (vlcPlayer.time.value?.doubleValue ?? 0) / 1000
@@ -934,9 +1036,27 @@ final class PlaybackSession: ObservableObject {
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
         let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
+        if useMPV {
+            if mpvEngine?.ended == true, let activePlaybackURL {
+                mpvResumePosition = target
+                didFinish = false
+                mpvEngine?.load(activePlaybackURL)
+            } else {
+                mpvEngine?.seek(to: target)
+            }
+            currentTime = target
+            return
+        }
         #if canImport(VLCKit)
         if useVLC {
-            vlcPlayer.time = VLCTime(number: NSNumber(value: Int64(target * 1000)))
+            #if DEBUG
+            Self.diagnosticLog.info("seek request seconds=\(target) duration=\(self.duration) seekable=\(self.vlcPlayer.isSeekable) state=\(String(describing: self.vlcPlayer.state))")
+            #endif
+            if smbServer != nil, duration > 0 {
+                vlcPlayer.position = target / duration
+            } else {
+                vlcPlayer.time = VLCTime(number: NSNumber(value: Int64(target * 1000)))
+            }
             currentTime = target
             return
         }
@@ -946,6 +1066,7 @@ final class PlaybackSession: ObservableObject {
 
     func setPlaybackRate(_ rate: Float) {
         playbackRate = rate
+        if useMPV { mpvEngine?.setRate(rate); return }
         #if canImport(VLCKit)
         if useVLC { vlcPlayer.rate = rate }
         else { player.rate = rate }
@@ -959,7 +1080,27 @@ final class PlaybackSession: ObservableObject {
         player.currentItem?.preferredPeakBitRate = preferredPeakBitRate
     }
 
+    func selectEnginePreference(_ preference: PlaybackEnginePreference) {
+        guard enginePreference != preference else { return }
+        enginePreference = preference
+        UserDefaults.standard.set(preference.rawValue, forKey: "lucent.playbackEngine")
+        guard let activePlaybackURL else { return }
+        resumeOverride = currentTime
+        play(url: activePlaybackURL)
+    }
+
     func togglePlayback() {
+        if useMPV {
+            guard let mpvEngine else { return }
+            if mpvEngine.ended, let activePlaybackURL {
+                mpvResumePosition = currentTime < max(0, duration - 1) ? currentTime : 0
+                didFinish = false
+                mpvEngine.load(activePlaybackURL)
+                return
+            }
+            mpvEngine.setPaused(!mpvEngine.isPaused)
+            return
+        }
         #if canImport(VLCKit)
         if useVLC {
             if vlcPlayer.isPlaying { vlcPlayer.pause() }
@@ -1001,6 +1142,8 @@ final class PlaybackSession: ObservableObject {
             NotificationCenter.default.removeObserver(stallObserver)
             self.stallObserver = nil
         }
+        mpvTimer?.invalidate()
+        mpvTimer = nil
         #if canImport(VLCKit)
         let seconds = useVLC ? Double(vlcPlayer.time.intValue) / 1000 : player.currentTime().seconds
         let duration = useVLC ? Double(vlcPlayer.media?.length.intValue ?? 0) / 1000 : player.currentItem?.duration.seconds
@@ -1010,9 +1153,13 @@ final class PlaybackSession: ObservableObject {
         let duration = player.currentItem?.duration.seconds
         let hasItem = player.currentItem != nil
         #endif
-        if hasItem, seconds.isFinite, seconds >= 0 {
-            library?.finishPlayback(id: item.id, position: seconds, duration: duration)
+        let finalSeconds = useMPV ? (mpvEngine?.time ?? currentTime) : seconds
+        let finalDuration = useMPV ? self.duration : duration
+        if hasItem || useMPV, finalSeconds.isFinite, finalSeconds >= 0 {
+            library?.finishPlayback(id: item.id, position: finalSeconds, duration: finalDuration)
         }
+        mpvEngineStorage?.destroy()
+        mpvEngineStorage = nil
         #if canImport(VLCKit)
         if useVLC { vlcPlayer.stop(); vlcPlayer.drawable = nil; vlcPlayer.media = nil }
         #endif
@@ -1057,6 +1204,7 @@ final class PlaybackSession: ObservableObject {
     func toggleSidecarSubtitle() {
         subtitlesEnabled.toggle()
         if !subtitlesEnabled { subtitleText = "" }
+        if useMPV { mpvEngine?.setSubtitleTrack(subtitlesEnabled ? 0 : nil); return }
         #if canImport(VLCKit)
         if useVLC, nativeSubtitleAttached {
             if subtitlesEnabled, let nativeSubtitleTrackIndex {
@@ -1070,6 +1218,7 @@ final class PlaybackSession: ObservableObject {
 
     func adjustSubtitleDelay(by change: Double) {
         subtitleDelay = min(10, max(-10, subtitleDelay + change))
+        if useMPV { mpvEngine?.setSubtitleDelay(subtitleDelay); return }
         #if canImport(VLCKit)
         if useVLC, nativeSubtitleAttached {
             vlcPlayer.currentVideoSubTitleDelay = Int(subtitleDelay * 1_000_000)
@@ -1078,6 +1227,7 @@ final class PlaybackSession: ObservableObject {
     }
 
     func selectAudio(_ index: Int) {
+        if useMPV { mpvEngine?.setAudioTrack(index); return }
         #if canImport(VLCKit)
         if useVLC {
             vlcPlayer.selectTrack(at: index, type: .audio)
@@ -1090,6 +1240,7 @@ final class PlaybackSession: ObservableObject {
     }
 
     func selectEmbeddedSubtitle(_ index: Int?) {
+        if useMPV { mpvEngine?.setSubtitleTrack(index); return }
         #if canImport(VLCKit)
         if useVLC {
             if let index { vlcPlayer.selectTrack(at: index, type: .text) }
@@ -1424,6 +1575,10 @@ struct PlaybackView: View {
     var body: some View {
         ZStack {
             ZStack(alignment: .bottom) {
+                if session.useMPV, let engine = session.mpvEngine {
+                    MPVPlayerSurface(engine: engine)
+                    if !session.mpvVideoReady { Color.black.allowsHitTesting(false) }
+                } else {
                 #if canImport(VLCKit)
                 if session.useVLC {
                     VLCPlayerSurface(player: session.vlcPlayer)
@@ -1433,6 +1588,7 @@ struct PlaybackView: View {
                 #else
                 PlayerSurface(player: session.player)
                 #endif
+                }
                 if !session.subtitleText.isEmpty {
                     Text(session.subtitleText)
                         .font(.system(size: 22 * subtitleFontScale, weight: .semibold))
@@ -1786,10 +1942,10 @@ struct PlaybackView: View {
                         .foregroundStyle(.yellow)
                 }
                 #if os(iOS)
-                AudioRoutePicker()
+                if !session.useMPV { AudioRoutePicker()
                     .frame(width: 48, height: 48)
                     .background(.black.opacity(0.4), in: Circle())
-                    .accessibilityLabel("音频输出设备")
+                    .accessibilityLabel("音频输出设备") }
                 #endif
                 roundControl("播放信息", systemImage: "info.circle") { showDiagnostics = true }
             }
@@ -1903,6 +2059,19 @@ struct PlaybackView: View {
                         Label("字幕与音轨", systemImage: "captions.bubble")
                     }
                     Menu {
+                        Menu("播放内核") {
+                            ForEach(PlaybackEnginePreference.allCases, id: \.self) { preference in
+                                Button {
+                                    session.selectEnginePreference(preference)
+                                } label: {
+                                    if session.enginePreference == preference {
+                                        Label(preference.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(preference.title)
+                                    }
+                                }
+                            }
+                        }
                         advancedControls
                         if !session.segments.isEmpty {
                             Button(session.autoSkipSegments ? "关闭自动跳过片段" : "开启自动跳过片段") {
@@ -1928,6 +2097,7 @@ struct PlaybackView: View {
     }
 
     private var playbackIsActive: Bool {
+        if session.useMPV { return session.mpvEngine?.isPlaying == true }
         #if canImport(VLCKit)
         if session.useVLC { return session.vlcPlayer.isPlaying }
         #endif
@@ -1937,7 +2107,8 @@ struct PlaybackView: View {
     private var seekTrack: some View {
         GeometryReader { geometry in
             let width = max(1, geometry.size.width)
-            let fraction = min(1, max(0, (isSeeking ? seekPosition : session.currentTime) / max(1, session.duration)))
+            let rawFraction = (isSeeking ? seekPosition : session.currentTime) / max(1, session.duration)
+            let fraction = rawFraction.isFinite ? min(1, max(0, rawFraction)) : 0
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.24)).frame(height: 4)
                 Capsule().fill(.white).frame(width: max(0, width * fraction), height: 4)

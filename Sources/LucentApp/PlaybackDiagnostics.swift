@@ -14,6 +14,7 @@ struct PlaybackDiagnostics: Sendable {
     enum Engine: String, Sendable {
         case preparing = "准备中"
         case native = "系统播放器"
+        case mpv = "MPV"
         case vlc = "VLCKit"
     }
 
@@ -33,8 +34,8 @@ struct PlaybackDiagnostics: Sendable {
         if detectedDolbyVision && engine == .native {
             return "当前流包含杜比视界描述，正由系统播放器解码；显示设备是否进入杜比视界模式仍需在设备上确认。"
         }
-        if engine == .vlc {
-            return "当前使用 VLCKit；不能确认杜比视界动态元数据已输出。"
+        if engine == .vlc || engine == .mpv {
+            return "当前使用扩展播放内核；不能确认杜比视界动态元数据已输出。"
         }
         return "服务器标记为杜比视界，但当前流尚未检测到杜比视界描述。"
     }

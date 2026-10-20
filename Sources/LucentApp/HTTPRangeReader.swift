@@ -1,7 +1,6 @@
 import Foundation
 
 enum HTTPRangeReader {
-    private static let compatibleOrigins = CompatibleOriginCache()
     private static let signedRedirects = SignedRedirectCache()
 
     static func read(url: URL, headers: [String: String], offset: UInt64,
@@ -18,14 +17,13 @@ enum HTTPRangeReader {
             throw HTTPRangeError.invalidRange
         }
         var request = original
-        request.timeoutInterval = 25
+        request.timeoutInterval = 20
         let range = "bytes=\(offset)-\(offset + UInt64(length) - 1)"
         request.setValue(range, forHTTPHeaderField: "Range")
         // 115 signs its CDN redirects for the client's User-Agent. Keep a stable
         // value on the Emby request and every redirected range request.
         let userAgent = request.value(forHTTPHeaderField: "User-Agent") ?? "Python-urllib/3.9"
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        let origin = "\(url.scheme?.lowercased() ?? "")://\(url.host?.lowercased() ?? ""):\(url.port ?? 0)"
         let redirectKey = url.absoluteString + "|" +
             (request.value(forHTTPHeaderField: "X-Emby-Token") ?? "")
         if let cachedURL = signedRedirects.url(for: redirectKey) {
@@ -36,73 +34,54 @@ enum HTTPRangeReader {
             let cachedDelegate = LimitedRangeDelegate(maximumBytes: length, originalURL: cachedURL,
                                                       range: range, userAgent: userAgent)
             if let result = try? perform(request: cachedRequest, offset: offset, length: length,
-                                         delegate: cachedDelegate, bypassProxy: true, tls12: false) {
+                                         delegate: cachedDelegate) {
                 return result
             }
             signedRedirects.remove(redirectKey)
         }
-        if compatibleOrigins.contains(origin) {
-            let compatible = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
-                                                  range: range, userAgent: userAgent)
+        var lastError: Error = HTTPRangeError.timeout
+        // CDN edges can close a TLS connection before the first byte. Each
+        // retry asks Emby for a fresh signed redirect through the system's
+        // configured network path; bypassing that path breaks some edges.
+        for _ in 0..<3 {
+            let delegate = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
+                                                range: range, userAgent: userAgent)
             do {
                 let result = try perform(request: request, offset: offset, length: length,
-                                         delegate: compatible, bypassProxy: true, tls12: false)
-                if let redirect = compatible.signedRedirectURL {
+                                         delegate: delegate)
+                if let redirect = delegate.signedRedirectURL {
                     signedRedirects.insert(redirect, for: redirectKey)
                 }
                 return result
             } catch {
-                compatibleOrigins.remove(origin)
+                lastError = error
             }
         }
-        let delegate = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
-                                            range: range, userAgent: userAgent)
-        do {
-            let result = try perform(request: request, offset: offset, length: length,
-                                     delegate: delegate, bypassProxy: false, tls12: false)
-            if let redirect = delegate.signedRedirectURL {
-                signedRedirects.insert(redirect, for: redirectKey)
-            }
-            return result
-        } catch {
-            guard delegate.redirectedTo115 else { throw error }
-            let retry = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
-                                             range: range, userAgent: userAgent)
-            do {
-                let result = try perform(request: request, offset: offset, length: length,
-                                         delegate: retry, bypassProxy: true, tls12: false)
-                compatibleOrigins.insert(origin)
-                if let redirect = retry.signedRedirectURL {
-                    signedRedirects.insert(redirect, for: redirectKey)
-                }
-                return result
-            } catch {
-                // A few CDN edges also reject TLS 1.3. Refresh the signed URL
-                // once more and retry without the system proxy over TLS 1.2.
-                let legacy = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
-                                                  range: range, userAgent: userAgent)
-                let result = try perform(request: request, offset: offset, length: length,
-                                         delegate: legacy, bypassProxy: true, tls12: true)
-                if let redirect = legacy.signedRedirectURL {
-                    signedRedirects.insert(redirect, for: redirectKey)
-                }
-                return result
-            }
-        }
+        throw lastError
     }
 
     private static func perform(request: URLRequest, offset: UInt64, length: Int,
-                                delegate: LimitedRangeDelegate, bypassProxy: Bool,
-                                tls12: Bool) throws -> SMBScanner.RangeResult {
+                                delegate: LimitedRangeDelegate) throws -> SMBScanner.RangeResult {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         let configuration = URLSessionConfiguration.ephemeral
-        if bypassProxy { configuration.connectionProxyDictionary = [:] }
-        if tls12 { configuration.tlsMaximumSupportedProtocolVersion = .TLSv12 }
+        #if targetEnvironment(simulator)
+        // A simulator can have a different network route from its Mac host.
+        // Allow an explicit proxy for diagnosing CDN failures without baking a
+        // machine-specific address into release builds or saved sources.
+        if let value = ProcessInfo.processInfo.environment["LUCENT_HTTP_PROXY"],
+           let proxy = URLComponents(string: value),
+           proxy.scheme == "http", let host = proxy.host, let port = proxy.port {
+            configuration.connectionProxyDictionary = [
+                "HTTPEnable": 1, "HTTPProxy": host, "HTTPPort": port,
+                "HTTPSEnable": 1, "HTTPSProxy": host, "HTTPSPort": port
+            ]
+        }
+        #endif
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
         let task = session.dataTask(with: request)
         task.resume()
-        guard delegate.semaphore.wait(timeout: .now() + 30) == .success else {
+        guard delegate.semaphore.wait(timeout: .now() + 25) == .success else {
             task.cancel()
             session.invalidateAndCancel()
             throw HTTPRangeError.timeout
@@ -133,15 +112,6 @@ enum HTTPRangeReader {
     }
 }
 
-private final class CompatibleOriginCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var origins = Set<String>()
-
-    func contains(_ origin: String) -> Bool { lock.withLock { origins.contains(origin) } }
-    func insert(_ origin: String) { lock.withLock { _ = origins.insert(origin) } }
-    func remove(_ origin: String) { lock.withLock { _ = origins.remove(origin) } }
-}
-
 private final class SignedRedirectCache: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [String: (URL, Date)] = [:]
@@ -170,7 +140,6 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
     private let range: String
     private let userAgent: String
     private var redirectCount = 0
-    private(set) var redirectedTo115 = false
     private(set) var signedRedirectURL: URL?
     private var bytes = Data()
     private var response: URLResponse?
@@ -233,7 +202,6 @@ private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unc
         }
         redirectCount += 1
         if destination.host?.lowercased().hasSuffix(".115cdn.net") == true {
-            redirectedTo115 = true
             signedRedirectURL = destination
         }
         let sameOrigin = destination.scheme?.caseInsensitiveCompare(originalURL.scheme ?? "") == .orderedSame &&

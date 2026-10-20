@@ -1,11 +1,15 @@
 import Foundation
+import os
 
 /// A seekable InputStream for VLCKit's callback-based media API.
 final class RangeInputStream: InputStream, @unchecked Sendable {
+    private static let diagnosticLog = Logger(subsystem: "com.lucent.app", category: "RangeInputStream")
     private let readRange: @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult
     private let lock = NSLock()
     private var offset: UInt64 = 0
     private var totalSize: UInt64?
+    private var cachedStart: UInt64 = 0
+    private var cachedData = Data()
     private var status: Stream.Status = .notOpen
     private var failure: Error?
 
@@ -50,13 +54,33 @@ final class RangeInputStream: InputStream, @unchecked Sendable {
         guard status == .open, len > 0 else { return -1 }
         if let totalSize, offset >= totalSize { status = .atEnd; return 0 }
         do {
-            let result = try readRange(offset, min(len, 1_048_576))
-            totalSize = result.totalSize
-            guard !result.data.isEmpty else { status = .atEnd; return 0 }
-            result.data.copyBytes(to: buffer, count: result.data.count)
-            offset += UInt64(result.data.count)
-            return result.data.count
+            let cachedEnd = cachedStart + UInt64(cachedData.count)
+            if offset < cachedStart || offset >= cachedEnd {
+                #if DEBUG
+                Self.diagnosticLog.info("fetch offset=\(self.offset) requested=1048576")
+                #endif
+                let result = try readRange(offset, 1_048_576)
+                #if DEBUG
+                Self.diagnosticLog.info("fetched bytes=\(result.data.count) total=\(result.totalSize)")
+                #endif
+                totalSize = result.totalSize
+                guard !result.data.isEmpty else { status = .atEnd; return 0 }
+                cachedStart = offset
+                cachedData = result.data
+            }
+            let index = Int(offset - cachedStart)
+            let count = min(len, cachedData.count - index)
+            cachedData.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                buffer.update(from: base.assumingMemoryBound(to: UInt8.self).advanced(by: index),
+                              count: count)
+            }
+            offset += UInt64(count)
+            return count
         } catch {
+            #if DEBUG
+            Self.diagnosticLog.error("read failed at offset=\(self.offset) type=\(String(describing: type(of: error)))")
+            #endif
             failure = error
             status = .error
             return -1
@@ -81,7 +105,13 @@ final class RangeInputStream: InputStream, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         offset = number.uint64Value
-        if status == .atEnd { status = .open }
+        #if DEBUG
+        Self.diagnosticLog.info("seek offset=\(self.offset)")
+        #endif
+        if status == .atEnd || status == .error {
+            status = .open
+            failure = nil
+        }
         return true
     }
 }

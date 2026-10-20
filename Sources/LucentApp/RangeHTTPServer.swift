@@ -6,12 +6,14 @@ final class RangeHTTPServer: @unchecked Sendable {
     private let readRange: @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult
     private let asyncReadRange: (@Sendable (UInt64, Int) async throws -> SMBScanner.RangeResult)?
     private let onReadFailure: (@Sendable (Error) -> Void)?
+    private let maxReadAttempts: Int
     private let fileExtension: String
     private let token = UUID().uuidString
     private let queue = DispatchQueue(label: "com.lucent.range-http")
     private let lock = NSLock()
     private var listener: NWListener?
     private var connections: [NWConnection] = []
+    private var cachedTotalSize: UInt64?
     private var running = false
     var supportsSynchronousInputStream: Bool { asyncReadRange == nil }
 
@@ -19,18 +21,21 @@ final class RangeHTTPServer: @unchecked Sendable {
         fileExtension = Self.safeExtension((path as NSString).pathExtension)
         asyncReadRange = nil
         onReadFailure = nil
+        maxReadAttempts = 3
         readRange = { offset, length in
             try SMBScanner.readRange(source: source, password: password, path: path,
                                      offset: offset, length: length)
         }
     }
 
-    init(fileExtension: String, readRange: @escaping @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult,
+    init(fileExtension: String, maxReadAttempts: Int = 3,
+         readRange: @escaping @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult,
          onReadFailure: (@Sendable (Error) -> Void)? = nil) {
         self.fileExtension = Self.safeExtension(fileExtension)
         self.readRange = readRange
         asyncReadRange = nil
         self.onReadFailure = onReadFailure
+        self.maxReadAttempts = max(1, maxReadAttempts)
     }
 
     init(fileExtension: String,
@@ -39,6 +44,7 @@ final class RangeHTTPServer: @unchecked Sendable {
         readRange = { _, _ in throw RangeHTTPError.asyncOnly }
         self.asyncReadRange = asyncReadRange
         onReadFailure = nil
+        maxReadAttempts = 3
     }
 
     func makeInputStream() -> RangeInputStream {
@@ -161,7 +167,12 @@ final class RangeHTTPServer: @unchecked Sendable {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let size = try await self.readWithRetryAsync(offset: 0, length: 1).totalSize
+                let size: UInt64
+                if let cached = self.lock.withLock({ self.cachedTotalSize }) {
+                    size = cached
+                } else {
+                    size = try await self.readWithRetryAsync(offset: 0, length: 1).totalSize
+                }
                 guard size > 0 else {
                     self.sendError(connection, status: "416 Range Not Satisfiable")
                     return
@@ -233,15 +244,19 @@ final class RangeHTTPServer: @unchecked Sendable {
 
     private func readWithRetry(offset: UInt64, length: Int) throws -> SMBScanner.RangeResult {
         var lastError: Error = RangeHTTPError.cancelled
-        for attempt in 0..<3 {
+        for attempt in 0..<maxReadAttempts {
             lock.lock()
             let active = running
             lock.unlock()
             guard active else { throw RangeHTTPError.cancelled }
-            do { return try readRange(offset, length) }
+            do {
+                let result = try readRange(offset, length)
+                lock.withLock { cachedTotalSize = result.totalSize }
+                return result
+            }
             catch {
                 lastError = error
-                if attempt < 2 { Thread.sleep(forTimeInterval: 0.25 * Double(1 << attempt)) }
+                if attempt + 1 < maxReadAttempts { Thread.sleep(forTimeInterval: 0.25 * Double(1 << attempt)) }
             }
         }
         onReadFailure?(lastError)
@@ -254,7 +269,11 @@ final class RangeHTTPServer: @unchecked Sendable {
         for attempt in 0..<3 {
             let active = lock.withLock { running }
             guard active else { throw RangeHTTPError.cancelled }
-            do { return try await asyncReadRange(offset, length) }
+            do {
+                let result = try await asyncReadRange(offset, length)
+                lock.withLock { cachedTotalSize = result.totalSize }
+                return result
+            }
             catch {
                 lastError = error
                 if attempt < 2 { try? await Task.sleep(for: .milliseconds(Int64(250 * (1 << attempt)))) }

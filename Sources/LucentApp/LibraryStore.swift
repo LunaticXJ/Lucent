@@ -1097,6 +1097,28 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    func updateEmbyLogin(id: UUID, username: String, password: String) async -> Bool {
+        guard let source = embySources.first(where: { $0.id == id }),
+              !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "请输入 Emby 用户名。"
+            return false
+        }
+        do {
+            let login = try await EmbyClient.authenticate(baseAddress: source.baseAddress,
+                                                           username: username, password: password)
+            guard login.userID.caseInsensitiveCompare(source.userID) == .orderedSame else {
+                errorMessage = "登录的 Emby 用户与此服务器原有用户不同，无法保留原播放记录。"
+                return false
+            }
+            try KeychainPasswordStore.setEmbyToken(login.token, for: id)
+            save()
+            return true
+        } catch {
+            errorMessage = "Emby 重新登录失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
     func addPlex(address: String, token: String) async -> Bool {
         let raw = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),

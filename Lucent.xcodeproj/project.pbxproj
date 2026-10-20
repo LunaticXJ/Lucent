@@ -27,6 +27,7 @@
 		1241121A356327C0A0D5E9B1 /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432A898696BEFBEED0B6F342 /* TVHomeView.swift */; };
 		19B721A9980B89798AC6D0AC /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
 		1A27FE799E9B5504BC67E52D /* LibraryDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BAC3530C3B0902125F4432 /* LibraryDatabase.swift */; };
+		1BFEB9797FE67011366189E7 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0BE3D344DFEBAC866E6614BD /* MPVKit */; };
 		1CF5E0E569682E1491FA51F2 /* PlexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483F341CF13C9DAF8728F0DE /* PlexClient.swift */; };
 		2242731EE1403E39B713B796 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */; };
 		2282229B7E8E3D72E8A7D7E1 /* VLCNetworkBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558B6B7CC2150AEF6CBF5E23 /* VLCNetworkBrowser.swift */; };
@@ -58,6 +59,7 @@
 		415F68969D3E9EBAF8045A41 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */; };
 		4273AB7FEE9A55A3D9016C77 /* SwiftSMB in Frameworks */ = {isa = PBXBuildFile; productRef = E74BB10A9F87D54E1FB3AFB7 /* SwiftSMB */; };
 		42DAF4BAF307813E9FAC049A /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */; };
+		441450B5FEC65BFA39FBC12C /* MPVPlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96C9201963FE9DDBB4975DC /* MPVPlaybackEngine.swift */; };
 		45312F671C1D08F12AEC869B /* EmbyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEAD6FC7FA5A22B1AFB3933F /* EmbyClient.swift */; };
 		46C0D0C08FD7EDCACC6499E9 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
 		49E0AE598069EA8AC533AC56 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */; };
@@ -74,6 +76,7 @@
 		589CB6BD6FF3C661CDD8B964 /* SubtitleTextDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */; };
 		58A19C0AE760B7FD082A669B /* SubtitleParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */; };
 		58C93097236D0A172422C083 /* PlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */; };
+		58E3754D81A9F4A73A6362D0 /* MPVPlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96C9201963FE9DDBB4975DC /* MPVPlaybackEngine.swift */; };
 		5A0AC15023AD2BB3ABE19028 /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
 		5B366F094C185995C56B5AA2 /* MediaEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */; };
 		5CF7B611415823EE852BF4D4 /* HTTPDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */; };
@@ -84,6 +87,7 @@
 		619E3E1312F00684E798E499 /* MediaEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8265C48BBA163FC938AE7CA5 /* MediaEditView.swift */; };
 		68AF766FCFCC2AB02664F661 /* RangeHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172B9DB1756D414D8D930996 /* RangeHTTPServer.swift */; };
 		6C228A00CA059C7074FA4634 /* OpenSubtitlesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */; };
+		6C39A3E83D1952A4ACDC313C /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = D9B4334458B372E8F91A6443 /* MPVKit */; };
 		701C9105ECB87825CBBAA981 /* CloudTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */; };
 		732CB6E2714E7E7D743ECBAD /* MediaNameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20E878991AC175C0352DE5E /* MediaNameParser.swift */; };
 		743E8549341012A9D8401BC0 /* SeriesDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AB85696E2E34BC7503E9981 /* SeriesDetailView.swift */; };
@@ -122,6 +126,7 @@
 		ACC39CA5608A1A0F6CAB6F5B /* SubtitleRangeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */; };
 		ACDC7CADA72EEC2BE18850C3 /* CloudDriveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A958243E594A7D86762A57B /* CloudDriveClient.swift */; };
 		AD8A0E186D99D944314E5378 /* MovieDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08669968F397CA13B8995B96 /* MovieDetailView.swift */; };
+		ADA422B3EAE94773AA81A1E8 /* MPVPlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96C9201963FE9DDBB4975DC /* MPVPlaybackEngine.swift */; };
 		ADC8CB3C0786207AA729BA0F /* MediaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54B97982618CB94DF83B691 /* MediaDetailView.swift */; };
 		AEA61C4350467EFBBE9FF9A0 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A783901481863088FDE35E39 /* libsqlite3.tbd */; };
 		B1C23407343E14E663A2F15D /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
@@ -154,6 +159,7 @@
 		D5EC1AAD2F0B31B21899F6E2 /* CastDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CE42EA85280DF860F3293E /* CastDiscovery.swift */; };
 		D68867ACCB595EABD81B8403 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
 		D9E19A01A9C08A9B427B73C0 /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
+		DA7F5CFEEE1460B11EDCA47F /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = 52BC9FF6CC90A1750ACCA0E1 /* MPVKit */; };
 		DBB0F7F469C6CEE8091A910D /* AudioRoutePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C78BFFFA6C56CC7CAAFEBC72 /* AudioRoutePicker.swift */; };
 		DCBC6C96F6D9FB9B730FD55B /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432A898696BEFBEED0B6F342 /* TVHomeView.swift */; };
 		DF83E1DE1190149541050FF9 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A989709453124F9315EDAAF6 /* MacHomeView.swift */; };
@@ -240,6 +246,7 @@
 		D3916E7378624863840BC778 /* CloudPlaybackSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudPlaybackSync.swift; sourceTree = "<group>"; };
 		D5A29C26F927979B782E48F1 /* SubtitleRangeLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleRangeLoader.swift; sourceTree = "<group>"; };
 		DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataMatchView.swift; sourceTree = "<group>"; };
+		E96C9201963FE9DDBB4975DC /* MPVPlaybackEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MPVPlaybackEngine.swift; sourceTree = "<group>"; };
 		EA3B2BAD9EB43D8CBA1D0437 /* VLCPlayerSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayerSurface.swift; sourceTree = "<group>"; };
 		F06E4CE71A807F4420ED5937 /* TraktClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TraktClient.swift; sourceTree = "<group>"; };
 		F6A7C249ED386F717C0080C7 /* SubtitleParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleParser.swift; sourceTree = "<group>"; };
@@ -253,6 +260,7 @@
 			files = (
 				4273AB7FEE9A55A3D9016C77 /* SwiftSMB in Frameworks */,
 				D3B4164B0F618D23557FF499 /* VLCKit in Frameworks */,
+				6C39A3E83D1952A4ACDC313C /* MPVKit in Frameworks */,
 				AEA61C4350467EFBBE9FF9A0 /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -263,6 +271,7 @@
 			files = (
 				37A4558B724E7333B4DC8D99 /* SwiftSMB in Frameworks */,
 				A5E07A428B7911146F9F1BA9 /* VLCKit in Frameworks */,
+				1BFEB9797FE67011366189E7 /* MPVKit in Frameworks */,
 				19B721A9980B89798AC6D0AC /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -273,6 +282,7 @@
 			files = (
 				E0B5CF70BE15364E72CFBCF8 /* SwiftSMB in Frameworks */,
 				08221D60E5B50A2CFCAC975E /* VLCKit in Frameworks */,
+				DA7F5CFEEE1460B11EDCA47F /* MPVKit in Frameworks */,
 				2E65801DCD9E7C1395BAFC7B /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -340,6 +350,7 @@
 				DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */,
 				95723DE6607ECC25204574AD /* MobileHomeView.swift */,
 				08669968F397CA13B8995B96 /* MovieDetailView.swift */,
+				E96C9201963FE9DDBB4975DC /* MPVPlaybackEngine.swift */,
 				9B19908BB9CAFA68F560B7C3 /* OpenSubtitlesClient.swift */,
 				B095797ACA05162BDC8D6389 /* PlaybackDiagnostics.swift */,
 				6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */,
@@ -397,6 +408,7 @@
 			packageProductDependencies = (
 				E74BB10A9F87D54E1FB3AFB7 /* SwiftSMB */,
 				7BA385AA5448300E666F352F /* VLCKit */,
+				D9B4334458B372E8F91A6443 /* MPVKit */,
 			);
 			productName = "Lucent-iOS";
 			productReference = 573A54B8D4EF46144B6CCD59 /* Lucent-iOS.app */;
@@ -417,6 +429,7 @@
 			packageProductDependencies = (
 				A45761EA0E1D4C2FF69362DB /* SwiftSMB */,
 				FE10C3EC9A6D1D937865F287 /* VLCKit */,
+				52BC9FF6CC90A1750ACCA0E1 /* MPVKit */,
 			);
 			productName = "Lucent-tvOS";
 			productReference = C33ECAD42376B61A16E2982A /* Lucent-tvOS.app */;
@@ -437,6 +450,7 @@
 			packageProductDependencies = (
 				A2A0FCEF45196BF6968E789B /* SwiftSMB */,
 				1DC72D141EC946D41C51A8C0 /* VLCKit */,
+				0BE3D344DFEBAC866E6614BD /* MPVKit */,
 			);
 			productName = "Lucent-macOS";
 			productReference = 609E3AE700D13572742EEAF6 /* Lucent-macOS.app */;
@@ -463,6 +477,7 @@
 			mainGroup = 2A9C84545C2F35CEA53AD1CA;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				F45592D5341DD018B93E4531 /* XCRemoteSwiftPackageReference "MPVKit" */,
 				DE858FD7E9BC1DEAF947320E /* XCRemoteSwiftPackageReference "SwiftSMB" */,
 				A0CB1FC4F0D519840863CBC9 /* XCLocalSwiftPackageReference "Vendor/VLCKit" */,
 			);
@@ -504,6 +519,7 @@
 				76EC073F50D5ADFA72D6C025 /* LibraryStore.swift in Sources */,
 				D3B4630DE06038D6FD15DCE5 /* LibraryView.swift in Sources */,
 				276F4FB00563E76B1972DC06 /* LucentApp.swift in Sources */,
+				ADA422B3EAE94773AA81A1E8 /* MPVPlaybackEngine.swift in Sources */,
 				108542BD655E52D8A3BE60D6 /* MacHomeView.swift in Sources */,
 				ADC8CB3C0786207AA729BA0F /* MediaDetailView.swift in Sources */,
 				5B366F094C185995C56B5AA2 /* MediaEditView.swift in Sources */,
@@ -566,6 +582,7 @@
 				42DAF4BAF307813E9FAC049A /* LibraryStore.swift in Sources */,
 				A02F5485201B86BA9C14EF22 /* LibraryView.swift in Sources */,
 				F66E60E0673B1C0DD7EB0406 /* LucentApp.swift in Sources */,
+				441450B5FEC65BFA39FBC12C /* MPVPlaybackEngine.swift in Sources */,
 				DF83E1DE1190149541050FF9 /* MacHomeView.swift in Sources */,
 				56A55486EC2A517EAE7CA25B /* MediaDetailView.swift in Sources */,
 				619E3E1312F00684E798E499 /* MediaEditView.swift in Sources */,
@@ -628,6 +645,7 @@
 				BF6AF5E36888B8CB380BA194 /* LibraryStore.swift in Sources */,
 				E9D3C3F8D76328E14DF6E8A3 /* LibraryView.swift in Sources */,
 				F3EB64551EF413726B2AF522 /* LucentApp.swift in Sources */,
+				58E3754D81A9F4A73A6362D0 /* MPVPlaybackEngine.swift in Sources */,
 				9DB4BD6B2AB2DB9B83C248F6 /* MacHomeView.swift in Sources */,
 				D58F7DBBB1088587F04DF25C /* MediaDetailView.swift in Sources */,
 				F8FECDAC62B4D300D0D3DA68 /* MediaEditView.swift in Sources */,
@@ -952,12 +970,30 @@
 				version = 3.3.1;
 			};
 		};
+		F45592D5341DD018B93E4531 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
+			requirement = {
+				kind = revision;
+				revision = d9194243bdc68b87d8989376ab52aee7da6c8e0b;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0BE3D344DFEBAC866E6614BD /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F45592D5341DD018B93E4531 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
+		};
 		1DC72D141EC946D41C51A8C0 /* VLCKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VLCKit;
+		};
+		52BC9FF6CC90A1750ACCA0E1 /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F45592D5341DD018B93E4531 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
 		};
 		7BA385AA5448300E666F352F /* VLCKit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -972,6 +1008,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DE858FD7E9BC1DEAF947320E /* XCRemoteSwiftPackageReference "SwiftSMB" */;
 			productName = SwiftSMB;
+		};
+		D9B4334458B372E8F91A6443 /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F45592D5341DD018B93E4531 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
 		};
 		E74BB10A9F87D54E1FB3AFB7 /* SwiftSMB */ = {
 			isa = XCSwiftPackageProductDependency;

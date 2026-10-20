@@ -29,6 +29,8 @@ LucentApp（平台 UI）
 
 网络视频通过仅监听本机回环地址的范围 HTTP 服务转给 AVPlayer，认证仍由片源连接器完成。当前 SMB 分段读取每次建立连接；需实测高码率、随机拖动、断网重试、内存与系统限制。若 AVPlayer 无法可靠消费常见格式，再决定第二播放内核。
 
+2026-10 更新：播放设置已提供 AVPlayer、MPV 和自动选择。自动选择对系统容器使用 AVPlayer，对 MKV 等扩展容器使用锁定版本的 MPVKit；iOS/tvOS 采用其 MoltenVK/Metal 输出，macOS 暂用 libmpv OpenGL 输出。MPV 必须等渲染视图就绪后再加载文件，否则视频轨会因缺少渲染上下文被禁用。完整光盘结构和菜单暂保留 VLCKit 路径，尚未达到完全移除 VLC 的验收条件。iPhone 模拟器已验证本机 H.264 MKV 的画面与 HTTP Range 拖动；Emby 115 CDN 长时间播放、tvOS/macOS 实际画面和真机 HDR 仍待验证。
+
 ## 阶段 A 必测矩阵
 
 在各平台至少选一台真实设备，使用已获授权的样本文件，记录「可打开、首帧时间、拖动、字幕、音轨、HDR/色彩、功耗/发热、崩溃」。样本至少包含：MP4/H.264/AAC、MP4/HEVC、MKV/H.264、MKV/HEVC、内嵌 SRT/ASS、外挂 SRT、双音轨，以及高码率 4K 文件。网络条件包括本地、稳定 SMB、断线重连和慢速 Wi-Fi。兼容性以测试报告为准，不根据扩展名承诺。

@@ -123,6 +123,9 @@ final class PlaybackSession: ObservableObject {
     private let transcodeBitrate: Int?
     private var automaticTranscodeBitrate: Int?
     private var directPlaybackFailure: String?
+    private var directReconnectAttempts = 0
+    private var lastMPVAdvanceAt = Date()
+    private var lastMPVPosition: Double = 0
     private var audioStreamIndex: Int?
     private var subtitleStreamIndex: Int?
     private let plexPartID: Int?
@@ -328,9 +331,13 @@ final class PlaybackSession: ObservableObject {
                         ?? versions?.first
                     let mediaSourceID = self.serverMediaSourceID ?? selected?.id
                     self.activeEmbyMediaSourceID = mediaSourceID
-                    let container = selected?.container ?? self.serverContainer
+                    let declaredContainer = selected?.container ?? self.serverContainer
                         ?? self.item.serverFileExtension ?? "mp4"
-                    let server = RangeHTTPServer(fileExtension: container, maxReadAttempts: 1,
+                    // A STRM entry names a link, not the linked video's container.
+                    // Expose it as an opaque stream so MPV probes the actual bytes.
+                    let container = declaredContainer.lowercased() == "strm" ? "bin" : declaredContainer
+                    let server = RangeHTTPServer(fileExtension: container, maxReadAttempts: 2,
+                        blockLength: 524_288,
                         readRange: { offset, length in
                             try EmbyClient.readRange(source: source, token: token, itemID: itemID,
                                                      offset: offset, length: length,
@@ -338,27 +345,16 @@ final class PlaybackSession: ObservableObject {
                         }, onReadFailure: { [weak self] error in
                             Task { @MainActor [weak self] in
                                 guard let self, self.smbServer != nil else { return }
-                                self.fallbackFromDirectEmby(source: source, token: token,
-                                                            itemID: itemID, failure: error)
+                                if self.currentTime > 0.5 {
+                                    self.directPlaybackFailure = error.localizedDescription
+                                } else {
+                                    self.fallbackFromDirectEmby(source: source, token: token,
+                                                                itemID: itemID, failure: error)
+                                }
                             }
                         })
                     activeServer = server
                     self.smbServer = server
-                    // Emby may redirect the original file to an unavailable remote
-                    // storage host. Check the first byte before handing the URL to a
-                    // player, so a failed direct stream can use Emby's HLS route.
-                    do {
-                        _ = try await Task.detached(priority: .userInitiated) {
-                            try EmbyClient.readRange(source: source, token: token, itemID: itemID,
-                                                     offset: 0, length: 1,
-                                                     mediaSourceID: mediaSourceID)
-                        }.value
-                    } catch {
-                        guard !Task.isCancelled else { server.stop(); return }
-                        self.fallbackFromDirectEmby(source: source, token: token,
-                                                    itemID: itemID, failure: error)
-                        return
-                    }
                     let url = try await server.start()
                     guard !Task.isCancelled else { server.stop(); return }
                     self.play(url: url)
@@ -753,7 +749,7 @@ final class PlaybackSession: ObservableObject {
         if ["VIDEO_TS", "BDMV"].contains(url.lastPathComponent.uppercased()) { return true }
         if url.isFileURL, url.pathExtension.lowercased() == "m3u8" { return true }
         if ["ftp", "ftps", "sftp", "nfs"].contains(url.scheme?.lowercased() ?? "") { return true }
-        return ["mkv", "avi", "wmv", "flv", "webm", "ts", "m2ts", "mts", "vob", "mpg", "mpeg", "ogv", "iso"]
+        return ["bin", "mkv", "avi", "wmv", "flv", "webm", "ts", "m2ts", "mts", "vob", "mpg", "mpeg", "ogv", "iso"]
             .contains(url.pathExtension.lowercased())
     }
 
@@ -798,6 +794,8 @@ final class PlaybackSession: ObservableObject {
         mpvResumePosition = resumeOverride ?? (item.watched ? 0 : item.position)
         resumeOverride = nil
         useMPV = true
+        lastMPVAdvanceAt = Date()
+        lastMPVPosition = 0
         mpvEngine.load(url)
         mpvTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.tickMPV() }
@@ -807,7 +805,10 @@ final class PlaybackSession: ObservableObject {
     private func tickMPV() {
         guard useMPV, let mpvEngine else { return }
         mpvEngine.pollEvents()
-        if let playbackError = mpvEngine.playbackError { message = playbackError }
+        if let playbackError = mpvEngine.playbackError {
+            if retryDirectMPV() { return }
+            message = playbackError
+        }
         if mpvEngine.ended { didFinish = true; return }
         let mediaDuration = mpvEngine.duration
         let videoReady = mpvEngine.hasVideoOutput && mpvEngine.time > 0.1
@@ -821,6 +822,14 @@ final class PlaybackSession: ObservableObject {
         guard seconds.isFinite, seconds >= 0 else { return }
         currentTime = seconds
         isBuffering = mpvEngine.isBuffering
+        if abs(seconds - lastMPVPosition) > 0.1 {
+            lastMPVPosition = seconds
+            lastMPVAdvanceAt = Date()
+        } else if isBuffering, directPlaybackFailure != nil,
+                  Date().timeIntervalSince(lastMPVAdvanceAt) > 8 {
+            if retryDirectMPV() { return }
+            message = "外部视频连接持续中断：\(directPlaybackFailure ?? "未知错误")"
+        }
         if !mpvAttachedSubtitle, let nativeSubtitleURL, duration > 0 {
             mpvEngine.addSubtitle(nativeSubtitleURL)
             mpvAttachedSubtitle = true
@@ -842,6 +851,17 @@ final class PlaybackSession: ObservableObject {
             lastProgressSave = Date()
         }
         applyAutomaticSkip(at: seconds)
+    }
+
+    private func retryDirectMPV() -> Bool {
+        guard directPlaybackFailure != nil, directReconnectAttempts < 2,
+              smbServer != nil, let activePlaybackURL, let mpvEngine else { return false }
+        directReconnectAttempts += 1
+        mpvResumePosition = currentTime
+        mpvVideoReady = false
+        lastMPVAdvanceAt = Date()
+        mpvEngine.load(activePlaybackURL)
+        return true
     }
 
     #if canImport(VLCKit)

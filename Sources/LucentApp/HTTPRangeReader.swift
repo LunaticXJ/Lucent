@@ -43,7 +43,7 @@ enum HTTPRangeReader {
         // CDN edges can close a TLS connection before the first byte. Each
         // retry asks Emby for a fresh signed redirect through the system's
         // configured network path; bypassing that path breaks some edges.
-        for _ in 0..<3 {
+        for attempt in 0..<3 {
             let delegate = LimitedRangeDelegate(maximumBytes: length, originalURL: url,
                                                 range: range, userAgent: userAgent)
             do {
@@ -55,6 +55,9 @@ enum HTTPRangeReader {
                 return result
             } catch {
                 lastError = error
+                // A signed CDN edge can briefly close TLS while another edge
+                // serves the same byte range. Space out fresh Emby redirects.
+                if attempt < 2 { Thread.sleep(forTimeInterval: 0.4 * Double(1 << attempt)) }
             }
         }
         throw lastError
@@ -130,7 +133,7 @@ private final class SignedRedirectCache: @unchecked Sendable {
         lock.withLock { entries[key] = (url, Date().addingTimeInterval(30)) }
     }
 
-    func remove(_ key: String) { lock.withLock { entries.removeValue(forKey: key) } }
+    func remove(_ key: String) { _ = lock.withLock { entries.removeValue(forKey: key) } }
 }
 
 private final class LimitedRangeDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {

@@ -7,6 +7,7 @@ final class RangeHTTPServer: @unchecked Sendable {
     private let asyncReadRange: (@Sendable (UInt64, Int) async throws -> SMBScanner.RangeResult)?
     private let onReadFailure: (@Sendable (Error) -> Void)?
     private let maxReadAttempts: Int
+    private let blockLength: Int
     private let fileExtension: String
     private let token = UUID().uuidString
     private let queue = DispatchQueue(label: "com.lucent.range-http")
@@ -14,6 +15,7 @@ final class RangeHTTPServer: @unchecked Sendable {
     private var listener: NWListener?
     private var connections: [NWConnection] = []
     private var cachedTotalSize: UInt64?
+    private var loggedBlocks = 0
     private var running = false
     var supportsSynchronousInputStream: Bool { asyncReadRange == nil }
 
@@ -22,13 +24,14 @@ final class RangeHTTPServer: @unchecked Sendable {
         asyncReadRange = nil
         onReadFailure = nil
         maxReadAttempts = 3
+        blockLength = 1_048_576
         readRange = { offset, length in
             try SMBScanner.readRange(source: source, password: password, path: path,
                                      offset: offset, length: length)
         }
     }
 
-    init(fileExtension: String, maxReadAttempts: Int = 3,
+    init(fileExtension: String, maxReadAttempts: Int = 3, blockLength: Int = 1_048_576,
          readRange: @escaping @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult,
          onReadFailure: (@Sendable (Error) -> Void)? = nil) {
         self.fileExtension = Self.safeExtension(fileExtension)
@@ -36,6 +39,7 @@ final class RangeHTTPServer: @unchecked Sendable {
         asyncReadRange = nil
         self.onReadFailure = onReadFailure
         self.maxReadAttempts = max(1, maxReadAttempts)
+        self.blockLength = min(1_048_576, max(65_536, blockLength))
     }
 
     init(fileExtension: String,
@@ -45,6 +49,7 @@ final class RangeHTTPServer: @unchecked Sendable {
         self.asyncReadRange = asyncReadRange
         onReadFailure = nil
         maxReadAttempts = 3
+        blockLength = 1_048_576
     }
 
     func makeInputStream() -> RangeInputStream {
@@ -194,12 +199,13 @@ final class RangeHTTPServer: @unchecked Sendable {
                     // Do not advertise a successful response until the upstream
                     // source has actually supplied the first block. Otherwise a
                     // failed signed CDN redirect looks like endless buffering.
-                    let firstLength = Int(min(1_048_576, length))
+                    let firstLength = Int(min(UInt64(self.blockLength), length))
                     let first = try await self.readWithRetryAsync(offset: requested.start, length: firstLength)
                     guard !first.data.isEmpty, UInt64(first.data.count) <= length else {
                         self.sendError(connection, status: "502 Bad Gateway")
                         return
                     }
+                    self.logBlock(offset: requested.start, count: first.data.count, first: true)
                     var response = Data(headers.utf8)
                     response.append(first.data)
                     let next = requested.start + UInt64(first.data.count)
@@ -209,6 +215,8 @@ final class RangeHTTPServer: @unchecked Sendable {
                     })
                 }
             } catch {
+                let failure = error as NSError
+                NSLog("Lucent Range: first block failed domain=%@ code=%d", failure.domain, failure.code)
                 self.sendError(connection, status: "502 Bad Gateway")
             }
         }
@@ -240,14 +248,18 @@ final class RangeHTTPServer: @unchecked Sendable {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let length = Int(min(1_048_576, end - offset + 1))
+                let length = Int(min(UInt64(self.blockLength), end - offset + 1))
                 let result = try await self.readWithRetryAsync(offset: offset, length: length)
                 guard !result.data.isEmpty else { connection.cancel(); return }
+                self.logBlock(offset: offset, count: result.data.count, first: false)
                 connection.send(content: result.data, completion: .contentProcessed { error in
                     if error != nil { connection.cancel() }
                     else { self.sendBytes(connection, offset: offset + UInt64(result.data.count), end: end) }
                 })
             } catch {
+                let failure = error as NSError
+                NSLog("Lucent Range: subsequent block failed offset=%llu domain=%@ code=%d",
+                      offset, failure.domain, failure.code)
                 connection.cancel()
             }
         }
@@ -256,6 +268,17 @@ final class RangeHTTPServer: @unchecked Sendable {
     private func sendError(_ connection: NWConnection, status: String) {
         connection.send(content: Data("HTTP/1.1 \(status)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8),
                         completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    private func logBlock(offset: UInt64, count: Int, first: Bool) {
+        let shouldLog = lock.withLock { () -> Bool in
+            guard loggedBlocks < 24 else { return false }
+            loggedBlocks += 1
+            return true
+        }
+        if shouldLog {
+            NSLog("Lucent Range: %@ block offset=%llu bytes=%d", first ? "first" : "next", offset, count)
+        }
     }
 
     private func readWithRetry(offset: UInt64, length: Int) throws -> SMBScanner.RangeResult {
@@ -313,7 +336,7 @@ final class RangeHTTPServer: @unchecked Sendable {
     private static func safeExtension(_ value: String) -> String {
         let normalized = value.lowercased()
         return ["mp4", "m4v", "mov", "mkv", "webm", "ts", "m2ts", "mts", "avi",
-                "wmv", "flv", "vob", "mpg", "mpeg", "ogv", "iso"].contains(normalized) ? normalized : "mp4"
+                "wmv", "flv", "vob", "mpg", "mpeg", "ogv", "iso", "bin"].contains(normalized) ? normalized : "mp4"
     }
 }
 

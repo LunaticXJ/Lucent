@@ -31,6 +31,24 @@ enum DLNAClient {
                       controlURL: controlURL, serviceType: description.serviceType)
     }
 
+    static func contents(device: Device, objectID: String) async throws -> [StorageDirectory] {
+        var result: [StorageDirectory] = []
+        var start = 0
+        while true {
+            try Task.checkCancellation()
+            let page = try await browse(device: device, objectID: objectID.isEmpty ? "0" : objectID, start: start)
+            let entries = try DIDLParser(data: Data(page.result.utf8)).parse()
+            result += entries.compactMap { entry in
+                guard entry.isContainer || ["http", "https"].contains(entry.url?.scheme?.lowercased() ?? "") else { return nil }
+                return StorageDirectory(identifier: entry.id, name: entry.title, path: entry.title, isDirectory: entry.isContainer, playbackURL: entry.url)
+            }
+            start += page.numberReturned
+            if start >= page.totalMatches || page.numberReturned == 0 { break }
+            if start > 50_000 { throw DLNAError.tooManyFiles }
+        }
+        return result
+    }
+
     static func scan(device: Device) async throws -> [Video] {
         var queue = ["0"]
         var visited = Set<String>()

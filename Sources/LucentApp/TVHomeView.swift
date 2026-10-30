@@ -9,11 +9,6 @@ private enum TVPalette {
     static let horizontalInset: CGFloat = 88
 }
 
-@MainActor
-private enum TVArtworkCache {
-    static var images: [String: UIImage] = [:]
-}
-
 private struct TVArtwork: View {
     let source: EmbySource
     let itemID: String
@@ -42,16 +37,16 @@ private struct TVArtwork: View {
         }
         .clipped()
         .task(id: "\(source.id)|\(itemID)|\(backdrop)|\(width)") {
-            let key = "\(source.id)|\(itemID)|\(backdrop)|\(width)"
-            if let cached = TVArtworkCache.images[key] { image = cached; return }
+            image = nil
             guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
                   !token.isEmpty else { return }
             for useBackdrop in backdrop ? [true, false] : [false] {
-                guard let data = try? await EmbyClient.artwork(source: source, token: token,
-                                                               itemID: itemID, backdrop: useBackdrop,
-                                                               maxWidth: width),
+                guard let data = try? await LocalMediaCache.shared.imageData(
+                    key: "emby|\(source.id)|\(itemID)|\(useBackdrop)|\(width)", fetch: {
+                        try await EmbyClient.artwork(source: source, token: token,
+                            itemID: itemID, backdrop: useBackdrop, maxWidth: width)
+                    }),
                       let loaded = UIImage(data: data) else { continue }
-                TVArtworkCache.images[key] = loaded
                 image = loaded
                 break
             }
@@ -83,7 +78,7 @@ struct TVHomeView: View {
     @State private var shelves: [TVHomeShelf] = []
     @State private var loading = false
     @State private var errorMessage: String?
-    @State private var selectedItem: MediaItem?
+    @State private var selectedItemID: UUID?
     @State private var browserRoute: TVBrowserRoute?
 
     private var source: EmbySource? { library.embySources.first }
@@ -112,8 +107,8 @@ struct TVHomeView: View {
         .background(TVPalette.background)
         .ignoresSafeArea(edges: .top)
         .task(id: source?.id) { await loadHome() }
-        .sheet(item: $selectedItem) { item in
-            MediaDetailView(itemID: item.id).environmentObject(library)
+        .navigationDestination(item: $selectedItemID) { id in
+            MediaDetailView(itemID: id).environmentObject(library)
         }
         .sheet(item: $browserRoute) { route in
             EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title)
@@ -376,7 +371,7 @@ struct TVHomeView: View {
         if item.isFolder == true || item.type == "Series" {
             browserRoute = TVBrowserRoute(source: source, parentID: item.id, title: item.name)
         } else {
-            selectedItem = library.openEmbyItem(sourceID: source.id, remote: item)
+            selectedItemID = library.openEmbyItem(sourceID: source.id, remote: item).id
         }
     }
 

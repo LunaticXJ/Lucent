@@ -7,6 +7,27 @@ import UIKit
 private typealias PosterImage = UIImage
 #endif
 
+private enum EmbyBrowserPalette {
+    static var page: Color {
+        #if os(tvOS)
+        .black
+        #elseif os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(uiColor: .systemBackground)
+        #endif
+    }
+    static var panel: Color {
+        #if os(tvOS)
+        Color(white: 0.15)
+        #elseif os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color(uiColor: .secondarySystemBackground)
+        #endif
+    }
+}
+
 private struct SeriesToolbarVisibility: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -54,7 +75,7 @@ private struct EmbyBrowserPageView: View {
     @State private var loaded = false
     @State private var loading = false
     @State private var errorMessage: String?
-    @State private var selectedItem: MediaItem?
+    @State private var selectedItemID: UUID?
     @State private var detectedCatalog: CatalogType?
 
     private var activeCatalog: CatalogType? { catalogType ?? detectedCatalog }
@@ -90,11 +111,10 @@ private struct EmbyBrowserPageView: View {
             if isCatalogPage { catalogPage }
             else { genericPage }
         }
-        .background(Color(red: 0.985, green: 0.984, blue: 0.978))
-        .preferredColorScheme(.light)
+        .background(EmbyBrowserPalette.page)
         .task { await initialize() }
-        .sheet(item: $selectedItem) { item in
-            MediaDetailView(itemID: item.id).environmentObject(library)
+        .navigationDestination(item: $selectedItemID) { id in
+            MediaDetailView(itemID: id).environmentObject(library)
         }
     }
 
@@ -105,7 +125,7 @@ private struct EmbyBrowserPageView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 19, weight: .medium))
                         .frame(width: 44, height: 44)
-                        .background(.white, in: Circle())
+                        .background(EmbyBrowserPalette.panel, in: Circle())
                 }
                 Spacer()
                 Text(title).font(.system(size: 18, weight: .semibold)).lineLimit(1)
@@ -133,12 +153,12 @@ private struct EmbyBrowserPageView: View {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.system(size: 19, weight: .medium))
                         .frame(width: 44, height: 44)
-                        .background(.white, in: Circle())
+                        .background(EmbyBrowserPalette.panel, in: Circle())
                 }
                 .accessibilityLabel("排序：\(sort.title)，\(ascending ? "升序" : "降序")")
                 .disabled(loading)
             }
-            .foregroundStyle(.black)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 20)
             .padding(.top, 8)
             .padding(.bottom, 12)
@@ -155,15 +175,15 @@ private struct EmbyBrowserPageView: View {
                                 .font(.system(size: 14, weight: section == option ? .semibold : .regular))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 34)
-                                .background(section == option ? .white : .clear,
+                                .background(section == option ? EmbyBrowserPalette.panel : .clear,
                                             in: Capsule())
                         }
-                        .foregroundStyle(.black)
+                        .foregroundStyle(.primary)
                         .disabled(loading)
                     }
                 }
                 .padding(3)
-                .background(Color.black.opacity(0.055), in: Capsule())
+                .background(Color.primary.opacity(0.055), in: Capsule())
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
             }
@@ -188,7 +208,7 @@ private struct EmbyBrowserPageView: View {
                                 .buttonStyle(.plain)
                             } else {
                                 Button {
-                                    selectedItem = library.openEmbyItem(sourceID: source.id, remote: entry)
+                                    selectedItemID = library.openEmbyItem(sourceID: source.id, remote: entry).id
                                 } label: {
                                     SeriesPosterTile(source: source, entry: entry,
                                                      folder: false,
@@ -223,7 +243,8 @@ private struct EmbyBrowserPageView: View {
                                 }
                                 .foregroundStyle(.primary)
                                 .padding(16)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 14))
+                                .background(EmbyBrowserPalette.panel,
+                                            in: RoundedRectangle(cornerRadius: 14))
                             }
                             .buttonStyle(.plain)
                         }
@@ -243,7 +264,7 @@ private struct EmbyBrowserPageView: View {
                 if entry.type == "Series" || entry.mediaType == "Video" ||
                     ["Movie", "Episode", "Video", "MusicVideo"].contains(entry.type) {
                     Button {
-                        selectedItem = library.openEmbyItem(sourceID: source.id, remote: entry)
+                        selectedItemID = library.openEmbyItem(sourceID: source.id, remote: entry).id
                     } label: {
                         Label(entry.name, systemImage: entry.type == "Series" ? "tv" : "play.rectangle")
                     }

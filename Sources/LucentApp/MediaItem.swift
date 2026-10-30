@@ -1,5 +1,15 @@
 import Foundation
 
+/// A directory listing does not require a recursive media-library scan.
+struct SourceDirectoryEntry: Identifiable, Sendable {
+    let name: String
+    let path: String
+    let isDirectory: Bool
+    var id: String { path }
+    static let videoExtensions: Set<String> = ["mp4", "m4v", "mov", "mkv", "avi", "ts", "webm",
+        "m2ts", "mts", "wmv", "flv", "vob", "mpg", "mpeg", "ogv", "iso"]
+}
+
 enum MediaLocation: Codable, Equatable, Sendable {
     case remote(URL)
     case bookmark(Data)
@@ -59,24 +69,6 @@ struct DLNASource: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
-struct VLCNetworkSource: Codable, Identifiable, Equatable, Sendable {
-    let id: UUID
-    var rootAddress: String
-    var username: String
-    var lastScannedAt: Date?
-    var mediaIDs: [UUID]
-
-    init(root: URL, username: String = "") {
-        id = UUID()
-        rootAddress = root.absoluteString
-        self.username = username
-        lastScannedAt = nil
-        mediaIDs = []
-    }
-
-    var name: String { URL(string: rootAddress)?.host ?? rootAddress }
-}
-
 struct FolderSource: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
@@ -95,8 +87,11 @@ struct SMBSource: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var host: String
     var share: String
+    var domain: String? = nil
+    var syncAllowed: Bool? = nil
     var username: String
     var lastScannedAt: Date?
+    var displayName: String?
 
     init(host: String, share: String, username: String) {
         id = UUID()
@@ -106,14 +101,16 @@ struct SMBSource: Codable, Identifiable, Equatable, Sendable {
         lastScannedAt = nil
     }
 
-    var name: String { "\(share) · \(host)" }
+    var name: String { displayName.flatMap { $0.isEmpty ? nil : $0 } ?? "\(share) · \(host)" }
 }
 
 struct WebDAVSource: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var baseAddress: String
+    var syncAllowed: Bool? = nil
     var username: String
     var lastScannedAt: Date?
+    var displayName: String?
 
     init(baseAddress: String, username: String) {
         id = UUID()
@@ -122,7 +119,7 @@ struct WebDAVSource: Codable, Identifiable, Equatable, Sendable {
         lastScannedAt = nil
     }
 
-    var name: String { URL(string: baseAddress)?.host ?? baseAddress }
+    var name: String { displayName.flatMap { $0.isEmpty ? nil : $0 } ?? (URL(string: baseAddress)?.host ?? baseAddress) }
 }
 
 struct JellyfinSource: Codable, Identifiable, Equatable, Sendable {
@@ -130,29 +127,39 @@ struct JellyfinSource: Codable, Identifiable, Equatable, Sendable {
     var baseAddress: String
     var userID: String
     var lastScannedAt: Date?
+    var displayName: String?
+    var username: String?
+    var usesTokenLogin: Bool?
 
     init(baseAddress: String, userID: String) {
         id = UUID()
         self.baseAddress = baseAddress
         self.userID = userID
         lastScannedAt = nil
+        displayName = nil
+        username = nil
+        usesTokenLogin = nil
     }
 
-    var name: String { URL(string: baseAddress)?.host ?? baseAddress }
+    var name: String { displayName.flatMap { $0.isEmpty ? nil : $0 } ?? (URL(string: baseAddress)?.host ?? baseAddress) }
 }
 
 struct PlexSource: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var baseAddress: String
     var lastScannedAt: Date?
+    var displayName: String?
+    var username: String?
 
     init(baseAddress: String) {
         id = UUID()
         self.baseAddress = baseAddress
         lastScannedAt = nil
+        displayName = nil
+        username = nil
     }
 
-    var name: String { URL(string: baseAddress)?.host ?? baseAddress }
+    var name: String { displayName.flatMap { $0.isEmpty ? nil : $0 } ?? (URL(string: baseAddress)?.host ?? baseAddress) }
 }
 
 struct EmbySource: Codable, Identifiable, Equatable, Sendable {
@@ -160,18 +167,27 @@ struct EmbySource: Codable, Identifiable, Equatable, Sendable {
     var baseAddress: String
     var userID: String
     var lastScannedAt: Date?
+    var displayName: String?
+    var username: String?
+    var usesTokenLogin: Bool?
 
     init(baseAddress: String, userID: String) {
         id = UUID()
         self.baseAddress = baseAddress
         self.userID = userID
         lastScannedAt = nil
+        displayName = nil
+        username = nil
+        usesTokenLogin = nil
     }
 
-    var name: String { URL(string: baseAddress)?.host ?? baseAddress }
+    var name: String { displayName.flatMap { $0.isEmpty ? nil : $0 } ?? (URL(string: baseAddress)?.host ?? baseAddress) }
 }
 
 struct LibrarySnapshot: Codable {
+    var fileSources: [LibraryFileSource]? = nil
+    var storageFileIdentities: [String: UUID]? = nil
+    var pendingScopeScanIDs: [UUID]? = nil
     var items: [MediaItem]
     var folders: [FolderSource]
     var smbSources: [SMBSource]?
@@ -181,7 +197,6 @@ struct LibrarySnapshot: Codable {
     var plexSources: [PlexSource]?
     var cloudSources: [CloudSource]?
     var dlnaSources: [DLNASource]?
-    var vlcNetworkSources: [VLCNetworkSource]?
     var collections: [MediaCollection]?
     var smartPlaylists: [SmartPlaylist]?
     var libraryConfigUpdatedAt: Date?
@@ -275,16 +290,40 @@ struct MediaMetadata: Codable, Equatable, Sendable {
     var summary: String?
     var posterPath: String?
     var rating: Double?
+    var catalogVersion: Int? = nil
+    var catalogKind: CatalogMediaKind? = nil
+    var localizedTitle: String? = nil
+    var year: Int? = nil
+    var releaseDate: String? = nil
+    var genres: [String]? = nil
+    var genreIDs: [Int]? = nil
+    var originCountries: [String]? = nil
+    var originalLanguage: String? = nil
+    var backdropPath: String? = nil
+    var cast: [CatalogPerson]? = nil
 
     var posterURL: URL? {
         guard let posterPath, posterPath.hasPrefix("/") else { return nil }
         return URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")
+    }
+    var originalPosterURL: URL? {
+        guard let posterPath, posterPath.hasPrefix("/") else { return nil }
+        return URL(string: "https://image.tmdb.org/t/p/original\(posterPath)")
     }
 }
 
 enum MediaIdentity: Codable, Equatable, Sendable {
     case movie(year: Int?)
     case episode(series: String, season: Int, number: Int, name: String?)
+
+    var movieYear: Int? {
+        if case .movie(let year) = self { return year }
+        return nil
+    }
+    var episodeSortOrder: Int {
+        if case .episode(_, let season, let number, _) = self { return season * 100_000 + number }
+        return 0
+    }
 
     var seriesName: String? {
         if case .episode(let series, _, _, _) = self { return series }
@@ -324,6 +363,13 @@ struct MediaItem: Codable, Identifiable, Equatable, Sendable {
     var skipCreditsStart: Double?
     var extraItemIDs: [UUID]?
     var personalRating: Int?
+    var technicalInfo: LocalMediaTechnicalInfo? = nil
+    var technicalProbeAttemptedAt: Date? = nil
+    var technicalProbeError: String? = nil
+    var metadataRetryAfter: Date? = nil
+    var metadataMatchStatus: String? = nil
+    var catalogEpisode: CatalogEpisode? = nil
+    var catalogPath: String? = nil
 
     init(title: String, location: MediaLocation, identity: MediaIdentity? = nil) {
         self.id = UUID()

@@ -65,31 +65,12 @@ enum HTTPRangeReader {
 
     private static func perform(request: URLRequest, offset: UInt64, length: Int,
                                 delegate: LimitedRangeDelegate) throws -> SMBScanner.RangeResult {
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 1
-        let configuration = URLSessionConfiguration.ephemeral
-        #if targetEnvironment(simulator)
-        // A simulator can have a different network route from its Mac host.
-        // Allow an explicit proxy for diagnosing CDN failures without baking a
-        // machine-specific address into release builds or saved sources.
-        if let value = ProcessInfo.processInfo.environment["LUCENT_HTTP_PROXY"],
-           let proxy = URLComponents(string: value),
-           proxy.scheme == "http", let host = proxy.host, let port = proxy.port {
-            configuration.connectionProxyDictionary = [
-                "HTTPEnable": 1, "HTTPProxy": host, "HTTPPort": port,
-                "HTTPSEnable": 1, "HTTPSProxy": host, "HTTPSPort": port
-            ]
-        }
-        #endif
-        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
-        let task = session.dataTask(with: request)
+        let task = RangeHTTPSession.shared.task(request: request, receiver: delegate)
         task.resume()
         guard delegate.semaphore.wait(timeout: .now() + 25) == .success else {
             task.cancel()
-            session.invalidateAndCancel()
             throw HTTPRangeError.timeout
         }
-        session.invalidateAndCancel()
         let (data, response, error) = delegate.result
         if let error { throw error }
         guard let response = response as? HTTPURLResponse,
@@ -112,6 +93,71 @@ enum HTTPRangeReader {
         let bounds = values[0].split(separator: "-", omittingEmptySubsequences: false)
         guard bounds.count == 2, let start = UInt64(bounds[0]), let end = UInt64(bounds[1]) else { return nil }
         return (start, end, total)
+    }
+}
+
+/// One transport keeps TLS connections alive across successive ranges. Each
+/// task still has its own bounded buffer, redirect policy and completion gate.
+private final class RangeHTTPSession: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    static let shared = RangeHTTPSession()
+    private let lock = NSLock()
+    private var receivers: [Int: LimitedRangeDelegate] = [:]
+    private var session: URLSession!
+
+    private override init() {
+        super.init()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpMaximumConnectionsPerHost = 4
+        #if targetEnvironment(simulator)
+        if let value = ProcessInfo.processInfo.environment["LUCENT_HTTP_PROXY"],
+           let proxy = URLComponents(string: value),
+           proxy.scheme == "http", let host = proxy.host, let port = proxy.port {
+            configuration.connectionProxyDictionary = [
+                "HTTPEnable": 1, "HTTPProxy": host, "HTTPPort": port,
+                "HTTPSEnable": 1, "HTTPSProxy": host, "HTTPSPort": port
+            ]
+        }
+        #endif
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        session = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
+    }
+
+    func task(request: URLRequest, receiver: LimitedRangeDelegate) -> URLSessionDataTask {
+        let task = session.dataTask(with: request)
+        lock.withLock { receivers[task.taskIdentifier] = receiver }
+        return task
+    }
+
+    private func receiver(_ task: URLSessionTask) -> LimitedRangeDelegate? {
+        lock.withLock { receivers[task.taskIdentifier] }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let receiver = receiver(dataTask) else { completionHandler(.cancel); return }
+        receiver.urlSession(session, dataTask: dataTask, didReceive: response, completionHandler: completionHandler)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        receiver(dataTask)?.urlSession(session, dataTask: dataTask, didReceive: data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let receiver = lock.withLock { receivers.removeValue(forKey: task.taskIdentifier) }
+        receiver?.urlSession(session, task: task, didCompleteWithError: error)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let receiver = receiver(task) else { completionHandler(nil); return }
+        receiver.urlSession(session, task: task, willPerformHTTPRedirection: response,
+                            newRequest: request, completionHandler: completionHandler)
     }
 }
 

@@ -20,6 +20,31 @@ enum GuangyaClient {
         "wmv", "flv", "vob", "mpg", "mpeg", "ogv", "iso"
     ]
 
+    static func contents(token: String, directoryID: String) async throws -> [StorageDirectory] {
+        var entries: [StorageDirectory] = []
+        var page = 0
+        while true {
+            try Task.checkCancellation()
+            let json = try await request("https://api.guangyapan.com/userres/v1/file/get_file_list", token: token,
+                body: ["parentId": directoryID, "page": page, "pageSize": 100, "orderBy": 0, "sortType": 0])
+            guard let files = fileList(in: json) else { throw ClientError.invalidResponse }
+            for file in files {
+                guard let id = string(file["fileId"] ?? file["id"] ?? file["resId"]),
+                      let name = string(file["fileName"] ?? file["name"]) else { continue }
+                let directory = (file["isDir"] as? Bool) == true || (file["isDirectory"] as? Bool) == true
+                    || (file["resType"] as? NSNumber)?.intValue == 2
+                    || ["folder", "directory"].contains(string(file["fileType"] ?? file["type"])?.lowercased() ?? "")
+                if directory || videoExtensions.contains((name as NSString).pathExtension.lowercased()) {
+                    entries.append(.init(identifier: id, name: name, path: name, isDirectory: directory))
+                }
+            }
+            guard entries.count <= 50_000, page < 500 else { throw ClientError.tooManyFiles }
+            if files.count < 100 { break }
+            page += 1
+        }
+        return entries
+    }
+
     static func scan(token: String) async throws -> [Entry] {
         var pending = [""]
         var seen = Set<String>()

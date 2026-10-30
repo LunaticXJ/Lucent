@@ -11,6 +11,58 @@ enum CloudDriveClient {
         "wmv", "flv", "vob", "mpg", "mpeg", "ogv", "iso"
     ]
 
+    /// Nonrecursive provider-native listing. Folder IDs are never reconstructed from filenames.
+    static func contents(source: CloudSource, token: String, directoryID: String) async throws -> [StorageDirectory] {
+        if ![CloudProvider.dropbox, .googleDrive].contains(source.provider) {
+            return try await ChineseCloudClient.contents(provider: source.provider, token: token, directoryID: directoryID)
+        }
+        var result: [StorageDirectory] = []
+        var cursor: String?
+        repeat {
+            try Task.checkCancellation()
+            var request: URLRequest
+            if source.provider == .dropbox {
+                request = URLRequest(url: URL(string: "https://api.dropboxapi.com/2/files/list_folder" + (cursor == nil ? "" : "/continue"))!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let body: [String: Any] = cursor.map { ["cursor": $0] } ?? ["path": directoryID, "recursive": false, "limit": 2000]
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            } else {
+                var url = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
+                let parent = directoryID.isEmpty ? "root" : directoryID
+                let escaped = parent.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+                url.queryItems = [.init(name: "q", value: "'\(escaped)' in parents and trashed = false"),
+                                  .init(name: "fields", value: "nextPageToken,files(id,name,mimeType,capabilities(canDownload))"),
+                                  .init(name: "pageSize", value: "1000")]
+                if let cursor { url.queryItems?.append(.init(name: "pageToken", value: cursor)) }
+                request = URLRequest(url: url.url!)
+            }
+            request.timeoutInterval = 40
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let data = try await responseData(for: request)
+            let previous = cursor
+            if source.provider == .dropbox {
+                let page = try JSONDecoder().decode(DropboxPage.self, from: data)
+                for entry in page.entries {
+                    guard let id = entry.id, entry.tag == "folder" || videoExtensions.contains((entry.name as NSString).pathExtension.lowercased()) else { continue }
+                    result.append(.init(identifier: id, name: entry.name, path: entry.name, isDirectory: entry.tag == "folder"))
+                }
+                cursor = page.hasMore ? page.cursor : nil
+            } else {
+                let page = try JSONDecoder().decode(GooglePage.self, from: data)
+                for entry in page.files {
+                    let directory = entry.mimeType == "application/vnd.google-apps.folder"
+                    guard directory || (entry.capabilities?.canDownload != false && videoExtensions.contains((entry.name as NSString).pathExtension.lowercased())) else { continue }
+                    result.append(.init(identifier: entry.id, name: entry.name, path: entry.name, isDirectory: directory))
+                }
+                cursor = page.nextPageToken
+            }
+            if result.count > 50_000 { throw CloudDriveError.tooManyFiles }
+            if cursor != nil && cursor == previous { throw CloudDriveError.requestFailed }
+        } while cursor != nil
+        return result
+    }
+
     static func scan(source: CloudSource, token: String) async throws -> [FileEntry] {
         switch source.provider {
         case .dropbox: return try await scanDropbox(token: token)

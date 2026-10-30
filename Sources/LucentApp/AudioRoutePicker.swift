@@ -6,6 +6,8 @@ struct AudioRoutePicker: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.prioritizesVideoDevices = true
+        view.tintColor = .white
+        view.activeTintColor = .white
         return view
     }
 

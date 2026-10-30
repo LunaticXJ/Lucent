@@ -7,10 +7,34 @@ enum SMBScanner {
         let totalSize: UInt64
     }
 
+    static func shares(host: String, username: String, password: String, domain: String) throws -> [String] {
+        try SMB.listShares(server:SMB.Server(host:host),
+            credentials:SMB.Credentials(user:username.isEmpty ? nil : username,password:password,
+                                       domain:domain.isEmpty ? nil : domain),
+            configuration:SMB.Configuration(timeout:15)).map(\.name)
+    }
+
+    static func contents(source: SMBSource, password: String?, path: String) throws -> [SourceDirectoryEntry] {
+        guard !path.split(separator: "/").contains("..") else { throw CocoaError(.fileReadNoPermission) }
+        let connection = try SMB.connect(server: SMB.Server(host: source.host),
+            credentials: SMB.Credentials(user: source.username.isEmpty ? nil : source.username, password: password, domain: source.domain),
+            share: source.share, configuration: SMB.Configuration(timeout: 20))
+        defer { try? connection.disconnect() }
+        return try connection.listDirectory(at: path).compactMap { entry in
+            guard entry.name != ".", entry.name != ".." else { return nil }
+            let directory = entry.stat.type == .directory
+            guard directory || (entry.stat.type == .file &&
+                SourceDirectoryEntry.videoExtensions.contains((entry.name as NSString).pathExtension.lowercased())) else { return nil }
+            return SourceDirectoryEntry(name: entry.name, path: path.isEmpty ? entry.name : path + "/" + entry.name,
+                                        isDirectory: directory)
+        }
+    }
+
     static func scan(source: SMBSource, password: String?) throws -> [String] {
         let credentials = SMB.Credentials(
             user: source.username.isEmpty ? nil : source.username,
-            password: password
+            password: password,
+            domain: source.domain
         )
         let connection = try SMB.connect(
             server: SMB.Server(host: source.host),
@@ -49,7 +73,7 @@ enum SMBScanner {
             throw SMBScanError.invalidRange
         }
         let credentials = SMB.Credentials(user: source.username.isEmpty ? nil : source.username,
-                                          password: password)
+                                          password: password, domain: source.domain)
         let connection = try SMB.connect(server: SMB.Server(host: source.host),
                                          credentials: credentials, share: source.share,
                                          configuration: SMB.Configuration(timeout: 20))

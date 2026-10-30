@@ -1,6 +1,6 @@
 # P0/P1 验收矩阵
 
-状态：Xcode 27.1 已安装，三套 Debug 构建通过；启动与功能验收继续进行。代码存在不等于通过验收。
+状态：Xcode 27.1 已安装；2026-10-21 移除 VLCKit 后，Lucent-iOS、Lucent-tvOS 模拟器与 Lucent-macOS Debug 构建通过。启动与功能验收继续进行。代码存在不等于通过验收。
 
 | 领域 | iPhone | iPad | Apple TV | Mac | 必须验证的场景 |
 | --- | --- | --- | --- | --- | --- |
@@ -20,4 +20,4 @@
 
 完成标准：所有适用格子通过；失败要记录设备型号、系统版本、媒体样本、片源服务版本、复现步骤与修复结果。对缺失的 P0/P1 能力，先实现再验收。
 
-2026-10-17 的本机探针：AVFoundation 可打开 2 秒 H.264/AAC MP4，不支持同内容的 MKV；校验过的 VLCKit 可播放该 MKV。VLC 通过可拖动 `RangeInputStream` 读取同一 MKV 并播放结束。iPhone Duo iOS 27.1 与 Apple TV 4K (3rd generation) tvOS 27.0 模拟器可安装并启动 Lucent，进程保持运行。Emby 客户端通过本机假服务完成登录、用户校验、扫描、范围读取和观看状态回写；带 Emby 的三端 Debug 构建通过。该探针不替代真实设备、网络服务器和界面操作验收。
+2026-10-17 的历史探针：AVFoundation 可打开 2 秒 H.264/AAC MP4，不支持同内容的 MKV；当时校验过的 VLCKit 可通过可拖动 `RangeInputStream` 读取同一 MKV 并播放结束。VLC 播放内核已于 2026-10-21 移除，该记录仅作历史参考；当前 MKV 由 MPVKit 播放，需要重新做实际播放验收。iPhone Duo iOS 27.1 与 Apple TV 4K (3rd generation) tvOS 27.0 模拟器可安装并启动 Lucent，进程保持运行。Emby 客户端通过本机假服务完成登录、用户校验、扫描、范围读取和观看状态回写；带 Emby 的三端 Debug 构建通过。该探针不替代真实设备、网络服务器和界面操作验收。

@@ -1,6 +1,32 @@
 import Foundation
+import OSLog
+
+enum SubtitleDeliveryError: LocalizedError {
+    case invalidAddress, unsupportedFormat, http(Int), tooLarge, empty, parse, network(Int)
+    var errorDescription: String? {
+        switch self {
+        case .invalidAddress: "字幕地址无效"
+        case .unsupportedFormat: "字幕格式不支持"
+        case .http(let code): "字幕服务器返回 HTTP \(code)"
+        case .tooLarge: "字幕文件超过 8 MB 上限"
+        case .empty: "字幕服务器返回空文件"
+        case .parse: "响应内容无法解析为字幕"
+        case .network(let code): "字幕网络请求失败（\(code)）"
+        }
+    }
+}
 
 enum EmbyClient {
+    private static let subtitleLog = Logger(subsystem: "com.lucent.app", category: "SubtitleDelivery")
+
+    static func logSubtitleFailure(_ error: Error, stage: String) {
+        // Only fixed stage names and numeric error codes; never URL, token or body.
+        if let error = error as? SubtitleDeliveryError {
+            subtitleLog.error("\(stage, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        } else {
+            subtitleLog.error("\(stage, privacy: .public): error code \((error as NSError).code, privacy: .public)")
+        }
+    }
     static func featuredItemTypes(for view: JellyfinItem) -> String {
         switch view.collectionType?.lowercased() {
         case "movies": "Movie"
@@ -53,7 +79,8 @@ enum EmbyClient {
     }
     private struct User: Decodable {
         let id: String
-        enum CodingKeys: String, CodingKey { case id = "Id" }
+        let name: String?
+        enum CodingKeys: String, CodingKey { case id = "Id", name = "Name" }
     }
     private struct Authentication: Decodable {
         let accessToken: String
@@ -72,9 +99,11 @@ enum EmbyClient {
             let id: String?
             let transcodingURL: String?
             let supportsTranscoding: Bool?
+            let mediaStreams: [SubtitleDelivery]?
             enum CodingKeys: String, CodingKey {
                 case id = "Id", transcodingURL = "TranscodingUrl"
                 case supportsTranscoding = "SupportsTranscoding"
+                case mediaStreams = "MediaStreams"
             }
         }
         let mediaSources: [Source]?
@@ -84,10 +113,98 @@ enum EmbyClient {
         }
     }
 
-    static func validateUser(baseAddress: String, token: String, userID: String) async throws {
+    struct SubtitleDelivery: Decodable, Sendable {
+        let index: Int?
+        let type: String?
+        let displayTitle: String?
+        let language: String?
+        let deliveryMethod: String?
+        let deliveryURL: String?
+        let isExternal: Bool?
+        enum CodingKeys: String, CodingKey {
+            case index = "Index", type = "Type", displayTitle = "DisplayTitle"
+            case language = "Language", deliveryMethod = "DeliveryMethod"
+            case deliveryURL = "DeliveryUrl", isExternal = "IsExternal"
+        }
+    }
+
+    /// Ask for subtitle delivery only; this never starts a transcode or replaces video.
+    static func subtitleDeliveries(source: EmbySource, token: String, itemID: String,
+                                   mediaSourceID: String) async throws -> [SubtitleDelivery] {
+        var request = try makeRequest(baseAddress: source.baseAddress,
+                                     path: "Items/\(itemID)/PlaybackInfo", token: token)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "UserId": source.userID, "MediaSourceId": mediaSourceID,
+            "IsPlayback": false, "EnableDirectPlay": true,
+            "EnableDirectStream": true, "EnableTranscoding": false,
+            "DeviceProfile": [
+                "DirectPlayProfiles": [["Type": "Video"]],
+                "SubtitleProfiles": ["srt", "vtt", "ass", "ssa"].map {
+                    ["Format": $0, "Method": "External"]
+                }
+            ]
+        ])
+        let info = try JSONDecoder().decode(PlaybackInfo.self, from: await fetch(request))
+        // Never use a different version's stream indices.
+        return info.mediaSources?.first(where: { $0.id == mediaSourceID })?.mediaStreams?.filter {
+            let ext = URL(string: $0.deliveryURL ?? "")?.pathExtension.lowercased() ?? ""
+            return $0.type == "Subtitle" && $0.deliveryMethod == "External"
+                && $0.index != nil && ["srt", "vtt", "ass", "ssa"].contains(ext)
+        } ?? []
+    }
+
+    static func subtitleCues(delivery: SubtitleDelivery, baseAddress: String,
+                             token: String) async throws -> [SubtitleCue] {
+        guard let base = URL(string: baseAddress.hasSuffix("/") ? baseAddress : baseAddress + "/"),
+              let value = delivery.deliveryURL,
+              let url = URL(string: value, relativeTo: base)?.absoluteURL,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+            throw SubtitleDeliveryError.invalidAddress
+        }
+        let ext = url.pathExtension.lowercased()
+        guard ["srt", "vtt", "ass", "ssa"].contains(ext) else { throw SubtitleDeliveryError.unsupportedFormat }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 60
+        // Server credentials belong only to the server, not third-party delivery URLs.
+        if url.host == base.host && url.scheme == base.scheme && url.port == base.port {
+            request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+        }
+        let session = URLSession(configuration: .ephemeral,
+                                 delegate: SubtitleRedirectPolicy(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        subtitleLog.notice("Download started; stream=\(delivery.index ?? -1, privacy: .public)")
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await session.bytes(for: request)
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            throw SubtitleDeliveryError.network((error as NSError).code)
+        }
+        guard let http = response as? HTTPURLResponse else { throw SubtitleDeliveryError.invalidAddress }
+        subtitleLog.notice("Response HTTP=\(http.statusCode, privacy: .public); length=\(response.expectedContentLength, privacy: .public)")
+        guard (200..<300).contains(http.statusCode) else { throw SubtitleDeliveryError.http(http.statusCode) }
+        guard response.expectedContentLength <= 8_000_000 else { throw SubtitleDeliveryError.tooLarge }
+        var data = Data()
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            guard data.count < 8_000_000 else { throw SubtitleDeliveryError.tooLarge }
+            data.append(byte)
+        }
+        guard !data.isEmpty else { throw SubtitleDeliveryError.empty }
+        let cues = SubtitleParser.parse(data, fileExtension: ext)
+        subtitleLog.notice("Parsed bytes=\(data.count, privacy: .public); cues=\(cues.count, privacy: .public)")
+        guard !cues.isEmpty else { throw SubtitleDeliveryError.parse }
+        return cues
+    }
+
+    static func validateUser(baseAddress: String, token: String, userID: String) async throws -> String? {
         let user = try JSONDecoder().decode(User.self, from: await fetch(makeRequest(baseAddress: baseAddress,
                                                                                       path: "Users/\(userID)", token: token)))
         guard user.id.caseInsensitiveCompare(userID) == .orderedSame else { throw EmbyError.invalidResponse }
+        return user.name
     }
 
     static func browse(source: EmbySource, token: String, parentID: String?,
@@ -143,15 +260,15 @@ enum EmbyClient {
         return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
     }
 
-    static func latest(source: EmbySource, token: String, limit: Int = 12) async throws -> [JellyfinItem] {
+    static func latest(source: EmbySource, token: String, limit: Int = 40) async throws -> [JellyfinItem] {
         var request = try makeRequest(baseAddress: source.baseAddress,
                                       path: "Users/\(source.userID)/Items/Latest", token: token)
         var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "Limit", value: String(limit)),
-            URLQueryItem(name: "IncludeItemTypes", value: "Movie"),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
             URLQueryItem(name: "EnableUserData", value: "true"),
-            URLQueryItem(name: "Fields", value: "Overview")
+            URLQueryItem(name: "Fields", value: "Overview,ProviderIds,PreferredMetadataLanguage")
         ]
         request.url = components.url
         return try JSONDecoder().decode([JellyfinItem].self, from: await fetch(request))
@@ -173,6 +290,24 @@ enum EmbyClient {
         request.url = components.url
         let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
         return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+    }
+
+    static func mediaCounts(source: EmbySource, token: String) async throws -> (movies: Int, series: Int) {
+        func count(_ type: String) async throws -> Int {
+            var request = try makeRequest(baseAddress: source.baseAddress,
+                                          path: "Users/\(source.userID)/Items", token: token)
+            var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: type),
+                URLQueryItem(name: "Limit", value: "1")
+            ]
+            request.url = components.url
+            return try JSONDecoder().decode(Page.self, from: await fetch(request)).totalRecordCount
+        }
+        async let movies = count("Movie")
+        async let series = count("Series")
+        return try await (movies, series)
     }
 
     static func featured(source: EmbySource, token: String, parentID: String,
@@ -202,13 +337,14 @@ enum EmbyClient {
         components.queryItems = [
             URLQueryItem(name: "SearchTerm", value: term),
             URLQueryItem(name: "Recursive", value: "true"),
-            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Episode,Series,Video"),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
             URLQueryItem(name: "Limit", value: String(limit)),
             URLQueryItem(name: "EnableUserData", value: "true")
         ]
         request.url = components.url
         let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
-        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+        let titles = page.items.filter { $0.type == "Movie" || $0.type == "Series" }
+        return BrowsePage(items: titles, totalCount: titles.count)
     }
 
     static func artwork(source: EmbySource, token: String, itemID: String,
@@ -221,14 +357,14 @@ enum EmbyClient {
         return try await fetch(request)
     }
 
-    static func authenticate(baseAddress: String, username: String, password: String) async throws -> (token: String, userID: String) {
+    static func authenticate(baseAddress: String, username: String, password: String) async throws -> (token: String, userID: String, username: String) {
         guard !username.isEmpty else { throw EmbyError.invalidResponse }
         var request = try makeRequest(baseAddress: baseAddress, path: "Users/AuthenticateByName", token: "")
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["Username": username, "Pw": password])
         let result = try JSONDecoder().decode(Authentication.self, from: await fetch(request))
-        return (result.accessToken, result.user.id)
+        return (result.accessToken, result.user.id, result.user.name ?? username)
     }
 
     static func readRange(source: EmbySource, token: String, itemID: String,
@@ -238,6 +374,24 @@ enum EmbyClient {
                                   mediaSourceID: mediaSourceID) else { throw EmbyError.invalidResponse }
         return try HTTPRangeReader.read(url: url, headers: ["X-Emby-Token": token],
                                         offset: offset, length: length)
+    }
+
+    /// Give AetherEngine the same authenticated direct-file URL shape used by
+    /// Sodalite. Its demuxer then owns the source connection and redirects.
+    static func directPlaybackURL(source: EmbySource, token: String, itemID: String,
+                                  mediaSourceID: String?, container: String) -> URL? {
+        guard let base = URL(string: source.baseAddress) else { return nil }
+        let ext = container.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !ext.isEmpty, ext.allSatisfy({ $0.isASCII && $0.isLetter || $0.isNumber }) else { return nil }
+        let url = base.appendingPathComponent("Videos").appendingPathComponent(itemID)
+            .appendingPathComponent("stream.\(ext)")
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "api_key", value: token),
+                                  URLQueryItem(name: "Static", value: "true")]
+        if let mediaSourceID {
+            components?.queryItems?.append(URLQueryItem(name: "MediaSourceId", value: mediaSourceID))
+        }
+        return components?.url
     }
 
     static func downloadRequest(source: EmbySource, token: String, itemID: String) -> URLRequest? {
@@ -419,7 +573,7 @@ enum ServerDetailClient {
         var components = URLComponents(url: base.appendingPathComponent("Users")
             .appendingPathComponent(userID).appendingPathComponent("Items")
             .appendingPathComponent(itemID), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview,MediaSources"),
+        components.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview,MediaSources,ProviderIds"),
                                  URLQueryItem(name: "EnableUserData", value: "true")]
         var request = URLRequest(url: components.url!)
         request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
@@ -457,6 +611,11 @@ enum ServerEpisodeClient {
               let seriesID = (json["SeriesId"] as? String) ??
                 ((json["Type"] as? String) == "Series" ? itemID : nil), !seriesID.isEmpty else { return [] }
 
+        return try await episodesForSeries(base: base, userID: userID, seriesID: seriesID, token: token)
+    }
+
+    private static func episodesForSeries(base: URL, userID: String, seriesID: String,
+                                          token: String) async throws -> [JellyfinItem] {
         var episodes: [JellyfinItem] = []
         repeat {
             var components = URLComponents(url: base.appendingPathComponent("Shows")
@@ -491,26 +650,35 @@ enum ServerEpisodeClient {
     static func seriesPage(baseAddress: String, userID: String, itemID: String,
                            token: String) async throws -> SeriesPage? {
         guard let base = URL(string: baseAddress) else { throw EmbyError.invalidResponse }
-        var request = URLRequest(url: base.appendingPathComponent("Users")
+        var selectedURL = URLComponents(url: base.appendingPathComponent("Users")
             .appendingPathComponent(userID).appendingPathComponent("Items")
-            .appendingPathComponent(itemID))
+            .appendingPathComponent(itemID), resolvingAgainstBaseURL: false)!
+        selectedURL.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview,ProviderIds"),
+                                  URLQueryItem(name: "EnableUserData", value: "true")]
+        var request = URLRequest(url: selectedURL.url!)
         request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
         request.timeoutInterval = 20
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw EmbyError.requestFailed }
         let selected = try JSONDecoder().decode(JellyfinItem.self, from: data)
         guard let seriesID = selected.seriesId ?? (selected.type == "Series" ? selected.id : nil) else { return nil }
-        var seriesURL = URLComponents(url: base.appendingPathComponent("Users").appendingPathComponent(userID)
-            .appendingPathComponent("Items").appendingPathComponent(seriesID),
-            resolvingAgainstBaseURL: false)!
-        seriesURL.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview"),
-                                URLQueryItem(name: "EnableUserData", value: "true")]
-        request.url = seriesURL.url
-        let (seriesData, seriesResponse) = try await URLSession.shared.data(for: request)
-        guard (seriesResponse as? HTTPURLResponse)?.statusCode == 200 else { throw EmbyError.requestFailed }
-        let series = try JSONDecoder().decode(JellyfinItem.self, from: seriesData)
-        let episodes = try await episodes(baseAddress: baseAddress, userID: userID,
-                                          itemID: itemID, token: token)
+        async let episodeResult = episodesForSeries(base: base, userID: userID,
+                                                    seriesID: seriesID, token: token)
+        let series: JellyfinItem
+        if selected.type == "Series" {
+            series = selected
+        } else {
+            var seriesURL = URLComponents(url: base.appendingPathComponent("Users").appendingPathComponent(userID)
+                .appendingPathComponent("Items").appendingPathComponent(seriesID),
+                resolvingAgainstBaseURL: false)!
+            seriesURL.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview,ProviderIds"),
+                                    URLQueryItem(name: "EnableUserData", value: "true")]
+            request.url = seriesURL.url
+            let (seriesData, seriesResponse) = try await URLSession.shared.data(for: request)
+            guard (seriesResponse as? HTTPURLResponse)?.statusCode == 200 else { throw EmbyError.requestFailed }
+            series = try JSONDecoder().decode(JellyfinItem.self, from: seriesData)
+        }
+        let episodes = try await episodeResult
         return SeriesPage(series: series, episodes: episodes)
     }
 }
@@ -523,5 +691,27 @@ private enum EmbyError: LocalizedError {
         case .invalidResponse: "Emby 返回了无法识别的数据。"
         case .invalidTranscode(let detail): "Emby 转码流不可用：\(detail)。"
         }
+    }
+}
+
+/// Subtitle delivery may redirect to storage. Never forward server authentication
+/// across origins, including through a later redirect back to the original host.
+private final class SubtitleRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        guard let from = response.url, let to = request.url,
+              ["http", "https"].contains(to.scheme?.lowercased() ?? "") else {
+            completionHandler(nil)
+            return
+        }
+        var redirected = request
+        if from.host != to.host || from.scheme != to.scheme || from.port != to.port {
+            for header in ["X-Emby-Token", "X-Emby-Authorization", "Authorization", "Cookie"] {
+                redirected.setValue(nil, forHTTPHeaderField: header)
+            }
+        }
+        completionHandler(redirected)
     }
 }

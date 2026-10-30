@@ -2,53 +2,164 @@
 import SwiftUI
 import UIKit
 
+private struct EpisodeGlassShape: ViewModifier {
+    let capsule: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            if capsule { content.glassEffect(.regular, in: Capsule()) }
+            else { content.glassEffect(.regular, in: Circle()) }
+        } else {
+            if capsule { content.background(.regularMaterial, in: Capsule()) }
+            else { content.background(.regularMaterial, in: Circle()) }
+        }
+    }
+}
+
+struct DetailSkeletonBlock: View {
+    var cornerRadius: CGFloat = 12
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(LinearGradient(colors: [.white.opacity(0.07), .white.opacity(0.14),
+                                         .white.opacity(0.07)], startPoint: .topLeading,
+                                 endPoint: .bottomTrailing))
+            .accessibilityHidden(true)
+    }
+}
+
 struct SeriesArtwork: View {
     let baseAddress: String?
     let token: String?
     let itemID: String?
     let backdrop: Bool
     let fallback: URL?
+    var preferredURL: URL? = nil
+    var maximumWidth: Int = 600
+    @State private var preferredImage: UIImage?
+    @State private var preferredFailed = false
     @State private var image: UIImage?
+    @State private var localImage: UIImage?
 
     var body: some View {
         Group {
-            if let image {
+            if let preferredImage {
+                Image(uiImage: preferredImage).resizable().scaledToFill()
+            } else if preferredURL != nil && !preferredFailed {
+                DetailSkeletonBlock(cornerRadius: 0)
+            } else if let image {
                 Image(uiImage: image).resizable().scaledToFill()
-            } else if let fallback, fallback.isFileURL,
-                      let local = UIImage(contentsOfFile: fallback.path) {
-                Image(uiImage: local).resizable().scaledToFill()
+            } else if let localImage {
+                Image(uiImage: localImage).resizable().scaledToFill()
             } else if let fallback {
                 AsyncImage(url: fallback) { image in image.resizable().scaledToFill() }
-                    placeholder: { Rectangle().fill(.white.opacity(0.08)) }
+                    placeholder: { DetailSkeletonBlock(cornerRadius: 0) }
             } else {
-                Rectangle().fill(.white.opacity(0.08))
-                    .overlay(Image(systemName: "film.stack").font(.largeTitle).foregroundStyle(.white.opacity(0.3)))
+                DetailSkeletonBlock(cornerRadius: 0)
             }
         }
         .clipped()
-        .task(id: "\(baseAddress ?? "")|\(itemID ?? "")|\(backdrop)") {
+        .task(id: fallback) {
+            localImage = nil
+            guard let fallback, fallback.isFileURL else { return }
+            localImage = UIImage(contentsOfFile: fallback.path)
+        }
+        .task(id: preferredURL) {
+            preferredImage = nil
+            preferredFailed = false
+            guard let preferredURL else { return }
+            guard let data = try? await LocalMediaCache.shared.imageData(
+                    key: "tmdb|\(preferredURL.absoluteString)", fetch: {
+                        let (data, response) = try await URLSession.shared.data(from: preferredURL)
+                        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                            throw URLError(.badServerResponse)
+                        }
+                        return data
+                    }),
+                  !Task.isCancelled, let decoded = UIImage(data: data) else {
+                if !Task.isCancelled { preferredFailed = true }
+                return
+            }
+            preferredImage = decoded
+        }
+        .task(id: "\(baseAddress ?? "")|\(itemID ?? "")|\(backdrop)|\(preferredURL?.absoluteString ?? "")|\(preferredFailed)") {
             image = nil
+            guard preferredURL == nil || preferredFailed else { return }
             guard let baseAddress, let token, let itemID, let base = URL(string: baseAddress) else { return }
             let path = backdrop ? "Backdrop/0" : "Primary"
             var components = URLComponents(url: base.appendingPathComponent("Items")
                 .appendingPathComponent(itemID).appendingPathComponent("Images")
                 .appendingPathComponent(path), resolvingAgainstBaseURL: false)
-            components?.queryItems = [URLQueryItem(name: "maxWidth", value: backdrop ? "1400" : "600")]
+            components?.queryItems = [URLQueryItem(name: "maxWidth", value: backdrop ? "1400" : String(maximumWidth))]
             guard let url = components?.url else { return }
             var request = URLRequest(url: url)
             request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
-            if let (data, response) = try? await URLSession.shared.data(for: request),
-               (response as? HTTPURLResponse)?.statusCode == 200,
+            if let data = try? await LocalMediaCache.shared.imageData(
+                key: "server|\(baseAddress)|\(itemID)|\(path)|\(maximumWidth)", fetch: {
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                        throw URLError(.badServerResponse)
+                    }
+                    return data
+                }),
                let decoded = UIImage(data: data) {
                 image = decoded
             } else if backdrop {
                 request.url = base.appendingPathComponent("Items")
                     .appendingPathComponent(itemID).appendingPathComponent("Images/Primary")
-                if let (data, response) = try? await URLSession.shared.data(for: request),
-                   (response as? HTTPURLResponse)?.statusCode == 200 {
+                if let data = try? await LocalMediaCache.shared.imageData(
+                    key: "server|\(baseAddress)|\(itemID)|Primary|\(maximumWidth)", fetch: {
+                        let (data, response) = try await URLSession.shared.data(for: request)
+                        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                            throw URLError(.badServerResponse)
+                        }
+                        return data
+                    }) {
                     image = UIImage(data: data)
                 }
             }
+        }
+    }
+}
+
+struct DetailTitleArtwork: View {
+    let url: URL?
+    let title: String
+    @State private var image: UIImage?
+    @State private var failed = false
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFit()
+                    .frame(maxWidth: 310, maxHeight: 125)
+                    .accessibilityLabel(title)
+            } else if url != nil && !failed {
+                Color.clear.frame(width: 310, height: 125)
+            } else {
+                Text(title)
+                    .font(.system(size: 38, weight: .black, design: .rounded))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3).minimumScaleFactor(0.65)
+                    .foregroundStyle(.white)
+            }
+        }
+        .shadow(color: .black.opacity(0.6), radius: 8)
+        .task(id: url) {
+            image = nil
+            failed = false
+            guard let url else { failed = true; return }
+            guard let data = try? await LocalMediaCache.shared.imageData(
+                key: "tmdb|\(url.absoluteString)", fetch: {
+                    let (data, response) = try await URLSession.shared.data(from: url)
+                    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                        throw URLError(.badServerResponse)
+                    }
+                    return data
+                }), !Task.isCancelled, let decoded = UIImage(data: data) else {
+                if !Task.isCancelled { failed = true }
+                return
+            }
+            image = decoded
         }
     }
 }
@@ -64,11 +175,32 @@ struct SeriesDetailView: View {
     @State private var season = 1
     @State private var episodePage = 0
     @State private var showAllEpisodes = false
+    @State private var showSeasonPicker = false
+    @State private var editingEpisodes = false
+    @State private var selectedEpisodeIDs: Set<String> = []
     @State private var loading = false
     @State private var loadError: String?
-    @State private var overviewExpanded = false
+    @State private var artwork: TMDBService.DetailArtwork?
+    @State private var artworkResolved = false
+    @State private var artworkRetriedID: Int?
+    @State private var selectedEpisodeID: String?
+    @State private var synopsisSheet: SynopsisSheet?
+    @State private var serverConnection: (base: String, user: String, token: String,
+                                          sourceID: UUID, emby: Bool)?
+    @State private var localEpisodesByID: [String: MediaItem] = [:]
+
+    private struct SynopsisSheet: Identifiable {
+        let title: String
+        let text: String
+        var id: String { title }
+    }
 
     private var server: (base: String, user: String, token: String, sourceID: UUID, emby: Bool)? {
+        serverConnection
+    }
+
+    private func resolveServer() -> (base: String, user: String, token: String,
+                                     sourceID: UUID, emby: Bool)? {
         switch item.location {
         case .embyItem(let sourceID, _):
             guard let source = library.embySources.first(where: { $0.id == sourceID }),
@@ -96,9 +228,33 @@ struct SeriesDetailView: View {
         return Array(seasonEpisodes.dropFirst(start).prefix(10))
     }
     private var activeEpisode: JellyfinItem? {
-        episodes.first { $0.id == remoteID } ??
-        episodes.first { ($0.userData?.playbackPositionTicks ?? 0) > 0 && $0.userData?.played != true } ??
-        episodes.first { $0.userData?.played != true } ?? episodes.first
+        if let selectedEpisodeID, let selected = episodes.first(where: { $0.id == selectedEpisodeID }) {
+            return selected
+        }
+        let unfinished = episodes.filter { !episodeWatched($0) && episodeProgressSeconds($0) > 0 }
+        if let local = unfinished.max(by: {
+            (localItem(for: $0)?.lastPlayedAt ?? .distantPast) <
+            (localItem(for: $1)?.lastPlayedAt ?? .distantPast)
+        }), localItem(for: local)?.lastPlayedAt != nil { return local }
+        if let remote = unfinished.max(by: { episodeProgressSeconds($0) < episodeProgressSeconds($1) }) {
+            return remote
+        }
+        return episodes.first { $0.id == remoteID } ??
+            episodes.first { !episodeWatched($0) } ?? episodes.first
+    }
+    private var activeLocalItem: MediaItem? {
+        guard let activeEpisode else { return nil }
+        return localItem(for: activeEpisode)
+    }
+    private func localItem(for episode: JellyfinItem) -> MediaItem? {
+        localEpisodesByID[episode.id]
+    }
+    private var activeProgressSeconds: Double {
+        max(activeLocalItem?.position ?? 0,
+            Double(activeEpisode?.userData?.playbackPositionTicks ?? 0) / 10_000_000)
+    }
+    private var activeIsInProgress: Bool {
+        activeProgressSeconds > 0 && !(activeLocalItem?.watched ?? activeEpisode?.userData?.played ?? false)
     }
     private var activeSource: JellyfinItem.MediaSource? { activeEpisode?.mediaSources?.first }
     private var activeStreams: [JellyfinItem.MediaSource.Stream] { activeSource?.mediaStreams ?? [] }
@@ -121,19 +277,16 @@ struct SeriesDetailView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    hero(height: max(550, geometry.size.height * 0.68), width: geometry.size.width)
+                    StretchyHeroHeader(height: max(550, geometry.size.height * 0.68)) { height, pull in
+                        hero(height: height, width: geometry.size.width, pull: pull)
+                    }
                     VStack(alignment: .leading, spacing: 24) {
                         if let summary = page?.series.overview ?? item.metadata?.summary ?? item.serverSummary,
-                           !summary.isEmpty {
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text(summary).font(.subheadline).foregroundStyle(.white.opacity(0.85))
-                                    .lineSpacing(4).lineLimit(overviewExpanded ? nil : 4)
-                                if summary.count > 110 {
-                                    Button(overviewExpanded ? "收起简介" : "展开简介") {
-                                        withAnimation(.easeInOut(duration: 0.2)) { overviewExpanded.toggle() }
-                                    }
-                                    .font(.caption.weight(.semibold)).foregroundStyle(.white)
-                                }
+                           !summary.isEmpty { synopsisPreview(summary, title: "剧集简介", lines: 4) }
+                        else if loading {
+                            VStack(alignment: .leading, spacing: 8) {
+                                DetailSkeletonBlock().frame(height: 14)
+                                DetailSkeletonBlock().frame(width: 250, height: 14)
                             }
                         }
                         episodeSection
@@ -144,74 +297,60 @@ struct SeriesDetailView: View {
                     .frame(maxWidth: 780)
                     .frame(maxWidth: .infinity)
                 }
+                .frame(width: geometry.size.width, alignment: .leading)
             }
             .background(Color(red: 0.25, green: 0.19, blue: 0.22))
             .ignoresSafeArea(edges: .top)
+            .coordinateSpace(name: "lucentHeroScroll")
         }
-        .task(id: item.id) { await load() }
-        .sheet(isPresented: $showAllEpisodes) { allEpisodesSheet }
+        .overlay(alignment: .top) {
+            topControls
+                .padding(.top, 8)
+        }
+        .task(id: item.id) {
+            selectedEpisodeID = nil
+            serverConnection = resolveServer()
+            await load()
+        }
+        .onReceive(library.$items) { items in
+            let sourceID: UUID
+            switch item.location {
+            case .embyItem(let id, _), .jellyfinItem(let id, _): sourceID = id
+            default: updateLocalPage(received: items); return
+            }
+            var indexed: [String: MediaItem] = [:]
+            for local in items {
+                switch local.location {
+                case .embyItem(let id, let episodeID) where id == sourceID:
+                    indexed[episodeID] = local
+                case .jellyfinItem(let id, let episodeID) where id == sourceID:
+                    indexed[episodeID] = local
+                default: break
+                }
+            }
+            localEpisodesByID = indexed
+        }
+        .task(id: "\(item.id)|\(item.metadata?.providerID ?? 0)") {
+            artwork = nil
+            artworkResolved = false
+            artworkRetriedID = nil
+            await loadArtwork(remote: nil)
+            if artwork?.posterURL == nil, let remote = page?.series {
+                await loadArtwork(remote: remote)
+            }
+        }
+        .onChange(of: page?.series.id) { _, _ in
+            guard artworkResolved, artwork?.posterURL == nil, let remote = page?.series else { return }
+            Task { await loadArtwork(remote: remote) }
+        }
+        .fullScreenCover(isPresented: $showAllEpisodes) { allEpisodesSheet }
+        .sheet(item: $synopsisSheet) { synopsis in
+            synopsisSheetView(synopsis)
+        }
         .preferredColorScheme(.dark)
     }
 
-    private func hero(height: CGFloat, width: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            SeriesArtwork(baseAddress: server?.base, token: server?.token,
-                          itemID: page?.series.id ?? remoteID, backdrop: true,
-                          fallback: item.metadata?.posterURL)
-                .frame(width: width, height: height).clipped()
-                .overlay(LinearGradient(colors: [.black.opacity(0.25), .clear,
-                                                 Color(red: 0.25, green: 0.19, blue: 0.22).opacity(0.35),
-                                                 Color(red: 0.25, green: 0.19, blue: 0.22)],
-                                        startPoint: .top, endPoint: .bottom))
-            VStack(spacing: 13) {
-                Text(seriesName)
-                    .font(.system(size: 43, weight: .black, design: .rounded))
-                    .tracking(-1.5).multilineTextAlignment(.center)
-                    .shadow(color: .black.opacity(0.7), radius: 8)
-                    .lineLimit(3).minimumScaleFactor(0.65)
-                HStack(spacing: 7) {
-                    if let rating = page?.series.communityRating ?? item.metadata?.rating {
-                        Image(systemName: "star.fill").foregroundStyle(.yellow)
-                        Text(rating.formatted(.number.precision(.fractionLength(1))))
-                    }
-                    if let date = displayDate { Text("·  " + date) }
-                    if let genres = page?.series.genres, !genres.isEmpty {
-                        Text("·  " + genres.prefix(3).joined(separator: "、")).lineLimit(1)
-                    }
-                }
-                .font(.subheadline.weight(.semibold))
-                Text(details)
-                    .font(.caption).foregroundStyle(.white.opacity(0.82))
-                Button { play(activeEpisode) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "play.fill")
-                        VStack(spacing: 1) {
-                            Text(item.isInProgress || activeEpisode?.userData?.playbackPositionTicks ?? 0 > 0 ? "继续播放" : "开始播放")
-                                .font(.headline)
-                            if let position = activeEpisode?.userData?.playbackPositionTicks, position > 0 {
-                                Text("上次播放到：\(clock(Double(position) / 10_000_000))")
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity).frame(height: 62)
-                    .foregroundStyle(.black).background(.white, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(loading || (isSeriesEntry && activeEpisode == nil))
-                HStack(spacing: 42) {
-                    Button { library.toggleFavorite(id: item.id) } label: {
-                        Image(systemName: item.isFavorite ? "heart.fill" : "heart")
-                    }
-                    Button {
-                        if item.watched { library.markUnwatched(id: item.id) }
-                        else { library.markWatched(id: item.id) }
-                    } label: { Image(systemName: "flag") }
-                }
-                .font(.title3).foregroundStyle(.white.opacity(0.86)).padding(.top, 8)
-            }
-            .padding(.horizontal, 28).padding(.bottom, 12).frame(maxWidth: 660)
-            VStack {
+    private var topControls: some View {
                 HStack {
                     Button { dismiss() } label: { Image(systemName: "chevron.left")
                         .frame(width: 46, height: 46).background(.black.opacity(0.46), in: Circle()) }
@@ -233,19 +372,84 @@ struct SeriesDetailView: View {
                     } label: { Image(systemName: "ellipsis")
                         .frame(width: 46, height: 46).background(.black.opacity(0.46), in: Circle()) }
                 }
-                .font(.title3.weight(.semibold))
+        .font(.title3.weight(.semibold))
+        .foregroundStyle(.white)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 26)
+    }
+
+    private func hero(height: CGFloat, width: CGFloat, pull: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            if artworkResolved {
+                SeriesArtwork(baseAddress: server?.base, token: server?.token,
+                              itemID: page?.series.id ?? remoteID, backdrop: false,
+                              fallback: item.metadata?.posterURL,
+                              preferredURL: artwork?.posterURL, maximumWidth: 1400)
+                    .frame(width: width, height: height)
+                    .scaleEffect(1 + min(pull / max(height - pull, 1), 0.4), anchor: .top)
+                    .clipped()
+            } else { DetailSkeletonBlock(cornerRadius: 0).frame(width: width, height: height) }
+            LinearGradient(colors: [.black.opacity(0.25), .clear,
+                                    Color(red: 0.25, green: 0.19, blue: 0.22).opacity(0.35),
+                                    Color(red: 0.25, green: 0.19, blue: 0.22)],
+                           startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 13) {
+                if artworkResolved {
+                    DetailTitleArtwork(url: artwork?.logoURL,
+                                       title: artwork?.localizedTitle ?? seriesName)
+                } else {
+                    Color.clear.frame(height: 125)
+                }
+                HStack(spacing: 7) {
+                    if let rating = activeEpisode?.communityRating ?? page?.series.communityRating ?? item.metadata?.rating {
+                        Image(systemName: "star.fill").foregroundStyle(.white)
+                        Text(rating.formatted(.number.precision(.fractionLength(1))))
+                    }
+                    if let genres = page?.series.genres, !genres.isEmpty {
+                        Text("·  " + genres.prefix(3).joined(separator: "、")).lineLimit(1)
+                    }
+                }
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
+                if !details.isEmpty {
+                    Text(details)
+                        .font(.caption).foregroundStyle(.white.opacity(0.82))
+                }
+                Button { play(activeEpisode) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.fill")
+                        VStack(spacing: 1) {
+                            Text(activeIsInProgress ? "继续播放" : "开始播放")
+                                .font(.headline)
+                            if activeIsInProgress {
+                                Text("上次播放到：\(clock(activeProgressSeconds))")
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 330).frame(height: 54)
+                    .foregroundStyle(.black).background(.white, in: Capsule())
+                }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 26).padding(.top, 66)
-                .background { Color.clear }
-                Spacer()
+                .disabled(loading || (isSeriesEntry && activeEpisode == nil))
+                HStack(spacing: 42) {
+                    Button { library.toggleFavorite(id: item.id) } label: {
+                        Image(systemName: item.isFavorite ? "heart.fill" : "heart")
+                    }
+                    Button {
+                        if item.watched { library.markUnwatched(id: item.id) }
+                        else { library.markWatched(id: item.id) }
+                    } label: { Image(systemName: "flag") }
+                }
+                .font(.title3).foregroundStyle(.white.opacity(0.86)).padding(.top, 8)
             }
+            .padding(.horizontal, 28).padding(.bottom, 12).frame(maxWidth: 660)
         }
         .frame(width: width, height: height)
     }
 
     private var details: String {
-        let minutes = Int((activeEpisode?.runTimeTicks.map { Double($0) / 10_000_000 } ?? item.duration ?? 0) / 60)
+        let minutes = activeEpisode?.runTimeTicks.map { Int(Double($0) / 600_000_000) }
         let size = activeSource?.size.map { String(format: "%.2f GB", Double($0) / 1_000_000_000) }
         let resolution: String? = {
             guard let width = activeVideo?.width else { return nil }
@@ -254,18 +458,57 @@ struct SeriesDetailView: View {
             if width >= 1280 { return "720p" }
             return nil
         }()
-        return ["共 \(max(seasons.count, 1)) 季", minutes > 0 ? "\(minutes) 分钟" : nil,
-                !episodes.isEmpty ? "\(episodes.count) 集" : nil,
+        return [activeDisplayDate, minutes.flatMap { $0 > 0 ? "\($0) 分钟" : nil },
                 size, resolution, activeVideo?.codec?.uppercased()]
             .compactMap { $0 }.joined(separator: " · ")
     }
 
-    private var displayDate: String? {
-        if let raw = page?.series.premiereDate, raw.count >= 10 {
+    private var activeDisplayDate: String? {
+        if let raw = activeEpisode?.premiereDate, raw.count >= 10 {
             return String(raw.prefix(10)).replacingOccurrences(of: "-", with: "/")
         }
-        if let year = page?.series.productionYear { return String(year) }
         return nil
+    }
+
+    private func synopsisPreview(_ text: String, title: String, lines: Int,
+                                 font: Font = .subheadline, opacity: Double = 0.84) -> some View {
+        Button {
+            synopsisSheet = .init(title: title, text: text)
+        } label: {
+            Text(text)
+                .font(font)
+                .foregroundStyle(.white.opacity(opacity))
+                .lineSpacing(4)
+                .lineLimit(lines)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("点按查看完整简介")
+    }
+
+    private func synopsisSheetView(_ synopsis: SynopsisSheet) -> some View {
+        NavigationStack {
+            ScrollView {
+                Text(synopsis.text)
+                    .font(.body)
+                    .lineSpacing(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(24)
+            }
+            .navigationTitle(synopsis.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭", systemImage: "xmark") { synopsisSheet = nil }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("复制") { UIPasteboard.general.string = synopsis.text }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .preferredColorScheme(.dark)
     }
 
     private var episodeSection: some View {
@@ -287,14 +530,25 @@ struct SeriesDetailView: View {
                     .disabled(episodes.isEmpty)
             }
             .font(.title3.bold()).foregroundStyle(.white)
-            if loading { ProgressView().tint(.white) }
+            if loading {
+                HStack(spacing: 13) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        VStack(alignment: .leading, spacing: 8) {
+                            DetailSkeletonBlock().frame(width: 210, height: 122)
+                            DetailSkeletonBlock().frame(width: 160, height: 14)
+                            DetailSkeletonBlock().frame(width: 190, height: 12)
+                        }
+                    }
+                }
+                .accessibilityLabel("正在加载剧集")
+            }
             else if let loadError { Text(loadError).font(.footnote).foregroundStyle(.white.opacity(0.72)) }
             else if episodes.isEmpty { Text("暂无剧集信息").foregroundStyle(.white.opacity(0.7)) }
             else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 13) {
                         ForEach(shownEpisodes, id: \.id) { episode in
-                            Button { play(episode) } label: { episodeCard(episode) }.buttonStyle(.plain)
+                            episodeCard(episode)
                         }
                     }
                 }
@@ -320,34 +574,43 @@ struct SeriesDetailView: View {
 
     private func episodeCard(_ episode: JellyfinItem) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            SeriesArtwork(baseAddress: server?.base, token: server?.token,
-                          itemID: episode.id, backdrop: false, fallback: nil)
-                .frame(width: 210, height: 122).clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(alignment: .topTrailing) {
-                    if episode.userData?.played == true {
-                        Image(systemName: "checkmark").font(.caption.bold())
-                            .foregroundStyle(.black).padding(6).background(.white, in: Circle())
-                            .padding(8)
-                    }
-                }
-                .overlay(alignment: .bottom) {
-                    if let ticks = episode.userData?.playbackPositionTicks,
-                       let duration = episode.runTimeTicks, duration > 0, ticks > 0 {
-                        GeometryReader { proxy in
-                            Capsule().fill(.white.opacity(0.6))
-                                .overlay(alignment: .leading) {
-                                    Capsule().fill(.white).frame(width: proxy.size.width * min(1, Double(ticks) / Double(duration)))
-                                }
+            Button { selectOrPlay(episode) } label: {
+                VStack(alignment: .leading, spacing: 7) {
+                    SeriesArtwork(baseAddress: server?.base, token: server?.token,
+                                  itemID: episode.id, backdrop: false, fallback: nil, preferredURL: episodeArtworkURL(episode))
+                        .frame(width: 210, height: 122).clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay(alignment: .topTrailing) {
+                            if episodeWatched(episode) {
+                                Image(systemName: "checkmark").font(.caption.bold())
+                                    .foregroundStyle(.black).padding(6).background(.white, in: Circle())
+                                    .padding(8)
+                            }
                         }
-                        .frame(height: 3).padding(.horizontal, 10).padding(.bottom, 8)
-                    }
+                        .overlay(alignment: .bottom) {
+                            if let duration = episode.runTimeTicks, duration > 0,
+                               episodeProgressSeconds(episode) > 0 {
+                                GeometryReader { proxy in
+                                    Capsule().fill(.white.opacity(0.6))
+                                        .overlay(alignment: .leading) {
+                                            Capsule().fill(.white)
+                                                .frame(width: proxy.size.width * min(1,
+                                                    episodeProgressSeconds(episode) * 10_000_000 / Double(duration)))
+                                        }
+                                }
+                                .frame(height: 3).padding(.horizontal, 10).padding(.bottom, 8)
+                            }
+                        }
+                        .overlay(RoundedRectangle(cornerRadius: 14)
+                            .stroke(episode.id == activeEpisode?.id ? .white : .clear, lineWidth: 2))
+                    Text("E\(String(format: "%02d", episode.indexNumber ?? 0)) · \(episode.name)")
+                        .font(.subheadline.weight(.semibold)).lineLimit(2)
                 }
-                .overlay(RoundedRectangle(cornerRadius: 14)
-                    .stroke(episode.id == activeEpisode?.id ? .white : .clear, lineWidth: 2))
-            Text("\(episode.indexNumber ?? 0). \(episode.name)")
-                .font(.subheadline.weight(.medium)).lineLimit(1)
-            Text("第 \(episode.parentIndexNumber ?? season) 季 · 第 \(episode.indexNumber ?? 0) 集")
-                .font(.caption).foregroundStyle(.white.opacity(0.65))
+            }
+            .buttonStyle(.plain)
+            if let summary = episode.overview, !summary.isEmpty {
+                synopsisPreview(summary, title: "第 \(episode.indexNumber ?? 0) 集简介", lines: 3,
+                                font: .caption, opacity: 0.65)
+            }
         }
         .frame(width: 210, alignment: .leading).foregroundStyle(.white)
     }
@@ -363,7 +626,8 @@ struct SeriesDetailView: View {
                                 Group {
                                     if person.primaryImageTag != nil {
                                         SeriesArtwork(baseAddress: server?.base, token: server?.token,
-                                                      itemID: person.id, backdrop: false, fallback: nil)
+                                                      itemID: person.id, backdrop: false, fallback: nil,
+                                                      preferredURL: server == nil ? person.primaryImageTag.flatMap { URL(string: "https://image.tmdb.org/t/p/w185\($0)") } : nil)
                                     } else {
                                         RoundedRectangle(cornerRadius: 13)
                                             .fill(.white.opacity(0.12))
@@ -374,7 +638,7 @@ struct SeriesDetailView: View {
                                 }
                                 .frame(width: 88, height: 112)
                                 .clipShape(RoundedRectangle(cornerRadius: 13))
-                                Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
+                                Text(person.name).font(.caption.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
                                 if let role = person.role {
                                     Text(role).font(.caption2).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                                 }
@@ -388,66 +652,232 @@ struct SeriesDetailView: View {
     }
 
     private var mediaSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("当前分集音视频字幕")
-                .font(.title3.bold())
-                .foregroundStyle(.white)
-            VStack(alignment: .leading, spacing: 9) {
-                if let episode = activeEpisode {
-                    infoRow("分集", "第 \(episode.parentIndexNumber ?? 0) 季 · 第 \(episode.indexNumber ?? 0) 集 · \(episode.name)")
-                }
-                if let video = activeVideo {
-                    infoRow("视频", [video.width.map(String.init), video.height.map { "× \($0)" },
-                                    video.codec?.uppercased(), video.videoRangeType]
-                        .compactMap { $0 }.joined(separator: " "))
-                }
-                if !activeAudio.isEmpty {
-                    infoRow("音轨", activeAudio.compactMap { $0.displayTitle ?? $0.language ?? $0.codec }
-                        .joined(separator: " · "))
-                }
-                if !activeSubtitles.isEmpty {
-                    infoRow("字幕", activeSubtitles.compactMap { $0.displayTitle ?? $0.language }
-                        .joined(separator: " · "))
-                }
-                if let container = activeSource?.container {
-                    infoRow("封装", container.uppercased())
-                }
-                if activeEpisode == nil { Text("暂无媒体流信息").foregroundStyle(.white.opacity(0.65)) }
-            }
-            .font(.subheadline)
-            .padding(17)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-        }
-    }
-
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(label).foregroundStyle(.white.opacity(0.6)).frame(width: 40, alignment: .leading)
-            Text(value).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
-        }
+        DetailMediaMetadataPanel(streams: activeStreams, source: activeSource,
+                                 path: activeEpisode?.path, providerIDs: page?.series.providerIds,
+                                 tmdbID: item.metadata?.providerID, isSeries: true)
     }
 
     private var allEpisodesSheet: some View {
-        NavigationStack {
-            List {
-                ForEach(seasons, id: \.self) { number in
-                    Section("第 \(number) 季") {
-                        ForEach(episodes.filter { $0.parentIndexNumber == number }, id: \.id) { episode in
-                            Button { showAllEpisodes = false; play(episode) } label: {
-                                HStack {
-                                    Text("\(episode.indexNumber ?? 0). \(episode.name)")
-                                    Spacer()
-                                    if episode.userData?.played == true { Image(systemName: "checkmark.circle.fill") }
-                                }
-                            }
+        VStack(spacing: 0) {
+            ZStack {
+                Text("\(seriesName) 第 \(season) 季")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, 90)
+                HStack {
+                    Button { showAllEpisodes = false } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title3.weight(.medium))
+                            .frame(width: 48, height: 48)
+                            .modifier(EpisodeGlassShape(capsule: false))
+                    }
+                    .accessibilityLabel("返回剧集详情")
+                    Spacer(minLength: 0)
+                    if editingEpisodes {
+                        Button("完成") { editingEpisodes = false; selectedEpisodeIDs.removeAll() }
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 76, height: 48)
+                            .modifier(EpisodeGlassShape(capsule: true))
+                    } else {
+                        Button { editingEpisodes = true } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.title3.weight(.semibold))
+                                .frame(width: 48, height: 48)
+                                .modifier(EpisodeGlassShape(capsule: false))
                         }
+                        .accessibilityLabel("编辑剧集")
                     }
                 }
             }
-            .navigationTitle("全部剧集")
-            .toolbar { Button("完成") { showAllEpisodes = false } }
+            .foregroundStyle(.white)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 26)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+            ScrollView {
+                HStack {
+                    Button { showSeasonPicker = true } label: {
+                        HStack(spacing: 9) {
+                            Text("第 \(season) 季").font(.subheadline.weight(.semibold))
+                            Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16).frame(height: 42)
+                        .modifier(EpisodeGlassShape(capsule: true))
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showSeasonPicker, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(seasons, id: \.self) { number in
+                                Button {
+                                    season = number
+                                    selectedEpisodeIDs.removeAll()
+                                    showSeasonPicker = false
+                                } label: {
+                                    HStack {
+                                        Text("第 \(number) 季")
+                                        Spacer()
+                                        if season == number { Image(systemName: "checkmark") }
+                                    }
+                                    .foregroundStyle(.primary)
+                                    .padding(.horizontal, 15).frame(height: 44)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(8)
+                        .frame(width: 190)
+                        .presentationCompactAdaptation(.popover)
+                    }
+                    Spacer()
+                    Text("\(seasonEpisodes.count) 集")
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.62))
+                }
+                .padding(.horizontal, 20).padding(.top, 16)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                          alignment: .center, spacing: 26) {
+                    ForEach(seasonEpisodes, id: \.id) { episode in
+                        Button {
+                            if editingEpisodes {
+                                if selectedEpisodeIDs.contains(episode.id) { selectedEpisodeIDs.remove(episode.id) }
+                                else { selectedEpisodeIDs.insert(episode.id) }
+                            } else {
+                                showAllEpisodes = false
+                                selectOrPlay(episode)
+                            }
+                        } label: {
+                            fullEpisodeCard(episode)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 100)
+            }
         }
+        .background(Color.black.ignoresSafeArea())
+        .overlay(alignment: .bottom) {
+            if editingEpisodes { episodeBatchBar }
+        }
+        .preferredColorScheme(.dark)
+        .onDisappear { editingEpisodes = false; selectedEpisodeIDs.removeAll(); showSeasonPicker = false }
+    }
+
+    private var episodeBatchBar: some View {
+        HStack(spacing: 10) {
+            Button(selectedEpisodeIDs.count == seasonEpisodes.count ? "取消全选" : "全选") {
+                if selectedEpisodeIDs.count == seasonEpisodes.count { selectedEpisodeIDs.removeAll() }
+                else { selectedEpisodeIDs = Set(seasonEpisodes.map(\.id)) }
+            }
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 18).frame(height: 48)
+            .modifier(EpisodeGlassShape(capsule: true))
+            Spacer(minLength: 0)
+            Text("已选择 \(selectedEpisodeIDs.count) 项")
+                .font(.subheadline)
+                .monospacedDigit()
+                .padding(.horizontal, 16).frame(height: 48)
+                .modifier(EpisodeGlassShape(capsule: true))
+            Spacer(minLength: 0)
+            Menu {
+                Button("添加到收藏夹", systemImage: "star.fill") { batchEpisodes(.favorite) }
+                Button("从收藏夹中移除", systemImage: "star") { batchEpisodes(.unfavorite) }
+                Button("标记为已观看", systemImage: "flag.fill") { batchEpisodes(.watched) }
+                Button("标记为未观看", systemImage: "flag") { batchEpisodes(.unwatched) }
+                Button("下载", systemImage: "arrow.down") { batchEpisodes(.download) }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 48, height: 48)
+                    .modifier(EpisodeGlassShape(capsule: false))
+            }
+            .disabled(selectedEpisodeIDs.isEmpty)
+        }
+        .foregroundStyle(.white)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 26)
+        .padding(.bottom, 12)
+    }
+
+    private func fullEpisodeCard(_ episode: JellyfinItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SeriesArtwork(baseAddress: server?.base, token: server?.token,
+                          itemID: episode.id, backdrop: false, fallback: nil, preferredURL: episodeArtworkURL(episode))
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1.75, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 13))
+                .overlay(alignment: .topLeading) {
+                    if editingEpisodes {
+                        Image(systemName: selectedEpisodeIDs.contains(episode.id) ? "checkmark.square.fill" : "square")
+                            .font(.title3.weight(.medium))
+                            .foregroundStyle(selectedEpisodeIDs.contains(episode.id) ? .green : .white)
+                            .padding(10)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if episodeWatched(episode) {
+                        Image(systemName: "checkmark").font(.caption.bold())
+                            .foregroundStyle(.black).padding(5).background(.white.opacity(0.85), in: Circle())
+                            .padding(8)
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if let rating = episode.communityRating {
+                        Text(rating.formatted(.number.precision(.fractionLength(1))))
+                            .font(.caption.bold()).foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(.black.opacity(0.65), in: UnevenRoundedRectangle(topLeadingRadius: 9))
+                    }
+                }
+                .overlay(RoundedRectangle(cornerRadius: 13)
+                    .strokeBorder(selectedEpisodeIDs.contains(episode.id) ? .green :
+                                  episode.id == activeEpisode?.id ? .white : .white.opacity(0.12),
+                                  lineWidth: selectedEpisodeIDs.contains(episode.id) ||
+                                  episode.id == activeEpisode?.id ? 2 : 0.5))
+            Text("\(episode.indexNumber ?? 0). \(episode.name)")
+                .font(.subheadline.weight(.semibold)).lineLimit(2)
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func episodeWatched(_ episode: JellyfinItem) -> Bool {
+        if let local = localItem(for: episode) { return local.watched }
+        return episode.userData?.played == true
+    }
+
+    private func episodeProgressSeconds(_ episode: JellyfinItem) -> Double {
+        let serverPosition = Double(episode.userData?.playbackPositionTicks ?? 0) / 10_000_000
+        return max(localItem(for: episode)?.position ?? 0, serverPosition)
+    }
+
+    private enum EpisodeBatchAction { case favorite, unfavorite, watched, unwatched, download }
+
+    private func batchEpisodes(_ action: EpisodeBatchAction) {
+        let selected = seasonEpisodes.filter { selectedEpisodeIDs.contains($0.id) }
+        let items = selected.compactMap { mediaItem(for: $0) }
+        for entry in items {
+            switch action {
+            case .favorite:
+                if !entry.isFavorite { library.toggleFavorite(id: entry.id) }
+            case .unfavorite:
+                if entry.isFavorite { library.toggleFavorite(id: entry.id) }
+            case .watched: library.markWatched(id: entry.id)
+            case .unwatched: library.markUnwatched(id: entry.id)
+            case .download: break
+            }
+        }
+        if action == .download {
+            Task {
+                for entry in items where library.downloadedURL(for: entry) == nil {
+                    await library.download(id: entry.id)
+                }
+            }
+        }
+        selectedEpisodeIDs.removeAll()
+        editingEpisodes = false
     }
 
     private func play(_ episode: JellyfinItem?) {
@@ -458,13 +888,22 @@ struct SeriesDetailView: View {
         if let selected = mediaItem(for: episode) { onPlay(selected) }
     }
 
+    private func selectOrPlay(_ episode: JellyfinItem) {
+        if activeEpisode?.id == episode.id {
+            play(episode)
+        } else {
+            selectedEpisodeID = episode.id
+        }
+    }
+
     private func mediaItem(for episode: JellyfinItem) -> MediaItem? {
+        if server == nil { return localItem(for: episode) }
         guard let server else { return nil }
         var selected = server.emby
             ? library.openEmbyItem(sourceID: server.sourceID, remote: episode)
             : library.openJellyfinItem(sourceID: server.sourceID, remote: episode)
         if let ticks = episode.userData?.playbackPositionTicks {
-            selected.position = Double(ticks) / 10_000_000
+            selected.position = max(selected.position, Double(ticks) / 10_000_000)
         }
         if let duration = episode.runTimeTicks {
             selected.duration = Double(duration) / 10_000_000
@@ -477,8 +916,35 @@ struct SeriesDetailView: View {
         return String(format: "%02d:%02d", time / 60, time % 60)
     }
 
+    private func updateLocalPage(received: [MediaItem]? = nil) {
+        // @Published emits before the stored array is replaced. Use the received
+        // values to avoid showing the previous probe result or playback position.
+        let allowed = Set(library.localLibraryItems.map(\.id))
+        let values = received ?? library.localLibraryItems
+        let current = values.first { $0.id == item.id } ?? item
+        let group = values.filter {
+            allowed.contains($0.id) && $0.missingSince == nil && ($0.catalogGroupID == current.catalogGroupID ||
+                ($0.metadata == nil && $0.identity?.seriesName == current.identity?.seriesName))
+        }.sorted { ($0.identity?.episodeSortOrder ?? 0) < ($1.identity?.episodeSortOrder ?? 0) }
+        localEpisodesByID = Dictionary(uniqueKeysWithValues: group.map { ($0.id.uuidString, $0) })
+        if let series = (group.first(where: { $0.metadata != nil }) ?? item).localDetailItem(asSeries: true) {
+            page = .init(series: series, episodes: group.compactMap { $0.localDetailItem() })
+        }
+    }
+
+    private func episodeArtworkURL(_ episode: JellyfinItem) -> URL? {
+        guard server == nil else { return nil }
+        let path = localItem(for: episode)?.catalogEpisode?.stillPath ?? item.metadata?.backdropPath ?? item.metadata?.posterPath
+        guard let path else { return nil }
+        return URL(string: "https://image.tmdb.org/t/p/w780\(path)")
+    }
+
     private func load() async {
-        guard let server, let remoteID else { return }
+        guard let server, let remoteID else {
+            updateLocalPage()
+            if let currentSeason = activeEpisode?.parentIndexNumber { season = currentSeason }
+            return
+        }
         loading = true
         loadError = nil
         defer { loading = false }
@@ -490,6 +956,174 @@ struct SeriesDetailView: View {
             episodePage = currentIndex / 10
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    private func loadArtwork(remote: JellyfinItem?) async {
+        guard let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else {
+            artworkResolved = true
+            return
+        }
+        let remoteArtworkID = TMDBService.artworkID(remote: remote, metadata: nil)
+        if let remoteArtworkID {
+            guard remoteArtworkID != artworkRetriedID else { return }
+            artworkRetriedID = remoteArtworkID
+        }
+        let result = try? await TMDBService.detailArtwork(remote: remote,
+            metadata: item.metadata, title: seriesName, television: true,
+            language: TMDBService.deviceLanguage, token: token,
+            displayWidthPixels: Int(UIScreen.main.bounds.width * UIScreen.main.scale))
+        guard !Task.isCancelled else { return }
+        if let result, result.posterURL != nil || artwork == nil { artwork = result }
+        artworkResolved = true
+    }
+}
+
+struct DetailMediaMetadataPanel: View {
+    let streams: [JellyfinItem.MediaSource.Stream]
+    let source: JellyfinItem.MediaSource?
+    let path: String?
+    let providerIDs: [String: String]?
+    let tmdbID: Int?
+    let isSeries: Bool
+
+    private struct ExternalLink: Identifiable {
+        let title: String
+        let url: URL
+        var id: String { title }
+    }
+
+    private func provider(_ key: String) -> String? {
+        providerIDs?.first { $0.key.caseInsensitiveCompare(key) == .orderedSame }?.value
+    }
+
+    private var links: [ExternalLink] {
+        var result: [ExternalLink] = []
+        if let id = provider("Douban"), id.allSatisfy(\.isNumber),
+           let url = URL(string: "https://movie.douban.com/subject/\(id)/") {
+            result.append(.init(title: "豆瓣", url: url))
+        }
+        if let id = provider("Imdb"), id.range(of: "^tt[0-9]+$", options: .regularExpression) != nil,
+           let url = URL(string: "https://www.imdb.com/title/\(id)/") {
+            result.append(.init(title: "IMDb", url: url))
+        }
+        let resolvedTMDB = provider("Tmdb") ?? tmdbID.map(String.init)
+        if let id = resolvedTMDB, !id.isEmpty, id.allSatisfy(\.isNumber) {
+            let type = isSeries ? "tv" : "movie"
+            if let url = URL(string: "https://www.themoviedb.org/\(type)/\(id)") {
+                result.append(.init(title: "TheMovieDb", url: url))
+            }
+            if let url = URL(string: "https://trakt.tv/search/tmdb/\(id)?id_type=\(type)") {
+                result.append(.init(title: "Trakt", url: url))
+            }
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if !links.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("链接").font(.title3.bold()).foregroundStyle(.white)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(links) { link in
+                                Link(destination: link.url) {
+                                    Label(link.title, systemImage: "link")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white.opacity(0.78))
+                                        .padding(.horizontal, 14).padding(.vertical, 8)
+                                        .background(.white.opacity(0.07), in: Capsule())
+                                        .overlay(Capsule().strokeBorder(.white.opacity(0.13)))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 14) {
+                Text("媒体信息").font(.title3.bold()).foregroundStyle(.white)
+                if streams.isEmpty {
+                    Text("暂无媒体流信息").font(.subheadline).foregroundStyle(.white.opacity(0.65))
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(Array(streams.enumerated()), id: \.offset) { _, stream in
+                                streamCard(stream)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .contentMargins(.trailing, 22)
+                }
+                if let path, !path.isEmpty {
+                    VStack(spacing: 4) {
+                        Text((path as NSString).lastPathComponent).lineLimit(2)
+                        HStack(spacing: 8) {
+                            if let container = MediaInfoLabels.container(source?.container, filename: path) { Text(container) }
+                            if let size = source?.size {
+                                Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                            }
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(maxWidth: .infinity)
+                    .padding(14)
+                    .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.12)))
+                }
+            }
+        }
+    }
+
+    private func streamCard(_ stream: JellyfinItem.MediaSource.Stream) -> some View {
+        let kind = stream.type ?? "媒体流"
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Image(systemName: kind == "Video" ? "video" : kind == "Audio" ? "speaker.wave.2" : "captions.bubble")
+                Text(kind == "Video" ? "视频" : kind == "Audio" ? "音频" : "字幕")
+                Spacer()
+                if stream.isDefault == true { Image(systemName: "checkmark") }
+            }
+            .font(.headline).foregroundStyle(.white)
+            metadataRow("标题", stream.displayTitle)
+            metadataRow("语言", stream.language)
+            metadataRow("编码", stream.codec)
+            if let width = stream.width, let height = stream.height {
+                metadataRow("分辨率", "\(width)×\(height)")
+            }
+            if let rate = stream.averageFrameRate { metadataRow("帧率", rate.formatted()) }
+            if let rate = stream.bitRate { metadataRow("比特率", "\(rate / 1000) kbps") }
+            metadataRow("动态范围", stream.videoRangeType)
+            metadataRow("配置", stream.profile)
+            if let level = stream.level { metadataRow("等级", level.formatted()) }
+            metadataRow("长宽比", stream.aspectRatio)
+            if let channels = stream.channels { metadataRow("声道", "\(channels)") }
+            metadataRow("布局", stream.channelLayout)
+            if let sampleRate = stream.sampleRate { metadataRow("采样率", "\(sampleRate) Hz") }
+            if let external = stream.isExternal { metadataRow("外部", external ? "是" : "否") }
+            if let selected = stream.isDefault { metadataRow("默认", selected ? "是" : "否") }
+            metadataRow("色域", stream.colorSpace)
+            metadataRow("色偏", stream.colorTransfer)
+            metadataRow("基色", stream.colorPrimaries)
+            metadataRow("像素格式", stream.pixelFormat)
+            Spacer(minLength: 0)
+        }
+        .padding(17)
+        .frame(width: 238, height: 365, alignment: .topLeading)
+        .background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.13)))
+    }
+
+    @ViewBuilder private func metadataRow(_ label: String, _ value: String?) -> some View {
+        if let value, !value.isEmpty {
+            HStack(alignment: .top, spacing: 9) {
+                Text(label).foregroundStyle(.white.opacity(0.9)).frame(width: 52, alignment: .leading)
+                Text(value).foregroundStyle(.white.opacity(0.62)).lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
         }
     }
 }

@@ -3,12 +3,14 @@ import Network
 
 /// Bridges authenticated range reads to AVPlayer's ordinary HTTP byte-range requests.
 final class RangeHTTPServer: @unchecked Sendable {
+    private static let readQueue = DispatchQueue(label: "com.lucent.range-read", attributes: .concurrent)
     private let readRange: @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult
     private let asyncReadRange: (@Sendable (UInt64, Int) async throws -> SMBScanner.RangeResult)?
     private let onReadFailure: (@Sendable (Error) -> Void)?
     private let maxReadAttempts: Int
     private let blockLength: Int
     private let fileExtension: String
+    private let cacheKey: String?
     private let token = UUID().uuidString
     private let queue = DispatchQueue(label: "com.lucent.range-http")
     private let lock = NSLock()
@@ -17,9 +19,9 @@ final class RangeHTTPServer: @unchecked Sendable {
     private var cachedTotalSize: UInt64?
     private var loggedBlocks = 0
     private var running = false
-    var supportsSynchronousInputStream: Bool { asyncReadRange == nil }
 
     init(source: SMBSource, password: String?, path: String) {
+        cacheKey = "smb|\(source.id)|\(path)"
         fileExtension = Self.safeExtension((path as NSString).pathExtension)
         asyncReadRange = nil
         onReadFailure = nil
@@ -31,10 +33,12 @@ final class RangeHTTPServer: @unchecked Sendable {
         }
     }
 
-    init(fileExtension: String, maxReadAttempts: Int = 3, blockLength: Int = 1_048_576,
+    init(fileExtension: String, cacheKey: String? = nil,
+         maxReadAttempts: Int = 3, blockLength: Int = 1_048_576,
          readRange: @escaping @Sendable (UInt64, Int) throws -> SMBScanner.RangeResult,
          onReadFailure: (@Sendable (Error) -> Void)? = nil) {
         self.fileExtension = Self.safeExtension(fileExtension)
+        self.cacheKey = cacheKey
         self.readRange = readRange
         asyncReadRange = nil
         self.onReadFailure = onReadFailure
@@ -42,20 +46,15 @@ final class RangeHTTPServer: @unchecked Sendable {
         self.blockLength = min(1_048_576, max(65_536, blockLength))
     }
 
-    init(fileExtension: String,
+    init(fileExtension: String, cacheKey: String? = nil,
          asyncReadRange: @escaping @Sendable (UInt64, Int) async throws -> SMBScanner.RangeResult) {
         self.fileExtension = Self.safeExtension(fileExtension)
+        self.cacheKey = cacheKey
         readRange = { _, _ in throw RangeHTTPError.asyncOnly }
         self.asyncReadRange = asyncReadRange
         onReadFailure = nil
         maxReadAttempts = 3
         blockLength = 1_048_576
-    }
-
-    func makeInputStream() -> RangeInputStream {
-        RangeInputStream { [self] offset, length in
-            try readWithRetry(offset: offset, length: length)
-        }
     }
 
     func start() async throws -> URL {
@@ -102,6 +101,7 @@ final class RangeHTTPServer: @unchecked Sendable {
         lock.unlock()
         connections.forEach { $0.cancel() }
         listener?.cancel()
+        if let cacheKey { LocalMediaCache.shared.endUse(cacheKey) }
     }
 
     private func setListener(_ listener: NWListener) {
@@ -109,6 +109,7 @@ final class RangeHTTPServer: @unchecked Sendable {
         self.listener = listener
         running = true
         lock.unlock()
+        if let cacheKey { LocalMediaCache.shared.beginUse(cacheKey) }
     }
 
     private func accept(_ connection: NWConnection) {
@@ -121,8 +122,12 @@ final class RangeHTTPServer: @unchecked Sendable {
         connections.append(connection)
         lock.unlock()
         connection.stateUpdateHandler = { [weak self, weak connection] state in
-            guard case .cancelled = state, let connection else { return }
-            self?.remove(connection)
+            guard let connection else { return }
+            switch state {
+            case .cancelled, .failed:
+                self?.remove(connection)
+            default: break
+            }
         }
         connection.start(queue: queue)
         receiveRequest(connection, data: Data())
@@ -132,6 +137,10 @@ final class RangeHTTPServer: @unchecked Sendable {
         lock.lock()
         connections.removeAll { $0 === connection }
         lock.unlock()
+    }
+
+    private func isActive(_ connection: NWConnection) -> Bool {
+        lock.withLock { running && connections.contains { $0 === connection } }
     }
 
     private func receiveRequest(_ connection: NWConnection, data: Data) {
@@ -215,9 +224,11 @@ final class RangeHTTPServer: @unchecked Sendable {
                     })
                 }
             } catch {
+                guard self.isActive(connection) else { return }
                 let failure = error as NSError
                 NSLog("Lucent Range: first block failed domain=%@ code=%d", failure.domain, failure.code)
                 self.sendError(connection, status: "502 Bad Gateway")
+                self.onReadFailure?(error)
             }
         }
     }
@@ -244,12 +255,13 @@ final class RangeHTTPServer: @unchecked Sendable {
     }
 
     private func sendBytes(_ connection: NWConnection, offset: UInt64, end: UInt64) {
-        guard offset <= end else { connection.cancel(); return }
+        guard offset <= end, isActive(connection) else { connection.cancel(); return }
         Task { [weak self] in
             guard let self else { return }
             do {
                 let length = Int(min(UInt64(self.blockLength), end - offset + 1))
                 let result = try await self.readWithRetryAsync(offset: offset, length: length)
+                guard self.isActive(connection) else { return }
                 guard !result.data.isEmpty else { connection.cancel(); return }
                 self.logBlock(offset: offset, count: result.data.count, first: false)
                 connection.send(content: result.data, completion: .contentProcessed { error in
@@ -257,10 +269,12 @@ final class RangeHTTPServer: @unchecked Sendable {
                     else { self.sendBytes(connection, offset: offset + UInt64(result.data.count), end: end) }
                 })
             } catch {
+                guard self.isActive(connection) else { return }
                 let failure = error as NSError
                 NSLog("Lucent Range: subsequent block failed offset=%llu domain=%@ code=%d",
                       offset, failure.domain, failure.code)
                 connection.cancel()
+                self.onReadFailure?(error)
             }
         }
     }
@@ -289,7 +303,11 @@ final class RangeHTTPServer: @unchecked Sendable {
             lock.unlock()
             guard active else { throw RangeHTTPError.cancelled }
             do {
-                let result = try readRange(offset, length)
+                let result: SMBScanner.RangeResult
+                if let cacheKey {
+                    result = try LocalMediaCache.shared.readRange(key: cacheKey, offset: offset,
+                        length: length, fetch: readRange)
+                } else { result = try readRange(offset, length) }
                 lock.withLock { cachedTotalSize = result.totalSize }
                 return result
             }
@@ -298,18 +316,30 @@ final class RangeHTTPServer: @unchecked Sendable {
                 if attempt + 1 < maxReadAttempts { Thread.sleep(forTimeInterval: 0.25 * Double(1 << attempt)) }
             }
         }
-        onReadFailure?(lastError)
         throw lastError
     }
 
     private func readWithRetryAsync(offset: UInt64, length: Int) async throws -> SMBScanner.RangeResult {
-        guard let asyncReadRange else { return try readWithRetry(offset: offset, length: length) }
+        guard let asyncReadRange else {
+            // Synchronous protocol adapters wait on network callbacks. Never
+            // occupy Swift's cooperative executor while those callbacks run.
+            return try await withCheckedThrowingContinuation { continuation in
+                Self.readQueue.async { [self] in
+                    do { continuation.resume(returning: try readWithRetry(offset: offset, length: length)) }
+                    catch { continuation.resume(throwing: error) }
+                }
+            }
+        }
         var lastError: Error = RangeHTTPError.cancelled
         for attempt in 0..<3 {
             let active = lock.withLock { running }
             guard active else { throw RangeHTTPError.cancelled }
             do {
-                let result = try await asyncReadRange(offset, length)
+                let result: SMBScanner.RangeResult
+                if let cacheKey {
+                    result = try await LocalMediaCache.shared.readRange(key: cacheKey,
+                        offset: offset, length: length, fetch: asyncReadRange)
+                } else { result = try await asyncReadRange(offset, length) }
                 lock.withLock { cachedTotalSize = result.totalSize }
                 return result
             }

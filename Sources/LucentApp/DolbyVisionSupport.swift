@@ -30,17 +30,19 @@ enum DolbyVisionSupport {
         for track in tracks {
             guard let descriptions = try? await track.load(.formatDescriptions) else { continue }
             for description in descriptions {
-                let subtype = CMFormatDescriptionGetMediaSubType(description)
-                let fourCC = String(bytes: [UInt8((subtype >> 24) & 0xff),
-                                            UInt8((subtype >> 16) & 0xff),
-                                            UInt8((subtype >> 8) & 0xff), UInt8(subtype & 0xff)],
-                                    encoding: .ascii)?.lowercased()
-                if fourCC == "dvh1" || fourCC == "dvhe" { return true }
-                if let extensions = CMFormatDescriptionGetExtensions(description) as? [String: Any],
-                   let atoms = extensions["SampleDescriptionExtensionAtoms"] as? [String: Any],
-                   atoms["dvcC"] != nil || atoms["dvvC"] != nil { return true }
+                if formatHasDolbyVision(description) { return true }
             }
         }
         return false
+    }
+
+    static func formatHasDolbyVision(_ description: CMFormatDescription) -> Bool {
+        let subtype = CMFormatDescriptionGetMediaSubType(description)
+        let fourCC = String(bytes: [UInt8((subtype >> 24) & 0xff), UInt8((subtype >> 16) & 0xff),
+                                    UInt8((subtype >> 8) & 0xff), UInt8(subtype & 0xff)], encoding: .ascii)
+        if fourCC == "dvh1" || fourCC == "dvhe" { return true }
+        guard let extensions = CMFormatDescriptionGetExtensions(description) as? [String: Any],
+              let atoms = extensions["SampleDescriptionExtensionAtoms"] as? [String: Any] else { return false }
+        return atoms["dvcC"] != nil || atoms["dvvC"] != nil
     }
 }

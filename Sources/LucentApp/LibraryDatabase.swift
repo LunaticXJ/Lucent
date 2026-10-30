@@ -57,7 +57,6 @@ final class LibraryDatabase {
                                jellyfinSources: [], embySources: [], plexSources: [],
                                cloudSources: [],
                                dlnaSources: [],
-                               vlcNetworkSources: [],
                                collections: [], smartPlaylists: [], libraryConfigUpdatedAt: nil,
                                viewerProfiles: [], activeProfileID: nil)
     }

@@ -12,6 +12,79 @@ enum ChineseCloudClient {
         "wmv", "flv", "vob", "mpg", "mpeg", "ogv", "iso"
     ]
 
+    static func contents(provider: CloudProvider, token: String, directoryID: String) async throws -> [StorageDirectory] {
+        if provider == .guangyaPan { return try await GuangyaClient.contents(token: token, directoryID: directoryID) }
+        var result: [StorageDirectory] = []
+        var offset = 0
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            var components: URLComponents
+            switch provider {
+            case .pan115:
+                components = URLComponents(string: "https://proapi.115.com/open/ufile/files")!
+                components.queryItems = [.init(name: "cid", value: directoryID.isEmpty ? "0" : directoryID), .init(name: "limit", value: "1000"), .init(name: "offset", value: String(offset)), .init(name: "show_dir", value: "1")]
+            case .pan123:
+                components = URLComponents(string: "https://open-api.123pan.com/api/v2/file/list")!
+                components.queryItems = [.init(name: "parentFileId", value: directoryID.isEmpty ? "0" : directoryID), .init(name: "limit", value: "100")]
+                components.queryItems?.append(.init(name: "lastFileId", value: cursor ?? "0"))
+            case .baiduPan:
+                components = URLComponents(string: "https://pan.baidu.com/rest/2.0/xpan/file")!
+                components.queryItems = [.init(name: "method", value: "list"), .init(name: "dir", value: directoryID.isEmpty ? "/" : directoryID), .init(name: "start", value: String(offset)), .init(name: "limit", value: "1000"), .init(name: "access_token", value: token)]
+            default: throw Error.apiUnavailable
+            }
+            var request = URLRequest(url: components.url!)
+            request.timeoutInterval = 40
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            if provider == .pan123 { request.setValue("open_platform", forHTTPHeaderField: "Platform") }
+            let json = try await object(request)
+            let files: [[String: Any]]
+            let data = json["data"] as? [String: Any] ?? [:]
+            if provider == .pan115 {
+                guard let values = (json["data"] as? [[String: Any]]) ?? (data["data"] as? [[String: Any]]), (json["state"] as? Bool) != false else { throw Error.invalidResponse }
+                files = values
+            } else if provider == .pan123 {
+                guard (json["code"] as? NSNumber)?.intValue == 0, let values = data["fileList"] as? [[String: Any]] else { throw Error.invalidResponse }
+                files = values
+            } else {
+                guard (json["errno"] as? NSNumber)?.intValue == 0, let values = json["list"] as? [[String: Any]] else { throw Error.invalidResponse }
+                files = values
+            }
+            for file in files {
+                if provider == .pan123, let trashed = file["trashed"] as? NSNumber, trashed.intValue != 0 { continue }
+                let name: String?, id: String?, directory: Bool
+                if provider == .pan115 {
+                    name = file["fn"] as? String
+                    directory = String(describing: file["fc"] ?? "") == "0"
+                    id = directory ? file["fid"].map { String(describing: $0) } : file["pc"] as? String
+                } else if provider == .pan123 {
+                    name = file["filename"] as? String
+                    directory = (file["type"] as? NSNumber)?.intValue == 1
+                    id = file["fileId"].map { String(describing: $0) }
+                } else {
+                    name = file["server_filename"] as? String
+                    directory = (file["isdir"] as? NSNumber)?.intValue == 1
+                    id = directory ? file["path"] as? String : file["fs_id"].map { String(describing: $0) }
+                }
+                if let name, let id, directory || video(name) {
+                    result.append(.init(identifier: id, name: name, path: name, isDirectory: directory))
+                }
+            }
+            offset += files.count
+            try checkLimit(result.count, 0)
+            if provider == .pan115 {
+                guard let total = (json["count"] as? NSNumber) ?? (data["count"] as? NSNumber) else { throw Error.invalidResponse }
+                if files.isEmpty || offset >= total.intValue { break }
+            } else if provider == .pan123 {
+                let next = String(describing: data["lastFileId"] ?? "-1")
+                if next == "-1" || files.isEmpty { break }
+                guard next != cursor else { throw Error.invalidResponse }
+                cursor = next
+            } else if files.count < 1000 { break }
+        }
+        return result
+    }
+
     static func scan(provider: CloudProvider, token: String) async throws -> [Entry] {
         switch provider {
         case .pan115: return try await scan115(token: token)

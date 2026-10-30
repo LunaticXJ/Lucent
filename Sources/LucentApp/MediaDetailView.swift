@@ -40,7 +40,6 @@ private extension MediaItem {
 
 struct MediaDetailView: View {
     @EnvironmentObject private var library: LibraryStore
-    @Environment(\.dismiss) private var dismiss
     @State private var playingItem: MediaItem?
     @State private var editingItem: MediaItem?
     @State private var showMetadata = false
@@ -69,7 +68,6 @@ struct MediaDetailView: View {
     private var item: MediaItem? { library.visibleItems.first { $0.id == itemID } }
 
     var body: some View {
-        NavigationStack {
             Group {
                 if let item {
                     if item.identity?.seriesName != nil {
@@ -82,7 +80,7 @@ struct MediaDetailView: View {
                             selectedSubtitleStreamIndex = nil
                             forceRemoteVersion = false
                             selectedTranscodeBitrate = nil
-                            playingItem = selected
+                            presentPlayback(selected)
                         }, onMore: { selected in advancedDetailItem = selected })
                         #else
                         legacyDetail(item)
@@ -97,7 +95,7 @@ struct MediaDetailView: View {
                             selectedSubtitleStreamIndex = nil
                             forceRemoteVersion = false
                             selectedTranscodeBitrate = nil
-                            playingItem = selected
+                            presentPlayback(selected)
                         }, onMore: { advancedDetailItem = item })
                         #else
                         legacyDetail(item)
@@ -110,10 +108,8 @@ struct MediaDetailView: View {
             .navigationTitle("")
             #if os(iOS)
             .toolbar(.hidden, for: .navigationBar)
+            .background(DetailBackSwipeEnabler().frame(width: 0, height: 0))
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
-            }
             .sheet(item: $advancedDetailItem) { selected in
                 NavigationStack {
                     legacyDetail(selected)
@@ -125,7 +121,9 @@ struct MediaDetailView: View {
                 if let selected = advancedDetailItem { await loadServerVersions(for: selected) }
             }
             #if os(iOS)
-            .fullScreenCover(item: $playingItem) { item in
+            .fullScreenCover(item: $playingItem, onDismiss: {
+                LucentOrientationDelegate.setPlaybackPresented(false)
+            }) { item in
                 playbackContent(for: item)
             }
             #else
@@ -193,7 +191,16 @@ struct MediaDetailView: View {
                 }
             }
             #endif
-        }
+    }
+
+    private func presentPlayback(_ selected: MediaItem) {
+        #if os(iOS)
+        // The orientation mask must change before UIKit creates the full-screen cover.
+        LucentOrientationDelegate.setPlaybackPresented(true)
+        #endif
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { playingItem = selected }
     }
 
     private func legacyDetail(_ item: MediaItem) -> some View {
@@ -246,7 +253,7 @@ struct MediaDetailView: View {
                                     selectedSubtitleStreamIndex = nil
                                     forceRemoteVersion = false
                                     selectedTranscodeBitrate = nil
-                                    playingItem = item
+                                    presentPlayback(item)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 Button(item.isFavorite ? "取消收藏" : "收藏",
@@ -348,7 +355,7 @@ struct MediaDetailView: View {
                                         Button("\(megabits) Mbps") {
                                             forceRemoteVersion = true
                                             selectedTranscodeBitrate = megabits * 1_000_000
-                                            playingItem = item
+                                            presentPlayback(item)
                                         }
                                     }
                                 }
@@ -394,7 +401,7 @@ struct MediaDetailView: View {
                                             selectedServerMediaSourceID = nil
                                             forceRemoteVersion = false
                                             selectedTranscodeBitrate = nil
-                                            playingItem = extra
+                                            presentPlayback(extra)
                                         }
                                     }
                                 }
@@ -545,7 +552,7 @@ struct MediaDetailView: View {
                      serverMediaSourceID: selectedServerMediaSourceID,
                      serverContainer: activeVersion(for: item)?.container,
                      serverDolbyVision: activeVersion(for: item)?.isDolbyVision == true,
-                     mediaFeatures: activeVersion(for: item)?.features ?? .unknown,
+                     mediaFeatures: activeVersion(for: item)?.features ?? item.localPlaybackFeatures,
                      forceRemoteVersion: forceRemoteVersion,
                      transcodeBitrate: selectedTranscodeBitrate,
                      audioStreamIndex: selectedAudioStreamIndex,
@@ -558,7 +565,7 @@ struct MediaDetailView: View {
                              selectedServerMediaSourceID = nil
                              forceRemoteVersion = false
                              selectedTranscodeBitrate = nil
-                             playingItem = next
+                             presentPlayback(next)
                          }
                      },
                      onSelectEpisode: { selected in
@@ -569,7 +576,7 @@ struct MediaDetailView: View {
                          selectedSubtitleStreamIndex = nil
                          selectedPlexPartID = nil
                          selectedPlexMediaIndex = 0
-                         playingItem = selected
+                         presentPlayback(selected)
                      })
         .id(item.id)
         .environmentObject(library)
@@ -620,6 +627,9 @@ struct MediaDetailView: View {
                         features: PlaybackMediaFeatures(
                             container: (part.key as NSString).pathExtension,
                             videoCodec: version.videoCodec,
+                            defaultStyledSubtitle: part.streams?.contains(where: {
+                                $0.streamType == 3 && ["ass", "ssa"].contains($0.codec?.lowercased() ?? "")
+                            }) == true,
                             audioCodec: version.audioCodec,
                             dynamicRange: part.streams?.first(where: { $0.streamType == 1 })?.videoProfile,
                             resolution: version.videoResolution))
@@ -633,14 +643,7 @@ struct MediaDetailView: View {
     }
 
     private func features(for source: JellyfinItem.MediaSource) -> PlaybackMediaFeatures {
-        let video = source.mediaStreams?.first { $0.type?.caseInsensitiveCompare("Video") == .orderedSame }
-        let audio = source.mediaStreams?.first { $0.type?.caseInsensitiveCompare("Audio") == .orderedSame }
-        let size: String?
-        if let width = video?.width, let height = video?.height { size = "\(width)×\(height)" }
-        else { size = nil }
-        return PlaybackMediaFeatures(container: source.container, videoCodec: video?.codec,
-                                     audioCodec: audio?.codec, dynamicRange: video?.videoRangeType,
-                                     resolution: size)
+        source.playbackFeatures
     }
 
     private func selectVersion(_ version: ServerPlaybackVersion, item: MediaItem) {
@@ -656,7 +659,7 @@ struct MediaDetailView: View {
         selectedSubtitleStreamIndex = nil
         forceRemoteVersion = true
         selectedTranscodeBitrate = nil
-        playingItem = selected
+        presentPlayback(selected)
     }
 
     private func activeVersion(for item: MediaItem) -> ServerPlaybackVersion? {
@@ -705,7 +708,7 @@ struct MediaDetailView: View {
         selectedSubtitleStreamIndex = nil
         selectedTranscodeBitrate = bitrate
         forceRemoteVersion = true
-        playingItem = item
+        presentPlayback(item)
     }
 
     private func searchOnlineSubtitles() {
@@ -797,6 +800,25 @@ struct MediaDetailView: View {
         }
     }
 }
+
+#if os(iOS)
+private struct DetailBackSwipeEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ controller: Controller, context: Context) { controller.enableBackSwipe() }
+
+    final class Controller: UIViewController {
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            enableBackSwipe()
+        }
+
+        func enableBackSwipe() {
+            guard let navigationController, navigationController.viewControllers.count > 1 else { return }
+            navigationController.interactivePopGestureRecognizer?.isEnabled = true
+        }
+    }
+}
+#endif
 
 struct LocalPosterView: View {
     let url: URL

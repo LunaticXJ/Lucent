@@ -29,7 +29,6 @@ struct NetworkSourceConfiguration: Codable, Equatable {
     var plex: [PlexSource]
     var cloud: [CloudSource]
     var dlna: [DLNASource]?
-    var vlcNetwork: [VLCNetworkSource]?
 }
 
 @MainActor

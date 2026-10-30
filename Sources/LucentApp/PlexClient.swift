@@ -73,6 +73,7 @@ struct PlexItem: Decodable, Sendable {
 }
 
 enum PlexClient {
+    private struct Account: Decodable { let username: String? }
     private struct Section: Decodable { let key: String; let type: String }
     private struct SectionContainer: Decodable { let Directory: [Section]? }
     private struct SectionResponse: Decodable { let MediaContainer: SectionContainer }
@@ -86,12 +87,48 @@ enum PlexClient {
         _ = try await sections(baseAddress: baseAddress, token: token)
     }
 
+    static func accountName(token: String) async throws -> String? {
+        var request = URLRequest(url: URL(string: "https://plex.tv/api/v2/user")!)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (name, value) in headers(token: token) { request.setValue(value, forHTTPHeaderField: name) }
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
+            throw PlexError.invalidResponse
+        }
+        return try JSONDecoder().decode(Account.self, from: data).username
+    }
+
+    static func mediaCounts(source: PlexSource, token: String) async throws -> (movies: Int, series: Int) {
+        let libraries = try await sections(baseAddress: source.baseAddress, token: token)
+        var movies = 0
+        var series = 0
+        for library in libraries where library.type == "movie" || library.type == "show" {
+            var request = try makeRequest(baseAddress: source.baseAddress,
+                                          path: "library/sections/\(library.key)/all", token: token)
+            request.setValue("0", forHTTPHeaderField: "X-Plex-Container-Start")
+            request.setValue("1", forHTTPHeaderField: "X-Plex-Container-Size")
+            let count = try JSONDecoder().decode(ItemResponse.self, from: await fetch(request))
+                .MediaContainer.totalSize ?? 0
+            if library.type == "movie" { movies += count }
+            else { series += count }
+        }
+        return (movies, series)
+    }
+
     static func versions(source: PlexSource, token: String,
                          ratingKey: String) async throws -> [PlexItem.MediaEntry] {
         let request = try makeRequest(baseAddress: source.baseAddress,
                                       path: "library/metadata/\(ratingKey)", token: token)
         return try JSONDecoder().decode(ItemResponse.self, from: await fetch(request))
             .MediaContainer.Metadata?.first?.Media ?? []
+    }
+
+    static func item(source: PlexSource, token: String, ratingKey: String) async throws -> PlexItem? {
+        let request = try makeRequest(baseAddress: source.baseAddress,
+                                      path: "library/metadata/\(ratingKey)", token: token)
+        return try JSONDecoder().decode(ItemResponse.self, from: await fetch(request))
+            .MediaContainer.Metadata?.first
     }
 
     static func selectStreams(source: PlexSource, token: String, partID: Int,
@@ -131,6 +168,38 @@ enum PlexClient {
             }
         }
         return all
+    }
+
+    static func browsePage(source: PlexSource, token: String,
+                           start: Int = 0, limit: Int = 40) async throws -> [PlexItem] {
+        let libraries = try await sections(baseAddress: source.baseAddress, token: token)
+        var result: [PlexItem] = []
+        for library in libraries where library.type == "movie" || library.type == "show" {
+            let endpoint = "library/sections/\(library.key)/\(library.type == "show" ? "allLeaves" : "all")"
+            var request = try makeRequest(baseAddress: source.baseAddress, path: endpoint, token: token)
+            request.setValue(String(start), forHTTPHeaderField: "X-Plex-Container-Start")
+            request.setValue(String(limit), forHTTPHeaderField: "X-Plex-Container-Size")
+            let page = try JSONDecoder().decode(ItemResponse.self, from: await fetch(request)).MediaContainer
+            result.append(contentsOf: (page.Metadata ?? []).filter { $0.partKey != nil })
+        }
+        return result
+    }
+
+    static func search(source: PlexSource, token: String, term: String) async throws -> [PlexItem] {
+        var request = try makeRequest(baseAddress: source.baseAddress, path: "hubs/search", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "query", value: term),
+                                 URLQueryItem(name: "limit", value: "30")]
+        request.url = components.url
+        struct SearchHub: Decodable { let Metadata: [PlexItem]? }
+        struct SearchContainer: Decodable { let Hub: [SearchHub]? }
+        struct SearchResponse: Decodable { let MediaContainer: SearchContainer }
+        let hubs = try JSONDecoder().decode(SearchResponse.self, from: await fetch(request)).MediaContainer.Hub ?? []
+        var seen = Set<String>()
+        return hubs.flatMap { $0.Metadata ?? [] }.filter { item in
+            (item.type == "movie" || item.type == "show") &&
+            seen.insert(item.ratingKey).inserted
+        }
     }
 
     static func readRange(source: PlexSource, token: String, partKey: String,

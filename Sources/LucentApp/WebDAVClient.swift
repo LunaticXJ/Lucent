@@ -1,6 +1,37 @@
 import Foundation
 
 enum WebDAVClient {
+    static func contents(source: WebDAVSource, password: String?, path: String) async throws -> [SourceDirectoryEntry] {
+        guard let base = URL(string: source.baseAddress),
+              !path.split(separator: "/").contains("..") else { throw WebDAVError.invalidAddress }
+        var directory = path.split(separator: "/").reduce(base) { $0.appendingPathComponent(String($1), isDirectory: true) }
+        if !directory.path.hasSuffix("/") { directory.appendPathComponent("") }
+        var request = authenticatedRequest(url: directory, source: source, password: password)
+        request.httpMethod = "PROPFIND"
+        request.timeoutInterval = 25
+        request.setValue("1", forHTTPHeaderField: "Depth")
+        request.setValue("application/xml", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>".utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 207 else { throw WebDAVError.requestFailed }
+        var seen = Set<String>()
+        return try DAVResponseParser(data: data).parse().compactMap { entry in
+            // Some DAV servers mix raw Unicode with existing percent escapes.
+            // Foundation's automatic repair double-escapes %20 in that case.
+            let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;=%")
+            guard let href = entry.href.addingPercentEncoding(withAllowedCharacters: allowed),
+                  let url = URL(string: href, relativeTo: directory)?.absoluteURL,
+                  url.scheme == base.scheme, url.host == base.host, url.port == base.port,
+                  url.user == nil, url.password == nil,
+                  let relative = relativePath(url: url, base: base), !relative.isEmpty,
+                  !relative.split(separator: "/").contains(".."), relative != path,
+                  (relative as NSString).deletingLastPathComponent == path,
+                  seen.insert(relative).inserted,
+                  entry.isDirectory || SourceDirectoryEntry.videoExtensions.contains(url.pathExtension.lowercased()) else { return nil }
+            return SourceDirectoryEntry(name: url.lastPathComponent, path: relative, isDirectory: entry.isDirectory)
+        }
+    }
+
     static func scan(source: WebDAVSource, password: String?) async throws -> [String] {
         guard let base = URL(string: source.baseAddress) else { throw WebDAVError.invalidAddress }
         var pending = [base]

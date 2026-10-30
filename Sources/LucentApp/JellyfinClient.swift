@@ -8,14 +8,33 @@ struct JellyfinItem: Decodable, Sendable {
             let language: String?
             let displayTitle: String?
             let codec: String?
+            let codecTag: String?
             let profile: String?
             let videoRangeType: String?
             let width: Int?
             let height: Int?
+            let bitRate: Int?
+            let channels: Int?
+            let sampleRate: Int?
+            let channelLayout: String?
+            let isDefault: Bool?
+            let isExternal: Bool?
+            let averageFrameRate: Double?
+            let aspectRatio: String?
+            let level: Double?
+            let pixelFormat: String?
+            let colorSpace: String?
+            let colorTransfer: String?
+            let colorPrimaries: String?
             enum CodingKeys: String, CodingKey {
                 case index = "Index", type = "Type", language = "Language", displayTitle = "DisplayTitle"
-                case codec = "Codec", profile = "Profile", videoRangeType = "VideoRangeType"
+                case codec = "Codec", codecTag = "CodecTag", profile = "Profile", videoRangeType = "VideoRangeType"
                 case width = "Width", height = "Height"
+                case bitRate = "BitRate", channels = "Channels", sampleRate = "SampleRate"
+                case channelLayout = "ChannelLayout", isDefault = "IsDefault", isExternal = "IsExternal"
+                case averageFrameRate = "AverageFrameRate", aspectRatio = "AspectRatio", level = "Level"
+                case pixelFormat = "PixelFormat", colorSpace = "ColorSpace"
+                case colorTransfer = "ColorTransfer", colorPrimaries = "ColorPrimaries"
             }
         }
         let id: String?
@@ -83,6 +102,8 @@ struct JellyfinItem: Decodable, Sendable {
     let collectionType: String?
     let criticRating: Double?
     let officialRating: String?
+    let providerIds: [String: String]?
+    let preferredMetadataLanguage: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id", name = "Name", type = "Type"
@@ -102,6 +123,7 @@ struct JellyfinItem: Decodable, Sendable {
         case path = "Path", container = "Container", mediaSources = "MediaSources"
         case collectionType = "CollectionType", criticRating = "CriticRating"
         case officialRating = "OfficialRating"
+        case providerIds = "ProviderIds", preferredMetadataLanguage = "PreferredMetadataLanguage"
     }
 
     var identity: MediaIdentity {
@@ -130,7 +152,11 @@ struct JellyfinItem: Decodable, Sendable {
 }
 
 enum JellyfinClient {
-    private struct User: Decodable { let id: String; enum CodingKeys: String, CodingKey { case id = "Id" } }
+    private struct User: Decodable {
+        let id: String
+        let name: String?
+        enum CodingKeys: String, CodingKey { case id = "Id", name = "Name" }
+    }
     private struct Authentication: Decodable {
         let accessToken: String
         enum CodingKeys: String, CodingKey { case accessToken = "AccessToken" }
@@ -145,8 +171,13 @@ enum JellyfinClient {
     }
 
     static func currentUserID(baseAddress: String, token: String) async throws -> String {
+        try await currentUser(baseAddress: baseAddress, token: token).id
+    }
+
+    static func currentUser(baseAddress: String, token: String) async throws -> (id: String, name: String?) {
         let request = try makeRequest(baseAddress: baseAddress, path: "Users/Me", token: token)
-        return try JSONDecoder().decode(User.self, from: await fetch(request)).id
+        let user = try JSONDecoder().decode(User.self, from: await fetch(request))
+        return (user.id, user.name)
     }
 
     static func authenticate(baseAddress: String, username: String, password: String) async throws -> String {
@@ -184,6 +215,56 @@ enum JellyfinClient {
             if all.count >= page.totalRecordCount { break }
         } while true
         return all
+    }
+
+    static func browsePage(source: JellyfinSource, token: String,
+                           start: Int = 0, limit: Int = 60) async throws -> [JellyfinItem] {
+        var request = try makeRequest(baseAddress: source.baseAddress, path: "Items", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "UserId", value: source.userID),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
+            URLQueryItem(name: "SortBy", value: "DateCreated"),
+            URLQueryItem(name: "SortOrder", value: "Descending"),
+            URLQueryItem(name: "StartIndex", value: String(start)),
+            URLQueryItem(name: "Limit", value: String(limit))
+        ]
+        request.url = components.url
+        return try JSONDecoder().decode(Page.self, from: await fetch(request)).items
+    }
+
+    static func mediaCounts(source: JellyfinSource, token: String) async throws -> (movies: Int, series: Int) {
+        func count(_ type: String) async throws -> Int {
+            var request = try makeRequest(baseAddress: source.baseAddress, path: "Items", token: token)
+            var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "UserId", value: source.userID),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: type),
+                URLQueryItem(name: "Limit", value: "1")
+            ]
+            request.url = components.url
+            return try JSONDecoder().decode(Page.self, from: await fetch(request)).totalRecordCount
+        }
+        async let movies = count("Movie")
+        async let series = count("Series")
+        return try await (movies, series)
+    }
+
+    static func search(source: JellyfinSource, token: String, term: String) async throws -> [JellyfinItem] {
+        var request = try makeRequest(baseAddress: source.baseAddress, path: "Items", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "UserId", value: source.userID),
+            URLQueryItem(name: "SearchTerm", value: term),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
+            URLQueryItem(name: "Limit", value: "50")
+        ]
+        request.url = components.url
+        return try JSONDecoder().decode(Page.self, from: await fetch(request)).items
+            .filter { $0.type == "Movie" || $0.type == "Series" }
     }
 
     static func streamURL(source: JellyfinSource, itemID: String, mediaSourceID: String? = nil) -> URL? {
@@ -278,5 +359,33 @@ private enum JellyfinError: LocalizedError {
         case .invalidResponse: "Jellyfin 返回了无法识别的数据。"
         case .tooManyItems: "媒体库超过 50,000 项，请缩小扫描范围。"
         }
+    }
+}
+
+extension JellyfinItem.MediaSource {
+    var playbackFeatures: PlaybackMediaFeatures {
+        let video = mediaStreams?.first { $0.type?.caseInsensitiveCompare("Video") == .orderedSame }
+        let audios = mediaStreams?.filter { $0.type?.caseInsensitiveCompare("Audio") == .orderedSame } ?? []
+        let audio = audios.first { $0.isDefault == true } ?? audios.first
+        let subtitles = mediaStreams?.filter {
+            $0.type?.caseInsensitiveCompare("Subtitle") == .orderedSame &&
+                ["ass", "ssa"].contains($0.codec?.lowercased() ?? "")
+        } ?? []
+        var range = video?.videoRangeType
+        if let video, DolbyVisionSupport.isDolbyVision(video) {
+            range = DolbyVisionSupport.profile(video).map { "Dolby Vision P\($0)" } ?? "Dolby Vision"
+        } else if MediaInfoLabels.known(range) == nil {
+            range = MediaInfoLabels.dynamicRange(transfer: video?.colorTransfer, matrix: video?.colorSpace)
+        }
+        let resolution: String?
+        if let width = video?.width, let height = video?.height, width > 0, height > 0 {
+            resolution = "\(width)×\(height)"
+        } else { resolution = nil }
+        return PlaybackMediaFeatures(container: container, videoCodec: video?.codec,
+                                     videoCodecTag: video?.codecTag, videoProfile: video?.profile,
+                                     videoPixelFormat: video?.pixelFormat,
+                                     styledSubtitleStreamIndices: subtitles.compactMap(\.index),
+                                     defaultStyledSubtitle: subtitles.contains { $0.isDefault == true },
+                                     audioCodec: audio?.codec, dynamicRange: range, resolution: resolution)
     }
 }

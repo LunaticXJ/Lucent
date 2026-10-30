@@ -9,11 +9,6 @@ private enum MacPalette {
     static let accent = Color(red: 0.86, green: 0.93, blue: 1.0)
 }
 
-@MainActor
-private enum MacArtworkCache {
-    static var images: [String: NSImage] = [:]
-}
-
 private struct MacArtwork: View {
     let source: EmbySource
     let itemID: String
@@ -36,16 +31,16 @@ private struct MacArtwork: View {
         }
         .clipped()
         .task(id: "\(source.id)|\(itemID)|\(backdrop)|\(width)") {
-            let key = "\(source.id)|\(itemID)|\(backdrop)|\(width)"
-            if let cached = MacArtworkCache.images[key] { image = cached; return }
+            image = nil
             guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
                   !token.isEmpty else { return }
             for useBackdrop in backdrop ? [true, false] : [false] {
-                guard let data = try? await EmbyClient.artwork(source: source, token: token,
-                                                               itemID: itemID, backdrop: useBackdrop,
-                                                               maxWidth: width),
+                guard let data = try? await LocalMediaCache.shared.imageData(
+                    key: "emby|\(source.id)|\(itemID)|\(useBackdrop)|\(width)", fetch: {
+                        try await EmbyClient.artwork(source: source, token: token,
+                            itemID: itemID, backdrop: useBackdrop, maxWidth: width)
+                    }),
                       let loaded = NSImage(data: data) else { continue }
-                MacArtworkCache.images[key] = loaded
                 image = loaded
                 break
             }
@@ -88,7 +83,7 @@ struct MacHomeView: View {
     @State private var shelves: [MacShelf] = []
     @State private var loading = false
     @State private var errorMessage: String?
-    @State private var selectedItem: MediaItem?
+    @State private var selectedItemID: UUID?
     @State private var browserRoute: MacBrowserRoute?
 
     private var source: EmbySource? { library.embySources.first }
@@ -121,8 +116,8 @@ struct MacHomeView: View {
         .background(MacPalette.background)
         .preferredColorScheme(.dark)
         .task(id: source?.id) { await loadHome() }
-        .sheet(item: $selectedItem) { item in
-            MediaDetailView(itemID: item.id).environmentObject(library)
+        .navigationDestination(item: $selectedItemID) { id in
+            MediaDetailView(itemID: id).environmentObject(library)
         }
         .sheet(item: $browserRoute) { route in
             EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title)
@@ -352,7 +347,7 @@ struct MacHomeView: View {
         if item.isFolder == true || item.type == "Series" {
             browserRoute = MacBrowserRoute(source: source, parentID: item.id, title: item.name)
         } else {
-            selectedItem = library.openEmbyItem(sourceID: source.id, remote: item)
+            selectedItemID = library.openEmbyItem(sourceID: source.id, remote: item).id
         }
     }
 

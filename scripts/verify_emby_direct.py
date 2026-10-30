@@ -2,18 +2,21 @@
 """Verify Lucent's direct Emby APIs using a password in the macOS login keychain.
 
 Store a password with:
-  security add-generic-password -a root -s com.lucent.emby.v398000xyz -w -U
+  security add-generic-password -a YOUR_USER -s com.lucent.emby.verification -w -U
+
+Set EMBY_BASE_URL (including any /emby prefix) and EMBY_USERNAME before running.
 
 No credentials or access tokens are written to this repository.
 """
 import json
+import os
 import subprocess
 import urllib.parse
 import urllib.request
 
-BASE = "https://v.398000.xyz/emby"
-ACCOUNT = "root"
-KEYCHAIN_SERVICE = "com.lucent.emby.v398000xyz"
+BASE = os.environ["EMBY_BASE_URL"].rstrip("/")
+ACCOUNT = os.environ["EMBY_USERNAME"]
+KEYCHAIN_SERVICE = os.environ.get("EMBY_KEYCHAIN_SERVICE", "com.lucent.emby.verification")
 HEADERS = {
     "X-Emby-Authorization": 'Emby Client="Lucent", Device="Verification", DeviceId="lucent-direct-verification", Version="0.1.0"',
 }

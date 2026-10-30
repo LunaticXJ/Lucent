@@ -2,23 +2,30 @@
 import SwiftUI
 import UIKit
 
+struct HomeMatchedSource: ViewModifier {
+    let key: String
+    let namespace: Namespace.ID
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.matchedTransitionSource(id: key, in: namespace)
+        } else {
+            content
+        }
+    }
+}
+
 @MainActor
 private enum HomePalette {
-    static let background = Color(red: 0.981, green: 0.950, blue: 0.939)
-    static let ink = Color(red: 0.115, green: 0.137, blue: 0.170)
-    static let muted = Color(red: 0.44, green: 0.45, blue: 0.48)
+    static let background = Color(red: 0.055, green: 0.071, blue: 0.094)
+    static let ink = Color.primary
+    static let muted = Color.secondary
     static let isPad = UIDevice.current.userInterfaceIdiom == .pad
     static let inset: CGFloat = isPad ? 42 : 20
-    static let heroHeight: CGFloat = isPad ? 510 : 390
     static let continueWidth: CGFloat = isPad ? 285 : 185
     static let categoryWidth: CGFloat = isPad ? 250 : 165
     static let posterWidth: CGFloat = isPad ? 160 : 105
     static let sectionSpacing: CGFloat = isPad ? 38 : 30
-}
-
-@MainActor
-private enum ArtworkCache {
-    static var images: [String: UIImage] = [:]
 }
 
 private struct EmbyArtwork: View {
@@ -26,6 +33,9 @@ private struct EmbyArtwork: View {
     let itemID: String
     let backdrop: Bool
     let width: Int
+    var preferredURL: URL? = nil
+    var softenBottom = false
+    var onImage: ((UIImage) -> Void)? = nil
     @State private var image: UIImage?
 
     var body: some View {
@@ -35,6 +45,17 @@ private struct EmbyArtwork: View {
                            startPoint: .topLeading, endPoint: .bottomTrailing)
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+                    .overlay {
+                        if softenBottom {
+                            Image(uiImage: image).resizable().scaledToFill()
+                                .blur(radius: 30)
+                                .mask(LinearGradient(stops: [
+                                    .init(color: .clear, location: 0.48),
+                                    .init(color: .white.opacity(0.35), location: 0.68),
+                                    .init(color: .white, location: 0.92)
+                                ], startPoint: .top, endPoint: .bottom))
+                        }
+                    }
             } else {
                 Image(systemName: backdrop ? "film.stack" : "film")
                     .font(.system(size: backdrop ? 48 : 30, weight: .ultraLight))
@@ -42,18 +63,35 @@ private struct EmbyArtwork: View {
             }
         }
         .clipped()
-        .task(id: "\(source.id)|\(itemID)|\(backdrop)") {
-            let key = "\(source.id)|\(itemID)|\(backdrop)|\(width)"
-            if let cached = ArtworkCache.images[key] { image = cached; return }
+        .task(id: "\(source.id)|\(itemID)|\(backdrop)|\(preferredURL?.absoluteString ?? "")") {
+            image = nil
+            let local = HomeSnapshotCache.localItems[itemID]
+            let localPath = backdrop ? (local?.metadata?.backdropPath ?? local?.metadata?.posterPath) : local?.metadata?.posterPath
+            let resolvedURL = preferredURL ?? localPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w780\($0)") }
+            if let preferredURL = resolvedURL,
+               let data = try? await LocalMediaCache.shared.imageData(
+                   key: "tmdb|\(preferredURL.absoluteString)", fetch: {
+                       let (data, response) = try await URLSession.shared.data(from: preferredURL)
+                       guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true
+                       else { throw URLError(.badServerResponse) }
+                       return data
+                   }),
+               let loaded = UIImage(data: data) {
+                image = loaded
+                onImage?(loaded)
+                return
+            }
             guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
                   !token.isEmpty else { return }
             for useBackdrop in backdrop ? [true, false] : [false] {
-                guard let data = try? await EmbyClient.artwork(source: source, token: token,
-                                                               itemID: itemID, backdrop: useBackdrop,
-                                                               maxWidth: width),
+                guard let data = try? await LocalMediaCache.shared.imageData(
+                    key: "emby|\(source.id)|\(itemID)|\(useBackdrop)|\(width)", fetch: {
+                        try await EmbyClient.artwork(source: source, token: token,
+                            itemID: itemID, backdrop: useBackdrop, maxWidth: width)
+                    }),
                       let loaded = UIImage(data: data) else { continue }
-                ArtworkCache.images[key] = loaded
                 image = loaded
+                onImage?(loaded)
                 break
             }
         }
@@ -66,6 +104,30 @@ private struct HomeShelf: Identifiable {
     var id: String { view.id }
 }
 
+private struct HeroColors { let dark: Color; let light: Color }
+
+@MainActor private enum HomeSnapshotCache {
+    struct Snapshot {
+        let refreshID: UUID
+        let loadedAt: Date
+        let views: [JellyfinItem]
+        let latest: [JellyfinItem]
+        let continuing: [JellyfinItem]
+        let continuingTotal: Int
+        let shelves: [HomeShelf]
+    }
+    static var entries: [UUID: Snapshot] = [:]
+    static var artworks: [UUID: [String: TMDBService.DetailArtwork]] = [:]
+    static var details: [UUID: [String: JellyfinItem]] = [:]
+    static var themes: [UUID: [String: HeroColors]] = [:]
+    static var selectedHeroIDs: [UUID: String] = [:]
+    static var heroProgress: [UUID: Double] = [:]
+    // Presentation-only context. Never persisted, authenticated or sent to a server.
+    static let localContext = EmbySource(baseAddress: "", userID: "local")
+    static var localItems: [String: MediaItem] = [:]
+    static let lifetime: TimeInterval = 24 * 60 * 60
+}
+
 private struct HomeBrowserRoute: Identifiable {
     let source: EmbySource
     let parentID: String?
@@ -73,38 +135,207 @@ private struct HomeBrowserRoute: Identifiable {
     var id: String { "\(source.id)|\(parentID ?? "root")" }
 }
 
+/// Waits for a clear direction before the enclosing scroll view can claim a hero swipe.
+private final class HeroDirectionalPanGestureRecognizer: UIGestureRecognizer {
+    private var startPoint: CGPoint?
+    private(set) var horizontalTranslation: CGFloat = 0
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        guard touches.count == 1, let touch = touches.first, let view else {
+            state = .failed
+            return
+        }
+        startPoint = touch.location(in: view)
+        horizontalTranslation = 0
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        guard let startPoint, let touch = touches.first, let view else { return }
+        let point = touch.location(in: view)
+        let dx = point.x - startPoint.x
+        let dy = point.y - startPoint.y
+        horizontalTranslation = dx
+
+        if state == .possible {
+            if abs(dx) >= 16, abs(dx) > abs(dy) * 1.15 {
+                state = .began
+            } else if abs(dy) >= 38, abs(dy) > abs(dx) * 1.15 {
+                state = .failed
+            }
+        } else if state == .began || state == .changed {
+            state = .changed
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        state = state == .began || state == .changed ? .ended : .failed
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        state = state == .began || state == .changed ? .cancelled : .failed
+    }
+
+    override func reset() {
+        super.reset()
+        startPoint = nil
+        horizontalTranslation = 0
+    }
+}
+
+private final class HeroGestureView: UIView {
+    var horizontalPan: HeroDirectionalPanGestureRecognizer?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard let horizontalPan else { return }
+        var ancestor = superview
+        while let view = ancestor {
+            if let scrollView = view as? UIScrollView {
+                scrollView.panGestureRecognizer.require(toFail: horizontalPan)
+                break
+            }
+            ancestor = view.superview
+        }
+    }
+}
+
+private struct HeroGestureSurface: UIViewRepresentable {
+    let onDrag: (CGFloat) -> Void
+    let onEnd: (CGFloat) -> Void
+    let onTap: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(owner: self) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = HeroGestureView()
+        view.backgroundColor = .clear
+        let pan = HeroDirectionalPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
+        pan.delegate = context.coordinator
+        pan.cancelsTouchesInView = true
+        view.addGestureRecognizer(pan)
+        view.horizontalPan = pan
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap))
+        tap.require(toFail: pan)
+        view.addGestureRecognizer(tap)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) { context.coordinator.owner = self }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var owner: HeroGestureSurface
+        init(owner: HeroGestureSurface) { self.owner = owner }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Do not let the vertical scroll view move while a carousel pan is active.
+            false
+        }
+
+        @objc func pan(_ recognizer: HeroDirectionalPanGestureRecognizer) {
+            let translation = recognizer.horizontalTranslation
+            switch recognizer.state {
+            case .began, .changed: owner.onDrag(translation)
+            case .ended, .cancelled, .failed: owner.onEnd(translation)
+            default: break
+            }
+        }
+
+        @objc func tap() { owner.onTap() }
+    }
+}
+
 struct MobileHomeView: View {
+    @AppStorage("lucent.appearance.theme") private var appearance = "system"
+    @Environment(\.colorScheme) private var systemColorScheme
+    @AppStorage("lucent.home.autoplay") private var heroAutoplay = true
     @EnvironmentObject private var library: LibraryStore
     let showSources: () -> Void
+    var preferredSourceID: UUID?
+    var localLibrary = false
+    var onCollectionChange: (Bool) -> Void = { _ in }
+    let refreshID: UUID
+    var showCacheSettings: () -> Void = {}
+    @Binding var detailPresented: Bool
+    var onScrollStateChange: (Bool) -> Void = { _ in }
 
-    @State private var selectedSourceID: UUID?
     @State private var views: [JellyfinItem] = []
     @State private var latest: [JellyfinItem] = []
     @State private var continuing: [JellyfinItem] = []
     @State private var continuingTotal = 0
     @State private var shelves: [HomeShelf] = []
     @State private var isLoading = false
+    @State private var hasLoadedHome = false
     @State private var errorMessage: String?
-    @State private var selectedItem: MediaItem?
+    @State private var selectedItemID: UUID?
+    @Namespace private var detailTransition
+    @State private var selectedTransitionKey: String?
     @State private var browserRoute: HomeBrowserRoute?
+    @State private var localCollection: LocalCatalogCollection?
+    @State private var showAllContinuing = false
+    @State private var heroArtworks: [String: TMDBService.DetailArtwork] = [:]
+    @State private var heroDetails: [String: JellyfinItem] = [:]
+    @State private var heroThemes: [String: HeroColors] = [:]
+    @State private var heroIndex = 0
+    @State private var indicatorIndex = 0
+    @State private var outgoingHeroIndex: Int?
+    @State private var heroReveal = 0.0
+    @State private var heroForward = true
+    @State private var heroTransitioning = false
+    @State private var heroPauseUntil = Date.distantPast
+    @State private var heroProgress = 0.0
+    @State private var heroCycleStartedAt: Date?
+    @State private var heroCycleStartProgress = 0.0
+    @State private var heroIsVisible = false
+    @State private var themeColor = HomePalette.background
+    @State private var heroDragX: CGFloat = 0
+    @State private var heroDragTarget: Int?
+    @State private var dockGestureHandled = false
+    private var darkMode: Bool {
+        appearance == "dark" || (appearance == "system" && systemColorScheme == .dark)
+    }
+    private var fallbackTheme: Color { darkMode ? HomePalette.background : Color(red: 0.94, green: 0.95, blue: 0.96) }
+    private func color(for id: String) -> Color {
+        guard let colors = heroThemes[id] else { return fallbackTheme }
+        return darkMode ? colors.dark : colors.light
+    }
 
     private var source: EmbySource? {
-        library.embySources.first { $0.id == selectedSourceID } ?? library.embySources.first
+        if localLibrary { return HomeSnapshotCache.localContext }
+        return library.embySources.first { $0.id == preferredSourceID } ?? library.embySources.first
     }
 
     var body: some View {
         GeometryReader { viewport in
         ScrollView {
+            if hasLoadedHome {
             VStack(alignment: .leading, spacing: 0) {
-                hero.frame(width: viewport.size.width)
+                if !latest.isEmpty {
+                    StretchyHeroHeader(height: HomePalette.isPad ? 650 : max(460, viewport.size.height * 0.76)) { height, pull in
+                        if latest.indices.contains(heroIndex) {
+                            transitionSource(hero(height: height, pull: pull),
+                                             key: "hero:\(latest[heroIndex].id)")
+                        }
+                    }
+                    .frame(width: viewport.size.width)
+                }
                 VStack(alignment: .leading, spacing: HomePalette.sectionSpacing) {
+                    if latest.isEmpty {
+                        HStack {
+                            Text("首页").font(.title2.bold())
+                        }
+                    }
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.subheadline)
                             .foregroundStyle(HomePalette.muted)
                             .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 18))
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
                     }
                     if !continuing.isEmpty { continueSection }
                     if !views.isEmpty { mediaSection }
@@ -114,19 +345,81 @@ struct MobileHomeView: View {
                             .foregroundStyle(HomePalette.muted)
                     }
                 }
-                .padding(.top, HomePalette.isPad ? 30 : 20)
+                .padding(.top, latest.isEmpty ? (HomePalette.isPad ? 76 : 66) : (HomePalette.isPad ? 30 : 20))
                 .padding(.bottom, 56)
             }
             .frame(width: viewport.size.width, alignment: .leading)
+            }
         }
+        .simultaneousGesture(DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard !dockGestureHandled,
+                      abs(value.translation.height) > abs(value.translation.width) * 1.8,
+                      abs(value.translation.height) > 64 else { return }
+                dockGestureHandled = true
+                onScrollStateChange(value.translation.height < 0)
+            }
+            .onEnded { _ in dockGestureHandled = false })
         }
-        .background(HomePalette.background)
+        .background(themeColor)
         .ignoresSafeArea(edges: .top)
-        .preferredColorScheme(.light)
-        .task(id: source?.id) { await loadHome() }
-        .refreshable { await loadHome() }
-        .sheet(item: $selectedItem) { item in
-            MediaDetailView(itemID: item.id).environmentObject(library)
+        .coordinateSpace(name: "lucentHeroScroll")
+        .preferredColorScheme(appearance == "system" ? nil : darkMode ? .dark : .light)
+        .onAppear { heroIsVisible = true }
+        .onDisappear {
+            saveHeroPosition()
+            heroIsVisible = false
+        }
+        .onChange(of: appearance) { _, _ in
+            themeColor = latest.indices.contains(heroIndex) ? color(for: latest[heroIndex].id) : fallbackTheme
+        }
+        .onChange(of: systemColorScheme) { _, _ in
+            if appearance == "system" {
+                themeColor = latest.indices.contains(heroIndex) ? color(for: latest[heroIndex].id) : fallbackTheme
+            }
+        }
+        .task(id: "\(source?.id.uuidString ?? "")|\(refreshID.uuidString)") { await loadHome() }
+        .task(id: "\(source?.id.uuidString ?? "")|\(latest.map(\.id).joined(separator: ","))") {
+            guard !latest.isEmpty else { return }
+            await loadHeroArtwork(at: heroIndex)
+            if latest.count > 1 { await loadHeroArtwork(at: (heroIndex + 1) % latest.count) }
+        }
+        .task(id: "\(heroIndex)|\(heroAutoplay)|\(heroIsVisible)|\(latest.map(\.id).joined(separator: ","))") {
+            guard heroIsVisible, latest.count > 1 else { return }
+            await loadHeroArtwork(at: heroIndex)
+            await loadHeroArtwork(at: (heroIndex + 1) % latest.count)
+            guard heroAutoplay else { return }
+            let remaining = heroPauseUntil.timeIntervalSinceNow
+            if remaining > 0 {
+                do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            let start = min(1, max(0, source.flatMap { HomeSnapshotCache.heroProgress[$0.id] } ?? 0))
+            heroProgress = start
+            heroCycleStartProgress = start
+            heroCycleStartedAt = Date()
+            let duration = max(0.01, 5 * (1 - start))
+            withAnimation(.linear(duration: duration)) { heroProgress = 1 }
+            do { try await Task.sleep(for: .seconds(duration)) } catch { return }
+            guard !Task.isCancelled, heroIsVisible, !detailPresented else { return }
+            advanceHero(to: (heroIndex + 1) % latest.count)
+        }
+        .onReceive(library.$items) { _ in
+            guard localLibrary else { return }
+            Task { @MainActor in await Task.yield(); loadLocalHome() }
+        }
+        .navigationDestination(item: $localCollection) { collection in
+            LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
+        }
+        .onChange(of: localCollection) { _, value in onCollectionChange(value != nil) }
+        .navigationDestination(item: $selectedItemID) { id in
+            detailDestination(id)
+        }
+        .onChange(of: selectedItemID) { _, newValue in
+            detailPresented = newValue != nil
+        }
+        .sheet(isPresented:$showAllContinuing) {
+            if let source { HomeContinuingList(source:source).environmentObject(library) }
         }
         .sheet(item: $browserRoute) { route in
             EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title)
@@ -134,127 +427,305 @@ struct MobileHomeView: View {
         }
     }
 
-    private var hero: some View {
+    private func hero(height: CGFloat, pull: CGFloat) -> some View {
         GeometryReader { geometry in
-        ZStack(alignment: .bottomLeading) {
-            if let source, let item = latest.first {
-                EmbyArtwork(source: source, itemID: item.id, backdrop: true, width: 1200)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-            } else {
-                LinearGradient(colors: [.init(red: 0.10, green: 0.22, blue: 0.40),
-                                        .init(red: 0.56, green: 0.49, blue: 0.53)],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-            }
-            LinearGradient(stops: [
-                .init(color: .black.opacity(0.38), location: 0),
-                .init(color: .clear, location: 0.30),
-                .init(color: .black.opacity(0.52), location: 0.50),
-                .init(color: HomePalette.background.opacity(0.88), location: 0.73),
-                .init(color: HomePalette.background, location: 0.95)
-            ], startPoint: .top, endPoint: .bottom)
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    if let source {
-                        Menu {
-                            ForEach(library.embySources) { option in
-                                Button(option.name) { selectedSourceID = option.id }
+            ZStack(alignment: .top) {
+                if latest.indices.contains(heroIndex), let source {
+                    if let heroDragTarget, latest.indices.contains(heroDragTarget) {
+                        heroArtwork(latest[heroDragTarget], source: source, size: geometry.size, pull: pull)
+                        heroContent(latest[heroDragTarget], size: geometry.size)
+                            .opacity(min(1, abs(heroDragX) / max(geometry.size.width, 1) * 2))
+                            .allowsHitTesting(false)
+                        heroArtwork(latest[heroIndex], source: source, size: geometry.size, pull: pull)
+                            .mask(alignment: heroDragX < 0 ? .leading : .trailing) {
+                                Rectangle().frame(width: max(0, geometry.size.width - abs(heroDragX)))
                             }
-                            Divider()
-                            Button("管理片源", systemImage: "externaldrive") { showSources() }
-                        } label: {
-                            Label(source.name, systemImage: "play.square.stack.fill")
-                                .font(.caption.weight(.semibold))
-                                .lineLimit(1)
-                                .padding(.horizontal, 14).padding(.vertical, 10)
-                                .background(.regularMaterial, in: Capsule())
-                        }
+                            .allowsHitTesting(false)
+                        heroContent(latest[heroIndex], size: geometry.size)
+                            .offset(x: heroDragX)
+                            .allowsHitTesting(false)
                     } else {
-                        Text("LUCENT")
-                            .font(.caption.bold()).tracking(2)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                            .background(.regularMaterial, in: Capsule())
+                        heroArtwork(latest[heroIndex], source: source, size: geometry.size, pull: pull)
+                        heroContent(latest[heroIndex], size: geometry.size)
                     }
+                    if heroDragTarget == nil, let outgoingHeroIndex, latest.indices.contains(outgoingHeroIndex) {
+                        heroArtwork(latest[outgoingHeroIndex], source: source, size: geometry.size, pull: pull)
+                            .mask(alignment: heroForward ? .leading : .trailing) {
+                                Rectangle().frame(width: geometry.size.width * (1 - heroReveal))
+                            }
+                            .allowsHitTesting(false)
+                        heroContent(latest[outgoingHeroIndex], size: geometry.size)
+                            .offset(x: (heroForward ? -1 : 1) * geometry.size.width * heroReveal)
+                            .allowsHitTesting(false)
+                    }
+                }
+                HeroGestureSurface(onDrag: { dx in
+                    guard latest.count > 1, !heroTransitioning else { return }
+                    heroPauseUntil = Date().addingTimeInterval(8)
+                    heroDragX = min(geometry.size.width, max(-geometry.size.width, dx))
+                    heroDragTarget = (heroIndex + (dx < 0 ? 1 : -1) + latest.count) % latest.count
+                }, onEnd: { dx in
+                    guard let target = heroDragTarget else { return }
+                    let shouldAdvance = abs(dx) > geometry.size.width * 0.30
+                    heroTransitioning = true
+                    if shouldAdvance {
+                        rememberHeroSelection(at: target)
+                        indicatorIndex = target
+                    }
+                    withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
+                        heroDragX = shouldAdvance ? (heroDragX < 0 ? -geometry.size.width : geometry.size.width) : 0
+                    }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(380))
+                        if shouldAdvance {
+                            withTransaction(Transaction(animation: nil)) {
+                                heroIndex = target
+                                themeColor = color(for: latest[target].id)
+                                rememberHeroSelection(at: target)
+                                heroDragTarget = nil
+                                heroDragX = 0
+                            }
+                        } else {
+                            heroDragTarget = nil
+                            heroDragX = 0
+                        }
+                        heroTransitioning = false
+                    }
+                }, onTap: {
+                        if heroDragTarget == nil, !heroTransitioning, latest.indices.contains(heroIndex) {
+                            open(latest[heroIndex], transitionKey: "hero:\(latest[heroIndex].id)")
+                        }
+                    })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack {
+                    Color.clear.frame(width: 1, height: 40)
                     Spacer()
                 }
                 .foregroundStyle(HomePalette.ink)
+                .padding(.horizontal, HomePalette.inset)
                 .padding(.top, HomePalette.isPad ? 72 : 60)
-                Spacer(minLength: 0)
-                if let item = latest.first {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("新近入库").font(.caption.weight(.semibold)).tracking(2)
-                            .foregroundStyle(.white.opacity(0.9))
-                        Text(item.name)
-                            .font(.system(size: HomePalette.isPad ? 48 : 34,
-                                          weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-                            .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-                            .padding(.top, 8)
-                        HStack(spacing: 8) {
-                            if let rating = item.communityRating {
-                                Label(rating.formatted(.number.precision(.fractionLength(1))),
-                                      systemImage: "star.fill")
-                                    .foregroundStyle(.yellow)
+                if latest.count > 1 {
+                    HStack(spacing: 0) {
+                        ZStack(alignment: .leading) {
+                            HStack(spacing: 0) {
+                                ForEach(latest.indices, id: \.self) { index in
+                                    Button {
+                                        heroPauseUntil = Date().addingTimeInterval(8)
+                                        advanceHero(to: index)
+                                    } label: {
+                                        Circle()
+                                            .fill(Color.gray.opacity(index == indicatorIndex ? 0 : 0.65))
+                                            .frame(width: 4, height: 4)
+                                            .frame(width: 22, height: 30)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .accessibilityLabel("第 \(index + 1) 张：\(latest[index].name)")
+                                }
                             }
-                            if let year = item.productionYear { Text(String(year)) }
-                            Text("电影")
+                            Capsule()
+                                .fill(Color.gray.opacity(0.35))
+                                .frame(width: 18, height: 4)
+                                .overlay(alignment: .leading) {
+                                    Capsule()
+                                        .fill(darkMode ? Color.white : Color.black)
+                                        .frame(width: max(2, 18 * heroProgress), height: 4)
+                                }
+                                .offset(x: CGFloat(indicatorIndex) * 22 + 2)
+                                .animation(.spring(response: 0.42, dampingFraction: 0.86), value: indicatorIndex)
+                                .allowsHitTesting(false)
                         }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(.top, 8)
-                        if let overview = item.overview, !overview.isEmpty {
-                            Text(overview)
-                                .font(HomePalette.isPad ? .body : .subheadline)
-                                .foregroundStyle(HomePalette.ink.opacity(0.84))
-                                .lineLimit(2)
-                                .padding(.top, 14)
-                        }
-                        Button {
-                            open(item)
-                        } label: {
-                            Label("查看影片", systemImage: "play.fill")
-                                .font(.subheadline.bold())
-                                .padding(.horizontal, 18).padding(.vertical, 12)
-                                .background(HomePalette.ink, in: Capsule())
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.top, 18)
+                        .frame(width: CGFloat(latest.count) * 22)
                     }
-                    .frame(maxWidth: HomePalette.isPad ? 640 : .infinity,
-                           alignment: .leading)
-                } else {
-                    Text("让好故事，触手可及")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text(source == nil ? "添加片源，开始探索你的影片。" : "正在读取服务器推荐…")
-                        .foregroundStyle(.white.opacity(0.8))
-                        .padding(.top, 8)
-                    Button("浏览片源") { showSources() }
-                        .buttonStyle(.borderedProminent)
-                        .padding(.top, 18)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 14)
                 }
             }
-            .frame(width: geometry.size.width - HomePalette.inset * 2,
-                   alignment: .leading)
-            .padding(.horizontal, HomePalette.inset)
-            .padding(.bottom, 24)
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
-        .frame(width: geometry.size.width, height: geometry.size.height)
-        .clipped()
+        .frame(height: height)
+    }
+
+    private func heroArtwork(_ item: JellyfinItem, source: EmbySource, size: CGSize,
+                             pull: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            EmbyArtwork(source: source, itemID: item.id,
+                        backdrop: heroArtworks[item.id]?.posterURL == nil, width: 1200,
+                        preferredURL: heroArtworks[item.id]?.posterURL,
+                        softenBottom: true,
+                        onImage: { image in
+                            heroThemes[item.id] = Self.theme(from: image)
+                            HomeSnapshotCache.themes[source.id] = heroThemes
+                            if latest.indices.contains(heroIndex), latest[heroIndex].id == item.id {
+                                withAnimation(.easeInOut(duration: 0.42)) { themeColor = color(for: item.id) }
+                            }
+                        })
+                .frame(width: size.width, height: size.height)
+                .scaleEffect(1 + min(pull / max(size.height - pull, 1), 0.4), anchor: .top)
+                .frame(maxHeight: .infinity, alignment: .top)
+            LinearGradient(stops: [
+                .init(color: .black.opacity(0.30), location: 0),
+                .init(color: .clear, location: 0.30),
+                .init(color: themeColor.opacity(0.12), location: 0.50),
+                .init(color: themeColor.opacity(0.58), location: 0.72),
+                .init(color: themeColor.opacity(0.88), location: 0.88),
+                .init(color: themeColor, location: 1)
+            ], startPoint: .top, endPoint: .bottom)
         }
-        .frame(height: HomePalette.heroHeight)
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func heroContent(_ item: JellyfinItem, size: CGSize) -> some View {
+        let displayItem = heroDetails[item.id] ?? item
+        return VStack(spacing: 11) {
+                if let artwork = heroArtworks[item.id] {
+                    DetailTitleArtwork(url: artwork.logoURL,
+                                       title: artwork.localizedTitle ?? item.name)
+                        .frame(maxWidth: HomePalette.isPad ? 450 : size.width * 0.82,
+                               minHeight: 100, maxHeight: 125)
+                } else {
+                    Color.clear.frame(height: 125)
+                }
+                HStack(spacing: 7) {
+                    if let rating = displayItem.communityRating {
+                        Image(systemName: "star.fill").foregroundStyle(.yellow)
+                        Text(rating.formatted(.number.precision(.fractionLength(1))))
+                    }
+                    if let date = heroDisplayDate(for: displayItem) { Text("·  " + date) }
+                    if let genres = displayItem.genres, !genres.isEmpty {
+                        Text("·  " + genres.prefix(2).joined(separator: "、")).lineLimit(1)
+                    }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(darkMode ? Color.white : Color.black)
+                if let overview = displayItem.overview, !overview.isEmpty {
+                    Text(overview).font(.subheadline)
+                        .foregroundStyle(darkMode ? Color.white.opacity(0.86) : Color.gray)
+                        .lineLimit(3)
+                        .frame(height: 63, alignment: .top)
+                } else { Color.clear.frame(height: 63) }
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 72)
+        .frame(width: size.width, height: size.height, alignment: .bottom)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func advanceHero(to target: Int) {
+        guard latest.indices.contains(target), target != heroIndex, !heroTransitioning else { return }
+        let previous = heroIndex
+        heroTransitioning = true
+        heroForward = target == (previous + 1) % latest.count || target > previous
+        outgoingHeroIndex = previous
+        heroReveal = 0
+        heroIndex = target
+        rememberHeroSelection(at: target)
+        indicatorIndex = target
+        withAnimation(.easeOut(duration: 0.46)) {
+            heroReveal = 1
+            themeColor = color(for: latest[target].id)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(470))
+            outgoingHeroIndex = nil
+            heroTransitioning = false
+        }
+    }
+
+    private func rememberHeroSelection(at index: Int) {
+        guard let source, latest.indices.contains(index) else { return }
+        HomeSnapshotCache.selectedHeroIDs[source.id] = latest[index].id
+        HomeSnapshotCache.heroProgress[source.id] = 0
+        heroCycleStartedAt = nil
+        withTransaction(Transaction(animation: nil)) { heroProgress = 0 }
+    }
+
+    private func saveHeroPosition() {
+        guard let source, latest.indices.contains(heroIndex) else { return }
+        HomeSnapshotCache.selectedHeroIDs[source.id] = latest[heroIndex].id
+        let progress: Double
+        if let startedAt = heroCycleStartedAt {
+            progress = min(1, heroCycleStartProgress + Date().timeIntervalSince(startedAt) / 5)
+        } else {
+            progress = HomeSnapshotCache.heroProgress[source.id] ?? 0
+        }
+        HomeSnapshotCache.heroProgress[source.id] = progress
+        heroCycleStartedAt = nil
+        withTransaction(Transaction(animation: nil)) { heroProgress = progress }
+    }
+
+    private func loadHeroArtwork(at index: Int) async {
+        guard latest.indices.contains(index), heroArtworks[latest[index].id] == nil else { return }
+        let item = latest[index]
+        if !localLibrary, let source,
+           let embyToken = try? KeychainPasswordStore.embyToken(for: source.id), !embyToken.isEmpty,
+           let detail = try? await ServerDetailClient.item(baseAddress: source.baseAddress,
+               userID: source.userID, itemID: item.id, token: embyToken), !Task.isCancelled {
+            heroDetails[item.id] = detail
+            HomeSnapshotCache.details[source.id] = heroDetails
+        }
+        guard let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else {
+            heroArtworks[item.id] = TMDBService.DetailArtwork(posterURL: nil, logoURL: nil)
+            return
+        }
+        let result = try? await TMDBService.detailArtwork(remote: heroDetails[item.id] ?? item, metadata: nil,
+            title: item.name, television: item.type == "Series",
+            language: TMDBService.deviceLanguage, token: token,
+            displayWidthPixels: Int(UIScreen.main.bounds.width * UIScreen.main.scale))
+        guard !Task.isCancelled else { return }
+        heroArtworks[item.id] = result ?? TMDBService.DetailArtwork(posterURL: nil, logoURL: nil)
+        if let source { HomeSnapshotCache.artworks[source.id] = heroArtworks }
+    }
+
+    private func heroDisplayDate(for item: JellyfinItem) -> String? {
+        if let date = item.premiereDate, date.count >= 10 {
+            return String(date.prefix(10)).replacingOccurrences(of: "-", with: "/")
+        }
+        return item.productionYear.map(String.init)
+    }
+
+    private static func theme(from image: UIImage) -> HeroColors {
+        let fallback = HeroColors(dark: HomePalette.background,
+                                  light: Color(red: 0.94, green: 0.95, blue: 0.96))
+        guard let cgImage = image.cgImage else { return fallback }
+        let width = 24, height = 24
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &pixels, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return fallback
+        }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var bins = [Double](repeating: 0, count: 512)
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            let r = Int(pixels[index]), g = Int(pixels[index + 1]), b = Int(pixels[index + 2])
+            let high = max(r, g, b), low = min(r, g, b)
+            guard high >= 28, low <= 225, pixels[index + 3] >= 128 else { continue }
+            let bin = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5)
+            bins[bin] += 0.2 + Double(high - low) / 255
+        }
+        guard let best = bins.indices.max(by: { bins[$0] < bins[$1] }), bins[best] > 0 else { return fallback }
+        let values = [Double((best >> 6) & 7), Double((best >> 3) & 7), Double(best & 7)]
+        let peak = max(values.max() ?? 0, 1)
+        let dark = values.map { (8 + $0 / peak * 42) / 255 }
+        let light = values.map { (218 + $0 / peak * 24) / 255 }
+        return HeroColors(dark: Color(red: dark[0], green: dark[1], blue: dark[2]),
+                          light: Color(red: light[0], green: light[1], blue: light[2]))
     }
 
     private var continueSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            heading("继续观看", count: continuingTotal)
+            Button {
+                if localLibrary { localCollection = .continueWatching }
+                else { showAllContinuing = true }
+            } label: { heading("继续观看", count: continuingTotal) }.buttonStyle(.plain)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     if let source {
                         ForEach(continuing, id: \.id) { item in
-                            Button { open(item) } label: {
+                            Button { open(item, transitionKey: "continue:\(item.id)") } label: {
                                 VStack(alignment: .leading, spacing: 7) {
                                     ZStack(alignment: .bottom) {
                                         EmbyArtwork(source: source, itemID: item.id,
@@ -268,6 +739,8 @@ struct MobileHomeView: View {
                                     .frame(width: HomePalette.continueWidth,
                                            height: HomePalette.isPad ? 160 : 110)
                                     .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    .modifier(HomeMatchedSource(key: "continue:\(item.id)",
+                                                                namespace: detailTransition))
                                     Text(item.name).font(.subheadline.weight(.semibold))
                                         .foregroundStyle(HomePalette.ink).lineLimit(1)
                                     if let label = item.identity.episodeLabel {
@@ -288,14 +761,17 @@ struct MobileHomeView: View {
 
     private var mediaSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            heading("我的媒体", count: views.count)
+            Button {
+                if localLibrary { localCollection = .mediaLibraries }
+                else if let source { browserRoute = HomeBrowserRoute(source:source,parentID:nil,title:"我的媒体") }
+            } label: { heading("我的媒体", count: views.count) }.buttonStyle(.plain)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
                     if let source {
                         ForEach(views, id: \.id) { view in
                             Button {
-                                browserRoute = HomeBrowserRoute(source: source, parentID: view.id,
-                                                               title: view.name)
+                                if localLibrary { localCollection = LocalCatalogCollection(rawValue: view.id) }
+                                else { browserRoute = HomeBrowserRoute(source: source, parentID: view.id, title: view.name) }
                             } label: {
                                 ZStack(alignment: .bottomLeading) {
                                     if let first = shelves.first(where: { $0.id == view.id })?.items.first {
@@ -344,8 +820,8 @@ struct MobileHomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             Button {
                 if let source {
-                    browserRoute = HomeBrowserRoute(source: source, parentID: shelf.view.id,
-                                                   title: shelf.view.name)
+                    if localLibrary { localCollection = LocalCatalogCollection(rawValue: shelf.view.id) }
+                    else { browserRoute = HomeBrowserRoute(source: source, parentID: shelf.view.id, title: shelf.view.name) }
                 }
             } label: {
                 heading(shelf.view.name, count: nil)
@@ -361,7 +837,7 @@ struct MobileHomeView: View {
                 LazyHStack(alignment: .top, spacing: 14) {
                     if let source {
                         ForEach(shelf.items, id: \.id) { item in
-                            Button { open(item) } label: {
+                            Button { open(item, transitionKey: "shelf:\(shelf.id):\(item.id)") } label: {
                                 VStack(alignment: .leading, spacing: 7) {
                                     ZStack(alignment: .bottomTrailing) {
                                         EmbyArtwork(source: source, itemID: item.id,
@@ -377,6 +853,8 @@ struct MobileHomeView: View {
                                     .frame(width: HomePalette.posterWidth,
                                            height: HomePalette.isPad ? 240 : 158)
                                     .clipShape(RoundedRectangle(cornerRadius: 15))
+                                    .modifier(HomeMatchedSource(key: "shelf:\(shelf.id):\(item.id)",
+                                                                namespace: detailTransition))
                                     Text(item.name).font(.subheadline.weight(.medium))
                                         .foregroundStyle(HomePalette.ink).lineLimit(1)
                                     if let year = item.productionYear {
@@ -411,23 +889,107 @@ struct MobileHomeView: View {
         return min(1, max(0, Double(item.userData?.playbackPositionTicks ?? 0) / Double(total)))
     }
 
-    private func open(_ item: JellyfinItem) {
+    private func open(_ item: JellyfinItem, transitionKey: String? = nil) {
+        if localLibrary {
+            selectedTransitionKey = transitionKey
+            selectedItemID = UUID(uuidString: item.id)
+            return
+        }
         guard let source else { return }
-        if item.isFolder == true || item.type == "Series" {
+        if item.type != "Series" && item.isFolder == true {
             browserRoute = HomeBrowserRoute(source: source, parentID: item.id, title: item.name)
             return
         }
-        selectedItem = library.openEmbyItem(sourceID: source.id, remote: item)
+        selectedTransitionKey = transitionKey
+        selectedItemID = library.openEmbyItem(sourceID: source.id, remote: item).id
+    }
+
+    private func transitionSource<Content: View>(_ content: Content, key: String) -> some View {
+        content.modifier(HomeMatchedSource(key: key, namespace: detailTransition))
+    }
+
+    @ViewBuilder private func detailDestination(_ id: UUID) -> some View {
+        if #available(iOS 18.0, *), let selectedTransitionKey {
+            MediaDetailView(itemID: id)
+                .environmentObject(library)
+                .navigationTransition(.zoom(sourceID: selectedTransitionKey, in: detailTransition))
+        } else {
+            MediaDetailView(itemID: id).environmentObject(library)
+        }
+    }
+
+    private func loadLocalHome() {
+        let files = library.localLibraryItems.filter { $0.missingSince == nil }
+        let cards = library.localCatalogCards
+        HomeSnapshotCache.localItems = Dictionary(uniqueKeysWithValues: files.map { ($0.id.uuidString, $0) })
+        func mapped(_ values: [MediaItem]) -> [JellyfinItem] {
+            values.compactMap { $0.localDetailItem(asSeries: $0.identity?.seriesName != nil) }
+        }
+        func category(_ value: LocalCatalogCollection) -> JellyfinItem {
+            let data = try! JSONSerialization.data(withJSONObject: ["Id":value.rawValue,"Name":value.title,"Type":"CollectionFolder","IsFolder":true])
+            return try! JSONDecoder().decode(JellyfinItem.self, from:data)
+        }
+        let categories = LocalCatalogCollection.homeCategories
+        views = categories.filter { !$0.items(cards: cards, files: files).isEmpty }.map(category)
+        shelves = categories.compactMap { (value: LocalCatalogCollection) in
+            let values = value.items(cards: cards, files: files)
+            return values.isEmpty ? nil : HomeShelf(view:category(value),items:mapped(Array(values.prefix(20))))
+        }
+        continuing = mapped(LocalCatalogCollection.continueWatching.items(cards: cards, files: files))
+        continuingTotal = continuing.count
+        let available = mapped(LocalCatalogCollection.all.items(cards: cards, files: files))
+        let context = HomeSnapshotCache.localContext.id
+        let old = HomeSnapshotCache.entries[context]
+        let preserve = old.map { $0.refreshID == refreshID && Date().timeIntervalSince($0.loadedAt) < HomeSnapshotCache.lifetime } ?? false
+        let byID = Dictionary(uniqueKeysWithValues: available.map { ($0.id, $0) })
+        let retained = preserve ? (old?.latest.compactMap { byID[$0.id] } ?? []) : []
+        latest = retained + Array(available.filter { candidate in !retained.contains { $0.id == candidate.id } }.shuffled().prefix(max(0,8-retained.count)))
+        if !hasLoadedHome {
+            heroArtworks = HomeSnapshotCache.artworks[context] ?? [:]
+            heroThemes = HomeSnapshotCache.themes[context] ?? [:]
+            heroIndex = HomeSnapshotCache.selectedHeroIDs[context].flatMap { id in latest.firstIndex { $0.id == id } } ?? 0
+        }
+        if !latest.indices.contains(heroIndex) { heroIndex = 0 }
+        indicatorIndex = heroIndex
+        themeColor = latest.indices.contains(heroIndex) ? color(for:latest[heroIndex].id) : fallbackTheme
+        HomeSnapshotCache.entries[context] = .init(refreshID:refreshID,loadedAt:preserve ? old!.loadedAt : Date(),views:views,latest:latest,continuing:continuing,continuingTotal:continuingTotal,shelves:shelves)
+        hasLoadedHome = true
+        errorMessage = files.isEmpty ? "请在片源页面添加存储并导入文件夹。" : nil
     }
 
     private func loadHome() async {
+        if localLibrary { loadLocalHome(); return }
         guard let source else {
             views = []; latest = []; continuing = []; continuingTotal = 0; shelves = []
+            heroIndex = 0; indicatorIndex = 0
+            heroArtworks = [:]; heroDetails = [:]; heroThemes = [:]
+            themeColor = fallbackTheme
+            hasLoadedHome = false
+            return
+        }
+        if let snapshot = HomeSnapshotCache.entries[source.id],
+           snapshot.refreshID == refreshID,
+           Date().timeIntervalSince(snapshot.loadedAt) < HomeSnapshotCache.lifetime {
+            views = snapshot.views
+            latest = snapshot.latest
+            continuing = snapshot.continuing
+            continuingTotal = snapshot.continuingTotal
+            shelves = snapshot.shelves
+            heroArtworks = HomeSnapshotCache.artworks[source.id] ?? [:]
+            heroDetails = HomeSnapshotCache.details[source.id] ?? [:]
+            heroThemes = HomeSnapshotCache.themes[source.id] ?? [:]
+            let selectedID = HomeSnapshotCache.selectedHeroIDs[source.id]
+            heroIndex = selectedID.flatMap { id in latest.firstIndex(where: { $0.id == id }) } ?? 0
+            indicatorIndex = heroIndex
+            heroProgress = HomeSnapshotCache.heroProgress[source.id] ?? 0
+            themeColor = latest.indices.contains(heroIndex) ? color(for: latest[heroIndex].id) : fallbackTheme
+            hasLoadedHome = true
+            errorMessage = nil
             return
         }
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer { isLoading = false; hasLoadedHome = true }
         do {
             guard let token = try KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty else {
                 errorMessage = "Emby 登录已失效，请在片源页面更新令牌。"
@@ -440,7 +1002,21 @@ struct MobileHomeView: View {
             let recentMovies = try? await latestRequest
             let resumePage = try? await resumeRequest
             views = viewPage?.items ?? []
-            latest = recentMovies ?? []
+            let candidates = (recentMovies ?? []).filter { $0.type == "Movie" || $0.type == "Series" }
+            latest = Array(candidates.shuffled().prefix(8))
+            heroIndex = 0
+            indicatorIndex = 0
+            HomeSnapshotCache.selectedHeroIDs[source.id] = latest.first?.id
+            HomeSnapshotCache.heroProgress[source.id] = 0
+            heroProgress = 0
+            outgoingHeroIndex = nil
+            heroArtworks = [:]
+            heroDetails = [:]
+            heroThemes = [:]
+            HomeSnapshotCache.artworks[source.id] = [:]
+            HomeSnapshotCache.details[source.id] = [:]
+            HomeSnapshotCache.themes[source.id] = [:]
+            themeColor = fallbackTheme
             continuing = resumePage?.items ?? []
             continuingTotal = resumePage?.totalCount ?? continuing.count
             if views.isEmpty && latest.isEmpty && continuing.isEmpty {
@@ -460,98 +1036,513 @@ struct MobileHomeView: View {
                 return results
             }
             shelves = views.map { HomeShelf(view: $0, items: fetched[$0.id] ?? []) }
+            if !views.isEmpty || !latest.isEmpty || !continuing.isEmpty {
+                HomeSnapshotCache.entries[source.id] = .init(
+                    refreshID: refreshID, loadedAt: Date(), views: views, latest: latest,
+                    continuing: continuing, continuingTotal: continuingTotal, shelves: shelves)
+            }
         } catch {
             errorMessage = "无法读取推荐内容：\(error.localizedDescription)"
         }
     }
 }
 
+private struct HomeContinuingList: View {
+    @EnvironmentObject private var library: LibraryStore
+    @Environment(\.dismiss) private var dismiss
+    let source: EmbySource
+    @State private var items: [JellyfinItem] = []
+    @State private var loading = true
+    @State private var error: String?
+    @State private var selectedID: UUID?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns:[GridItem(.adaptive(minimum:160))],alignment:.leading,spacing:18) {
+                    ForEach(items,id:\.id) { item in
+                        Button { selectedID = library.openEmbyItem(sourceID:source.id,remote:item).id } label: {
+                            VStack(alignment:.leading,spacing:8) {
+                                EmbyArtwork(source:source,itemID:item.id,backdrop:true,width:600)
+                                    .frame(height:110).clipShape(RoundedRectangle(cornerRadius:14))
+                                Text(item.seriesName ?? item.name).font(.subheadline).lineLimit(1)
+                                if let label = item.identity.episodeLabel { Text(label).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }.buttonStyle(.plain)
+                    }
+                }.padding(20)
+                if loading { ProgressView() }
+                if let error { Text(error).foregroundStyle(.secondary).padding() }
+                if !loading && error == nil && items.isEmpty { ContentUnavailableView("暂无继续观看内容",systemImage:"play.circle") }
+            }
+            .navigationTitle("继续观看").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement:.cancellationAction) { Button("完成") { dismiss() } } }
+            .navigationDestination(item:$selectedID) { id in MediaDetailView(itemID:id).environmentObject(library) }
+            .task {
+                defer { loading = false }
+                do {
+                    guard let token = try KeychainPasswordStore.embyToken(for:source.id) else { throw URLError(.userAuthenticationRequired) }
+                    items = try await EmbyClient.resume(source:source,token:token,limit:10000).items
+                } catch { self.error = error.localizedDescription }
+            }
+        }
+    }
+}
+
+private enum SearchEntry: Identifiable, Sendable {
+    case emby(EmbySource, JellyfinItem)
+    case jellyfin(JellyfinSource, JellyfinItem)
+    case plex(PlexSource, PlexItem)
+
+    var id: String {
+        switch self {
+        case .emby(let source, let item): "emby|\(source.id)|\(item.id)"
+        case .jellyfin(let source, let item): "jellyfin|\(source.id)|\(item.id)"
+        case .plex(let source, let item): "plex|\(source.id)|\(item.ratingKey)"
+        }
+    }
+    var title: String {
+        switch self {
+        case .emby(_, let item), .jellyfin(_, let item): item.name
+        case .plex(_, let item): item.title
+        }
+    }
+    var year: String? {
+        switch self {
+        case .emby(_, let item), .jellyfin(_, let item): item.productionYear.map(String.init)
+        case .plex(_, let item): item.year.map(String.init)
+        }
+    }
+}
+
+private struct SearchGroup: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let entries: [SearchEntry]
+}
+
+private struct SearchRemotePoster: View {
+    let request: URLRequest?
+    let cacheKey: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color(uiColor: .secondarySystemGroupedBackground)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: "film").font(.title).foregroundStyle(.tertiary)
+            }
+        }
+        .task(id: cacheKey) {
+            guard let request else { return }
+            let data = try? await LocalMediaCache.shared.imageData(key: cacheKey) {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw URLError(.badServerResponse)
+                }
+                return data
+            }
+            guard !Task.isCancelled else { return }
+            image = data.flatMap(UIImage.init(data:))
+        }
+    }
+}
+
 struct MobileSearchView: View {
     @EnvironmentObject private var library: LibraryStore
-    @State private var query = ""
-    @State private var results: [JellyfinItem] = []
+    let catalog: String
+    @Binding var detailPresented: Bool
+    @Binding var query: String
+    @Binding var submittedQuery: String
+
+    @State private var scope = "server"
+    @State private var groups: [SearchGroup] = []
+    @State private var localResults: [MediaItem] = []
+    @State private var recommendations: [SearchEntry] = []
+    @State private var localRecommendations: [MediaItem] = []
     @State private var loading = false
     @State private var errorMessage: String?
-    @State private var selectedItem: MediaItem?
-    @State private var browserRoute: HomeBrowserRoute?
+    @State private var selectedItemID: UUID?
+    @State private var recommendationBatch = 0
+    @AppStorage("lucent.search.history") private var historyJSON = "[]"
 
-    private var source: EmbySource? { library.embySources.first }
+    private let columns = [GridItem(.flexible(), spacing: 12),
+                           GridItem(.flexible(), spacing: 12),
+                           GridItem(.flexible(), spacing: 12)]
+
+    private var term: String { submittedQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var history: [String] {
+        (try? JSONDecoder().decode([String].self, from: Data(historyJSON.utf8))) ?? []
+    }
+    private func groupedLocalTitles(_ items: [MediaItem]) -> [MediaItem] {
+        var seenSeries = Set<String>()
+        return items.filter { item in
+            guard let series = item.identity?.seriesName else { return true }
+            return seenSeries.insert(series.folding(options: [.caseInsensitive, .diacriticInsensitive],
+                                                    locale: .current)).inserted
+        }
+    }
+    private var hasResults: Bool {
+        scope == "library" ? !localResults.isEmpty : groups.contains { !$0.entries.isEmpty }
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    Text(term.isEmpty ? "搜索" : "搜索：\(term)")
+                        .font(.system(size: 31, weight: .bold))
+                        .padding(.top, 20)
+
+                    if !localResults.isEmpty || groups.contains(where: { !$0.entries.isEmpty }) {
+                        MobileSegmentedTabs(options: [("媒体库", "library"),
+                                                      ("影视服务器", "server")],
+                                            selection: $scope)
+                    }
+
+                    if term.isEmpty {
+                        emptySearchContent
+                    } else {
+                        searchResultsContent
+                    }
                 }
-                if loading { ProgressView("正在搜索…") }
-                if let source {
-                    ForEach(results, id: \.id) { item in
-                        Button {
-                            if item.isFolder == true || item.type == "Series" {
-                                browserRoute = HomeBrowserRoute(source: source, parentID: item.id,
-                                                               title: item.name)
-                            } else {
-                                selectedItem = library.openEmbyItem(sourceID: source.id, remote: item)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 36)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .toolbar(.hidden, for: .navigationBar)
+            .task(id: catalog) { scope = catalog == "library" ? "library" : "server" }
+            .task(id: term) { await search() }
+            .task(id: recommendationBatch) { await loadRecommendations() }
+            .navigationDestination(item: $selectedItemID) { id in
+                MediaDetailView(itemID: id).environmentObject(library)
+            }
+            .onChange(of: selectedItemID) { _, value in
+                detailPresented = value != nil
+            }
+        }
+        .searchable(text: $query, prompt: "搜索影片和剧集")
+        .onSubmit(of: .search) {
+            submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    @ViewBuilder private var emptySearchContent: some View {
+        if !history.isEmpty {
+            VStack(alignment: .leading, spacing: 13) {
+                HStack {
+                    Text("最近搜索").font(.headline)
+                    Spacer()
+                    Button("清除") { historyJSON = "[]" }
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 9) {
+                        ForEach(history, id: \.self) { value in
+                            Button {
+                                query = value
+                                submittedQuery = value
+                            } label: {
+                                Label(value, systemImage: "clock")
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 14).padding(.vertical, 10)
+                                    .background(Color(uiColor: .secondarySystemGroupedBackground),
+                                                in: Capsule())
                             }
-                        } label: {
-                            HStack(spacing: 12) {
-                                EmbyArtwork(source: source, itemID: item.id,
-                                            backdrop: false, width: 160)
-                                    .frame(width: 54, height: 76)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.name).font(.body.weight(.semibold))
-                                        .foregroundStyle(HomePalette.ink)
-                                    if let year = item.productionYear {
-                                        Text(String(year)).font(.caption)
-                                            .foregroundStyle(HomePalette.muted)
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        recommendationContent
+    }
+
+    @ViewBuilder private var recommendationContent: some View {
+        if (scope == "library" && !localRecommendations.isEmpty) ||
+            (scope == "server" && !recommendations.isEmpty) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("推荐观看").font(.title3.bold())
+                    Spacer()
+                    Button {
+                        recommendationBatch += 1
+                    } label: {
+                        Label("换一批", systemImage: "arrow.clockwise")
+                            .font(.subheadline)
+                    }
+                }
+                if scope == "library" {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                        ForEach(localRecommendations) { item in
+                            Button { selectedItemID = item.id } label: {
+                                posterCard(title: item.identity?.seriesName ?? item.title, subtitle: nil) {
+                                    if let url = library.posterURL(for: item) {
+                                        LocalPosterView(url: url)
+                                    } else {
+                                        posterPlaceholder
                                     }
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption)
-                                    .foregroundStyle(HomePalette.muted)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 } else {
-                    ContentUnavailableView("请先连接 Emby", systemImage: "server.rack")
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                        ForEach(recommendations) { entry in
+                            entryButton(entry)
+                        }
+                    }
                 }
-                if !query.isEmpty && !loading && results.isEmpty && errorMessage == nil {
-                    ContentUnavailableView.search(text: query)
-                }
-            }
-            .navigationTitle("搜索")
-            .searchable(text: $query, prompt: "搜索 Emby 影片和剧集")
-            .task(id: query) { await search() }
-            .sheet(item: $selectedItem) { item in
-                MediaDetailView(itemID: item.id).environmentObject(library)
-            }
-            .sheet(item: $browserRoute) { route in
-                EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title)
-                    .environmentObject(library)
             }
         }
-        .preferredColorScheme(.light)
+    }
+
+    @ViewBuilder private var searchResultsContent: some View {
+        if loading && scope == "server" {
+            ProgressView("正在搜索…")
+                .frame(maxWidth: .infinity).padding(.top, 36)
+        }
+        if let errorMessage {
+            Text(errorMessage).font(.subheadline).foregroundStyle(.secondary)
+        }
+        if scope == "library", !localResults.isEmpty {
+            resultSection(title: "媒体库", count: localResults.count) {
+                ForEach(localResults) { item in
+                    Button { selectedItemID = item.id } label: {
+                        posterCard(title: item.identity?.seriesName ?? item.title, subtitle: nil) {
+                            if let url = library.posterURL(for: item) {
+                                LocalPosterView(url: url)
+                            } else {
+                                posterPlaceholder
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        if scope == "server" {
+            ForEach(groups) { group in
+                if !group.entries.isEmpty {
+                    resultSection(title: group.title, count: group.entries.count) {
+                        ForEach(group.entries) { entry in entryButton(entry) }
+                    }
+                }
+            }
+        }
+        if (!loading || scope == "library") && errorMessage == nil && !hasResults {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("没有找到“\(term)”")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                recommendationContent
+            }
+            .padding(.top, 16)
+        }
+    }
+
+    private func resultSection<Content: View>(
+        title: String, count: Int, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.title3.bold())
+                Text("\(count)").font(.caption).foregroundStyle(.secondary)
+            }
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 20, content: content)
+        }
+    }
+
+    private func entryButton(_ entry: SearchEntry) -> some View {
+        Button { open(entry) } label: {
+            posterCard(title: entry.title, subtitle: entry.year) {
+                entryPoster(entry)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func posterCard<Poster: View>(
+        title: String, subtitle: String?, @ViewBuilder poster: @escaping () -> Poster
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Color.clear
+                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                .overlay {
+                    GeometryReader { geometry in
+                        poster()
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
+                    }
+                }
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 13))
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(2, reservesSpace: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var posterPlaceholder: some View {
+        Rectangle().fill(Color(uiColor: .secondarySystemGroupedBackground))
+            .overlay { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
+    }
+
+    @ViewBuilder private func entryPoster(_ entry: SearchEntry) -> some View {
+        switch entry {
+        case .emby(let source, let item):
+            EmbyArtwork(source: source, itemID: item.id, backdrop: false, width: 360)
+        case .jellyfin(let source, let item):
+            SearchRemotePoster(
+                request: (try? KeychainPasswordStore.jellyfinToken(for: source.id))
+                    .flatMap { JellyfinClient.posterRequest(source: source, token: $0, itemID: item.id) },
+                cacheKey: "search|jellyfin|\(source.id)|\(item.id)")
+        case .plex(let source, let item):
+            SearchRemotePoster(
+                request: (try? KeychainPasswordStore.plexToken(for: source.id)).flatMap { token in
+                    item.thumb.flatMap { PlexClient.posterRequest(source: source, token: token, thumb: $0) }
+                },
+                cacheKey: "search|plex|\(source.id)|\(item.ratingKey)")
+        }
+    }
+
+    private func open(_ entry: SearchEntry) {
+        switch entry {
+        case .emby(let source, let item):
+            selectedItemID = library.openEmbyItem(sourceID: source.id, remote: item).id
+        case .jellyfin(let source, let item):
+            selectedItemID = library.openJellyfinItem(sourceID: source.id, remote: item).id
+        case .plex(let source, let item):
+            if let opened = library.openPlexItem(sourceID: source.id, remote: item) {
+                selectedItemID = opened.id
+            } else {
+                Task {
+                    guard let token = try? KeychainPasswordStore.plexToken(for: source.id),
+                          let detailed = try? await PlexClient.item(
+                            source: source, token: token, ratingKey: item.ratingKey) else { return }
+                    selectedItemID = library.openPlexItem(sourceID: source.id, remote: detailed)?.id
+                }
+            }
+        }
     }
 
     private func search() async {
-        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty, let source else { results = []; errorMessage = nil; return }
-        do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
-        guard !Task.isCancelled else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            guard let token = try KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty else {
-                errorMessage = "Emby 登录已失效。"
-                return
-            }
-            let page = try await EmbyClient.search(source: source, token: token, term: term)
-            guard !Task.isCancelled else { return }
-            results = page.items
+        guard !term.isEmpty else {
+            groups = []
+            localResults = []
             errorMessage = nil
-        } catch {
-            if !Task.isCancelled { errorMessage = "搜索失败：\(error.localizedDescription)" }
+            loading = false
+            return
+        }
+        let searchTerm = term
+        remember(searchTerm)
+        localResults = groupedLocalTitles(library.localLibraryItems.filter {
+            $0.missingSince == nil &&
+            ($0.title.localizedStandardContains(searchTerm) ||
+             ($0.identity?.seriesName?.localizedStandardContains(searchTerm) ?? false))
+        })
+        loading = true
+        groups = []
+        errorMessage = nil
+        let emby = library.embySources
+        let jellyfin = library.jellyfinSources
+        let plex = library.plexSources
+        let found = await withTaskGroup(of: SearchGroup?.self) { taskGroup in
+            for source in emby {
+                taskGroup.addTask {
+                    guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
+                          !token.isEmpty,
+                          let page = try? await EmbyClient.search(
+                            source: source, token: token, term: searchTerm),
+                          !page.items.isEmpty else { return nil }
+                    return SearchGroup(id: "emby|\(source.id)", title: source.name,
+                        entries: page.items.map { .emby(source, $0) })
+                }
+            }
+            for source in jellyfin {
+                taskGroup.addTask {
+                    guard let token = try? KeychainPasswordStore.jellyfinToken(for: source.id),
+                          !token.isEmpty,
+                          let items = try? await JellyfinClient.search(
+                            source: source, token: token, term: searchTerm),
+                          !items.isEmpty else { return nil }
+                    return SearchGroup(id: "jellyfin|\(source.id)", title: source.name,
+                        entries: items.map { .jellyfin(source, $0) })
+                }
+            }
+            for source in plex {
+                taskGroup.addTask {
+                    guard let token = try? KeychainPasswordStore.plexToken(for: source.id),
+                          !token.isEmpty,
+                          let items = try? await PlexClient.search(
+                            source: source, token: token, term: searchTerm),
+                          !items.isEmpty else { return nil }
+                    return SearchGroup(id: "plex|\(source.id)", title: source.name,
+                        entries: items.map { .plex(source, $0) })
+                }
+            }
+            var results: [SearchGroup] = []
+            for await group in taskGroup {
+                if let group { results.append(group) }
+            }
+            return results
+        }
+        guard !Task.isCancelled else { return }
+        groups = found.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        loading = false
+    }
+
+    private func loadRecommendations() async {
+        localRecommendations = Array(groupedLocalTitles(library.localLibraryItems.filter {
+            $0.missingSince == nil
+        }).shuffled().prefix(9))
+        let emby = library.embySources
+        let jellyfin = library.jellyfinSources
+        let plex = library.plexSources
+        let found = await withTaskGroup(of: [SearchEntry].self) { taskGroup in
+            for source in emby {
+                taskGroup.addTask {
+                    guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
+                          let items = try? await EmbyClient.latest(
+                            source: source, token: token, limit: 24) else { return [] }
+                    return items.map { .emby(source, $0) }
+                }
+            }
+            for source in jellyfin {
+                taskGroup.addTask {
+                    guard let token = try? KeychainPasswordStore.jellyfinToken(for: source.id),
+                          let items = try? await JellyfinClient.browsePage(
+                            source: source, token: token, limit: 24) else { return [] }
+                    return items.map { .jellyfin(source, $0) }
+                }
+            }
+            for source in plex {
+                taskGroup.addTask {
+                    guard let token = try? KeychainPasswordStore.plexToken(for: source.id),
+                          let items = try? await PlexClient.browsePage(
+                            source: source, token: token, limit: 24) else { return [] }
+                    return items.map { .plex(source, $0) }
+                }
+            }
+            var entries: [SearchEntry] = []
+            for await items in taskGroup { entries.append(contentsOf: items) }
+            return entries
+        }
+        guard !Task.isCancelled else { return }
+        recommendations = Array(found.shuffled().prefix(9))
+    }
+
+    private func remember(_ value: String) {
+        let entries = Array(([value] + history.filter { $0 != value }).prefix(10))
+        if let data = try? JSONEncoder().encode(entries),
+           let encoded = String(data: data, encoding: .utf8) {
+            historyJSON = encoded
         }
     }
 }

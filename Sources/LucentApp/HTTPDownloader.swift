@@ -21,7 +21,9 @@ final class HTTPDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
                 self.resumeURL = resumeURL
                 self.progress = progress
                 self.continuation = continuation
-                let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+                let configuration = URLSessionConfiguration.default
+                configuration.allowsCellularAccess = NetworkUsagePolicy.allowsDownloads
+                let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
                 self.session = session
                 let task: URLSessionDownloadTask
                 if let data = try? Data(contentsOf: resumeURL) {
@@ -102,6 +104,10 @@ final class HTTPDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
         finished = true
         let continuation = self.continuation
         self.continuation = nil
+        if let error, let resumeURL = self.resumeURL,
+           let data = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
+            try? data.write(to: resumeURL, options: .atomic)
+        }
         let result = error.map { Result<Void, Error>.failure($0) } ?? self.result ?? .failure(CocoaError(.fileReadUnknown))
         lock.unlock()
         session.finishTasksAndInvalidate()

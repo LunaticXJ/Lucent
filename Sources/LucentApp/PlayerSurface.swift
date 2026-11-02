@@ -128,8 +128,8 @@ struct AetherAVKitSurface: UIViewControllerRepresentable {
         controller.canStartPictureInPictureAutomaticallyFromInline = false
         #endif
         let callback = onReady
-        context.coordinator.observation = controller.observe(\.isReadyForDisplay, options: [.initial, .new]) { controller, _ in
-            let ready = controller.isReadyForDisplay
+        context.coordinator.observation = controller.observe(\.isReadyForDisplay, options: [.initial, .new]) { _, change in
+            let ready = change.newValue ?? false
             Task { @MainActor in callback(ready) }
         }
         return controller
@@ -170,20 +170,56 @@ struct PlayerSurface: UIViewControllerRepresentable {
     }
 }
 #elseif os(macOS)
+struct AetherAVKitSurface: NSViewRepresentable {
+    let player: AVPlayer?
+    var detachForPictureInPicture = false
+    var videoGravity: AVLayerVideoGravity = .resizeAspect
+    var onReady: @MainActor @Sendable (Bool) -> Void = { _ in }
+    final class VideoView: NSView {
+        let videoLayer = AVPlayerLayer()
+        var observation: NSKeyValueObservation?
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layer?.addSublayer(videoLayer)
+        }
+        required init?(coder: NSCoder) { nil }
+        override func layout() { super.layout(); videoLayer.frame = bounds }
+    }
+    func makeNSView(context: Context) -> VideoView {
+        let view = VideoView(frame: .zero)
+        view.videoLayer.player = detachForPictureInPicture ? nil : player
+        view.videoLayer.videoGravity = videoGravity
+        let callback = onReady
+        view.observation = view.videoLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { _, change in
+            let ready = change.newValue ?? false
+            Task { @MainActor in callback(ready) }
+        }
+        return view
+    }
+    func updateNSView(_ view: VideoView, context: Context) {
+        let boundPlayer = detachForPictureInPicture ? nil : player
+        if view.videoLayer.player !== boundPlayer { view.videoLayer.player = boundPlayer }
+        view.videoLayer.videoGravity = videoGravity
+    }
+}
+
 struct PlayerSurface: NSViewRepresentable {
     let player: AVPlayer
+    var detachForPictureInPicture = false
     var videoGravity: AVLayerVideoGravity = .resizeAspect
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.controlsStyle = .none
-        view.player = player
+        view.player = detachForPictureInPicture ? nil : player
         view.videoGravity = videoGravity
         return view
     }
 
     func updateNSView(_ view: AVPlayerView, context: Context) {
-        if view.player !== player { view.player = player }
+        let boundPlayer = detachForPictureInPicture ? nil : player
+        if view.player !== boundPlayer { view.player = boundPlayer }
         if view.videoGravity != videoGravity { view.videoGravity = videoGravity }
     }
 }
@@ -195,7 +231,6 @@ struct PlayerSurface: View {
 }
 #endif
 
-#if os(iOS)
 /// Explicit PiP for custom chrome. A companion layer shares the current AVPlayer
 /// (no second decoder), following the host-owned approach used by Sodalite.
 @MainActor
@@ -221,10 +256,12 @@ final class PlayerWindowController: NSObject, ObservableObject, @preconcurrency 
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         let controller = AVPictureInPictureController(playerLayer: sourceView.playerLayer)
         controller?.delegate = self
+        #if os(iOS)
         controller?.canStartPictureInPictureAutomaticallyFromInline = false
+        #endif
         pip = controller
-        possibleObservation = controller?.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
-            let possible = controller.isPictureInPicturePossible
+        possibleObservation = controller?.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] _, change in
+            let possible = change.newValue ?? false
             Task { @MainActor [weak self] in self?.possible = possible }
         }
         transportObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
@@ -279,6 +316,23 @@ final class PlayerWindowController: NSObject, ObservableObject, @preconcurrency 
     }
 }
 
+#if os(macOS)
+final class PlayerWindowSourceView: NSView {
+    override func makeBackingLayer() -> CALayer { AVPlayerLayer() }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    init() { super.init(frame: .zero); wantsLayer = true }
+    required init?(coder: NSCoder) { nil }
+}
+struct PlayerWindowSurface: NSViewRepresentable {
+    let controller: PlayerWindowController
+    let player: AVPlayer?
+    let gravity: AVLayerVideoGravity
+    func makeNSView(context: Context) -> PlayerWindowSourceView {
+        controller.bind(player, gravity: gravity); return controller.sourceView
+    }
+    func updateNSView(_ view: PlayerWindowSourceView, context: Context) { controller.bind(player, gravity: gravity) }
+}
+#else
 final class PlayerWindowSourceView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
     var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }

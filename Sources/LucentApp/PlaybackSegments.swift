@@ -28,12 +28,29 @@ enum PlaybackSegmentClient {
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let values = json["Chapters"] as? [[String: Any]] else { return [] }
-        let chapters = values.enumerated().compactMap { index, value -> PlaybackChapter? in
-            guard let ticks = (value["StartPositionTicks"] as? NSNumber)?.doubleValue else { return nil }
-            return PlaybackChapter(index: index, title: value["Name"] as? String ?? "章节 \(index + 1)",
-                                   start: ticks / 10_000_000)
+        let runtime = duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            ?? (json["RunTimeTicks"] as? NSNumber).map { $0.doubleValue / 10_000_000 } ?? 0
+        return fromEmbyChapters(values, duration: runtime)
+    }
+
+    static func fromEmbyChapters(_ values: [[String: Any]], duration: Double) -> [PlaybackSegment] {
+        let rows = values.compactMap { value -> (time: Double, name: String, marker: String)? in
+            guard let ticks = (value["StartPositionTicks"] as? NSNumber)?.doubleValue,
+                  ticks.isFinite, ticks >= 0 else { return nil }
+            return (ticks / 10_000_000, value["Name"] as? String ?? "", (value["MarkerType"] as? String ?? "").lowercased())
+        }.sorted { $0.time < $1.time }
+        let chapters = rows.enumerated().map { PlaybackChapter(index: $0.offset, title: $0.element.name, start: $0.element.time) }
+        var result = fromChapters(chapters, duration: duration)
+        if let start = rows.first(where: { $0.marker == "introstart" }),
+           let end = rows.first(where: { $0.marker == "introend" && $0.time > start.time }) {
+            result.removeAll { $0.kind == .intro }
+            result.append(.init(kind: .intro, start: start.time, end: end.time))
         }
-        return fromChapters(chapters, duration: duration ?? 0)
+        if let start = rows.first(where: { $0.marker == "creditsstart" }), duration > start.time {
+            result.removeAll { $0.kind == .credits }
+            result.append(.init(kind: .credits, start: start.time, end: duration))
+        }
+        return result
     }
 
     static func jellyfin(baseAddress: String, itemID: String, token: String) async throws -> [PlaybackSegment] {
@@ -79,8 +96,10 @@ enum PlaybackSegmentClient {
     }
 
     static func fromChapters(_ chapters: [PlaybackChapter], duration: Double) -> [PlaybackSegment] {
-        chapters.enumerated().compactMap { index, chapter in
-            guard let kind = kind(chapter.title.lowercased()) else { return nil }
+        let chapters = chapters.filter { $0.start.isFinite && $0.start >= 0 }.sorted { $0.start < $1.start }
+        return chapters.enumerated().compactMap { index, chapter in
+            let title = chapter.title.lowercased()
+            guard !title.contains("introend"), let kind = kind(title) else { return nil }
             let end = index + 1 < chapters.count ? chapters[index + 1].start : duration
             guard end > chapter.start, end - chapter.start < 1_200 else { return nil }
             return PlaybackSegment(kind: kind, start: chapter.start, end: end)

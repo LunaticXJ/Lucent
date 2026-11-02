@@ -124,6 +124,18 @@ enum PlexClient {
             .MediaContainer.Metadata?.first?.Media ?? []
     }
 
+    static func cachedItem(source: PlexSource, token: String, ratingKey: String) async throws -> PlexItem? {
+        var request = try makeRequest(baseAddress: source.baseAddress, path: "library/metadata/\(ratingKey)", token: token)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let response = response as? HTTPURLResponse else { throw PlexError.requestFailed }
+        if response.statusCode == 404 { return nil }
+        guard response.statusCode == 200 else { throw PlexError.requestFailed }
+        let values = try JSONDecoder().decode(ItemResponse.self, from: data).MediaContainer.Metadata ?? []
+        guard values.count <= 1, values.allSatisfy({ $0.ratingKey == ratingKey }) else { throw PlexError.invalidResponse }
+        return values.first
+    }
+
     static func item(source: PlexSource, token: String, ratingKey: String) async throws -> PlexItem? {
         let request = try makeRequest(baseAddress: source.baseAddress,
                                       path: "library/metadata/\(ratingKey)", token: token)
@@ -185,6 +197,28 @@ enum PlexClient {
         return result
     }
 
+    /// Catalog browsing keeps shows as shows; allLeaves is only for file-level scans.
+    static func catalogPage(source: PlexSource, token: String, parentKey: String? = nil,
+                            start: Int = 0, limit: Int = 60) async throws -> [PlexItem] {
+        let endpoints: [String]
+        if let parentKey { endpoints = ["library/metadata/\(parentKey)/children"] }
+        else {
+            endpoints = try await sections(baseAddress: source.baseAddress, token: token)
+                .filter { $0.type == "movie" || $0.type == "show" }
+                .map { "library/sections/\($0.key)/all" }
+        }
+        var result: [PlexItem] = []
+        for endpoint in endpoints {
+            try Task.checkCancellation()
+            var request = try makeRequest(baseAddress: source.baseAddress, path: endpoint, token: token)
+            request.setValue(String(start), forHTTPHeaderField: "X-Plex-Container-Start")
+            request.setValue(String(limit), forHTTPHeaderField: "X-Plex-Container-Size")
+            let page = try JSONDecoder().decode(ItemResponse.self, from: await fetch(request)).MediaContainer
+            result += page.Metadata ?? []
+        }
+        return result
+    }
+
     static func search(source: PlexSource, token: String, term: String) async throws -> [PlexItem] {
         var request = try makeRequest(baseAddress: source.baseAddress, path: "hubs/search", token: token)
         var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
@@ -233,6 +267,7 @@ enum PlexClient {
         var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "identifier", value: "com.plexapp.plugins.library"),
                                  URLQueryItem(name: "key", value: ratingKey)]
+        request.allowsCellularAccess = NetworkUsagePolicy.allowsSync
         request.url = components.url
         request.httpMethod = "PUT"
         _ = try await fetch(request)
@@ -248,6 +283,7 @@ enum PlexClient {
             URLQueryItem(name: "time", value: String(Int(max(0, position) * 1000))),
             URLQueryItem(name: "duration", value: String(Int(max(0, duration ?? 0) * 1000)))
         ]
+        request.allowsCellularAccess = NetworkUsagePolicy.allowsSync
         request.url = components.url
         request.httpMethod = "POST"
         _ = try await fetch(request)
@@ -290,6 +326,8 @@ enum PlexClient {
     }
 
     private static func fetch(_ request: URLRequest) async throws -> Data {
+        var request = request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse,
               (200..<300).contains(response.statusCode) else { throw PlexError.requestFailed }

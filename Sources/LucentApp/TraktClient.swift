@@ -271,6 +271,9 @@ enum TraktClient {
                                 accessToken: String?) async throws -> (Data, Int) {
         var request = URLRequest(url: URL(string: "https://api.trakt.tv\(path)")!)
         request.timeoutInterval = 30
+        if !path.hasPrefix("/oauth/") {
+            request.allowsCellularAccess = NetworkUsagePolicy.allowsSync
+        }
         request.setValue("2", forHTTPHeaderField: "trakt-api-version")
         request.setValue(clientID, forHTTPHeaderField: "trakt-api-key")
         request.setValue("Lucent/1.0", forHTTPHeaderField: "User-Agent")

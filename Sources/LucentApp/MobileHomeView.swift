@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import UIKit
+import Combine
 
 struct HomeMatchedSource: ViewModifier {
     let key: String
@@ -40,9 +41,7 @@ private struct EmbyArtwork: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [.init(red: 0.13, green: 0.23, blue: 0.39),
-                                    .init(red: 0.48, green: 0.35, blue: 0.43)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            LucentArtworkPlaceholder(symbol: backdrop ? "film.stack" : "film", showsSymbol: image == nil)
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
                     .overlay {
@@ -56,10 +55,6 @@ private struct EmbyArtwork: View {
                                 ], startPoint: .top, endPoint: .bottom))
                         }
                     }
-            } else {
-                Image(systemName: backdrop ? "film.stack" : "film")
-                    .font(.system(size: backdrop ? 48 : 30, weight: .ultraLight))
-                    .foregroundStyle(.white.opacity(0.45))
             }
         }
         .clipped()
@@ -76,7 +71,8 @@ private struct EmbyArtwork: View {
                        else { throw URLError(.badServerResponse) }
                        return data
                    }),
-               let loaded = UIImage(data: data) {
+               let loaded = await ArtworkImageDecoder.image(data: data, key: preferredURL.absoluteString, maximumPixelSize: backdrop ? width : Int(Double(width) * 1.5)) {
+                guard !Task.isCancelled else { return }
                 image = loaded
                 onImage?(loaded)
                 return
@@ -89,7 +85,8 @@ private struct EmbyArtwork: View {
                         try await EmbyClient.artwork(source: source, token: token,
                             itemID: itemID, backdrop: useBackdrop, maxWidth: width)
                     }),
-                      let loaded = UIImage(data: data) else { continue }
+                      let loaded = await ArtworkImageDecoder.image(data: data, key: "\(source.id)|\(itemID)|\(useBackdrop)", maximumPixelSize: backdrop ? width : Int(Double(width) * 1.5)) else { continue }
+                guard !Task.isCancelled else { return }
                 image = loaded
                 onImage?(loaded)
                 break
@@ -98,41 +95,61 @@ private struct EmbyArtwork: View {
     }
 }
 
-private struct HomeShelf: Identifiable {
-    let view: JellyfinItem
-    let items: [JellyfinItem]
+private struct HomeShelf: Identifiable, Sendable {
+    let view: MediaCard
+    let items: [MediaCard]
     var id: String { view.id }
 }
 
-private struct HeroColors { let dark: Color; let light: Color }
+private struct HeroColors: Equatable { let dark: Color; let light: Color }
 
 @MainActor private enum HomeSnapshotCache {
     struct Snapshot {
         let refreshID: UUID
         let loadedAt: Date
-        let views: [JellyfinItem]
-        let latest: [JellyfinItem]
-        let continuing: [JellyfinItem]
+        let views: [MediaCard]
+        let latest: [MediaCard]
+        let continuing: [MediaCard]
         let continuingTotal: Int
         let shelves: [HomeShelf]
     }
     static var entries: [UUID: Snapshot] = [:]
+    static var artworkLanguage = LocalizationPreferences.current.contentID
     static var artworks: [UUID: [String: TMDBService.DetailArtwork]] = [:]
-    static var details: [UUID: [String: JellyfinItem]] = [:]
+    static var details: [UUID: [String: MediaCard]] = [:]
     static var themes: [UUID: [String: HeroColors]] = [:]
     static var selectedHeroIDs: [UUID: String] = [:]
     static var heroProgress: [UUID: Double] = [:]
     // Presentation-only context. Never persisted, authenticated or sent to a server.
     static let localContext = EmbySource(baseAddress: "", userID: "local")
     static var localItems: [String: MediaItem] = [:]
+    static func trim(validSources: Set<UUID>) {
+        let expired = entries.filter { !validSources.contains($0.key) || Date().timeIntervalSince($0.value.loadedAt) >= lifetime }.map(\.key)
+        for id in expired { evict(id) }
+        for id in entries.sorted(by: { $0.value.loadedAt > $1.value.loadedAt }).dropFirst(6).map(\.key) { evict(id) }
+        let valid = Set(entries.keys)
+        artworks = artworks.filter { valid.contains($0.key) }
+        details = details.filter { valid.contains($0.key) }
+        themes = themes.filter { valid.contains($0.key) }
+        selectedHeroIDs = selectedHeroIDs.filter { validSources.contains($0.key) }
+        heroProgress = heroProgress.filter { validSources.contains($0.key) }
+    }
+    static func evict(_ id: UUID) {
+        entries[id] = nil; artworks[id] = nil; details[id] = nil; themes[id] = nil
+    }
+    static func releaseRebuildable() {
+        entries.removeAll(); artworks.removeAll(); details.removeAll(); themes.removeAll(); localItems.removeAll()
+    }
     static let lifetime: TimeInterval = 24 * 60 * 60
 }
 
-private struct HomeBrowserRoute: Identifiable {
+private struct HomeBrowserRoute: Identifiable, Hashable {
     let source: EmbySource
     let parentID: String?
     let title: String?
     var id: String { "\(source.id)|\(parentID ?? "root")" }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// Waits for a clear direction before the enclosing scroll view can claim a hero swipe.
@@ -250,9 +267,12 @@ private struct HeroGestureSurface: UIViewRepresentable {
 }
 
 struct MobileHomeView: View {
-    @AppStorage("lucent.appearance.theme") private var appearance = "system"
+    @Environment(\.appTheme) private var appTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("lucent.home.autoplay") private var heroAutoplay = true
+    @AppStorage(PlaybackProgressPolicy.minimumKey) private var minimumResumePercent = 5.0
+    @AppStorage(PlaybackProgressPolicy.completionKey) private var completedPercent = 90.0
     @EnvironmentObject private var library: LibraryStore
     let showSources: () -> Void
     var preferredSourceID: UUID?
@@ -263,13 +283,14 @@ struct MobileHomeView: View {
     @Binding var detailPresented: Bool
     var onScrollStateChange: (Bool) -> Void = { _ in }
 
-    @State private var views: [JellyfinItem] = []
-    @State private var latest: [JellyfinItem] = []
-    @State private var continuing: [JellyfinItem] = []
+    @State private var views: [MediaCard] = []
+    @State private var latest: [MediaCard] = []
+    @State private var continuing: [MediaCard] = []
     @State private var continuingTotal = 0
     @State private var shelves: [HomeShelf] = []
     @State private var isLoading = false
     @State private var hasLoadedHome = false
+    @State private var localHomeGeneration = UUID()
     @State private var errorMessage: String?
     @State private var selectedItemID: UUID?
     @Namespace private var detailTransition
@@ -277,8 +298,9 @@ struct MobileHomeView: View {
     @State private var browserRoute: HomeBrowserRoute?
     @State private var localCollection: LocalCatalogCollection?
     @State private var showAllContinuing = false
+    @Environment(\.contentLocalizationID) private var contentLocalizationID
     @State private var heroArtworks: [String: TMDBService.DetailArtwork] = [:]
-    @State private var heroDetails: [String: JellyfinItem] = [:]
+    @State private var heroDetails: [String: MediaCard] = [:]
     @State private var heroThemes: [String: HeroColors] = [:]
     @State private var heroIndex = 0
     @State private var indicatorIndex = 0
@@ -291,17 +313,26 @@ struct MobileHomeView: View {
     @State private var heroCycleStartedAt: Date?
     @State private var heroCycleStartProgress = 0.0
     @State private var heroIsVisible = false
-    @State private var themeColor = HomePalette.background
+    @State private var selectedTheme: HeroColors?
     @State private var heroDragX: CGFloat = 0
     @State private var heroDragTarget: Int?
     @State private var dockGestureHandled = false
-    private var darkMode: Bool {
-        appearance == "dark" || (appearance == "system" && systemColorScheme == .dark)
+    private var darkMode: Bool { appTheme.isDark(system: systemColorScheme) }
+    private var fallbackTheme: Color {
+        darkMode ? HomePalette.background : Color(red: 0.94, green: 0.95, blue: 0.96)
     }
-    private var fallbackTheme: Color { darkMode ? HomePalette.background : Color(red: 0.94, green: 0.95, blue: 0.96) }
-    private func color(for id: String) -> Color {
-        guard let colors = heroThemes[id] else { return fallbackTheme }
-        return darkMode ? colors.dark : colors.light
+    private var themeColor: Color {
+        guard let selectedTheme else { return fallbackTheme }
+        return darkMode ? selectedTheme.dark : selectedTheme.light
+    }
+
+    /// Use the same color transaction for the page and every poster's bottom gradient.
+    /// Retain the current palette until the next image has actually been sampled.
+    private func transitionHeroTheme(to id: String) {
+        guard let colors = heroThemes[id], selectedTheme != colors else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.85)) {
+            selectedTheme = colors
+        }
     }
 
     private var source: EmbySource? {
@@ -323,7 +354,7 @@ struct MobileHomeView: View {
                     }
                     .frame(width: viewport.size.width)
                 }
-                VStack(alignment: .leading, spacing: HomePalette.sectionSpacing) {
+                LazyVStack(alignment: .leading, spacing: HomePalette.sectionSpacing) {
                     if latest.isEmpty {
                         HStack {
                             Text("首页").font(.title2.bold())
@@ -335,7 +366,7 @@ struct MobileHomeView: View {
                             .foregroundStyle(HomePalette.muted)
                             .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+                            .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 18)))
                     }
                     if !continuing.isEmpty { continueSection }
                     if !views.isEmpty { mediaSection }
@@ -364,21 +395,23 @@ struct MobileHomeView: View {
         .background(themeColor)
         .ignoresSafeArea(edges: .top)
         .coordinateSpace(name: "lucentHeroScroll")
-        .preferredColorScheme(appearance == "system" ? nil : darkMode ? .dark : .light)
         .onAppear { heroIsVisible = true }
         .onDisappear {
             saveHeroPosition()
             heroIsVisible = false
         }
-        .onChange(of: appearance) { _, _ in
-            themeColor = latest.indices.contains(heroIndex) ? color(for: latest[heroIndex].id) : fallbackTheme
-        }
-        .onChange(of: systemColorScheme) { _, _ in
-            if appearance == "system" {
-                themeColor = latest.indices.contains(heroIndex) ? color(for: latest[heroIndex].id) : fallbackTheme
-            }
-        }
         .task(id: "\(source?.id.uuidString ?? "")|\(refreshID.uuidString)") { await loadHome() }
+        .onChange(of: minimumResumePercent) { _, _ in Task { await loadHome() } }
+        .onChange(of: completedPercent) { _, _ in Task { await loadHome() } }
+        .task(id: contentLocalizationID) {
+            if HomeSnapshotCache.artworkLanguage != contentLocalizationID {
+                HomeSnapshotCache.artworks.removeAll()
+                HomeSnapshotCache.artworkLanguage = contentLocalizationID
+                heroArtworks.removeAll()
+            }
+            await loadHeroArtwork(at: heroIndex)
+            if latest.count > 1 { await loadHeroArtwork(at: (heroIndex + 1) % latest.count) }
+        }
         .task(id: "\(source?.id.uuidString ?? "")|\(latest.map(\.id).joined(separator: ","))") {
             guard !latest.isEmpty else { return }
             await loadHeroArtwork(at: heroIndex)
@@ -404,9 +437,24 @@ struct MobileHomeView: View {
             guard !Task.isCancelled, heroIsVisible, !detailPresented else { return }
             advanceHero(to: (heroIndex + 1) % latest.count)
         }
-        .onReceive(library.$items) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            HomeSnapshotCache.releaseRebuildable()
+            ArtworkImageDecoder.clear()
+        }
+        .onChange(of: library.embySources.map(\.id)) { _, ids in
+            HomeSnapshotCache.trim(validSources: Set(ids).union([HomeSnapshotCache.localContext.id]))
+        }
+        .onReceive(library.$items.dropFirst().throttle(for: .milliseconds(750), scheduler: RunLoop.main, latest: true)) { _ in
             guard localLibrary else { return }
-            Task { @MainActor in await Task.yield(); loadLocalHome() }
+            Task { @MainActor in await refreshLocalContinuing() }
+        }
+        .onReceive(library.$catalogStructureRevision.dropFirst().debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in
+            guard localLibrary else { return }
+            Task { @MainActor in await loadLocalHome() }
+        }
+        .onReceive(library.$fileSources.dropFirst().debounce(for: .milliseconds(200), scheduler: RunLoop.main)) { _ in
+            guard localLibrary else { return }
+            Task { @MainActor in await Task.yield(); await loadLocalHome() }
         }
         .navigationDestination(item: $localCollection) { collection in
             LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
@@ -421,10 +469,11 @@ struct MobileHomeView: View {
         .sheet(isPresented:$showAllContinuing) {
             if let source { HomeContinuingList(source:source).environmentObject(library) }
         }
-        .sheet(item: $browserRoute) { route in
-            EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title)
+        .navigationDestination(item: $browserRoute) { route in
+            EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title, embedded: true)
                 .environmentObject(library)
         }
+        .onChange(of: browserRoute?.id) { _, value in onCollectionChange(value != nil) }
     }
 
     private func hero(height: CGFloat, pull: CGFloat) -> some View {
@@ -471,6 +520,7 @@ struct MobileHomeView: View {
                     if shouldAdvance {
                         rememberHeroSelection(at: target)
                         indicatorIndex = target
+                        transitionHeroTheme(to: latest[target].id)
                     }
                     withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
                         heroDragX = shouldAdvance ? (heroDragX < 0 ? -geometry.size.width : geometry.size.width) : 0
@@ -480,11 +530,12 @@ struct MobileHomeView: View {
                         if shouldAdvance {
                             withTransaction(Transaction(animation: nil)) {
                                 heroIndex = target
-                                themeColor = color(for: latest[target].id)
                                 rememberHeroSelection(at: target)
                                 heroDragTarget = nil
                                 heroDragX = 0
                             }
+                            // The image may have become ready during the drag's settling animation.
+                            transitionHeroTheme(to: latest[target].id)
                         } else {
                             heroDragTarget = nil
                             heroDragX = 0
@@ -546,7 +597,7 @@ struct MobileHomeView: View {
         .frame(height: height)
     }
 
-    private func heroArtwork(_ item: JellyfinItem, source: EmbySource, size: CGSize,
+    private func heroArtwork(_ item: MediaCard, source: EmbySource, size: CGSize,
                              pull: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             EmbyArtwork(source: source, itemID: item.id,
@@ -557,7 +608,7 @@ struct MobileHomeView: View {
                             heroThemes[item.id] = Self.theme(from: image)
                             HomeSnapshotCache.themes[source.id] = heroThemes
                             if latest.indices.contains(heroIndex), latest[heroIndex].id == item.id {
-                                withAnimation(.easeInOut(duration: 0.42)) { themeColor = color(for: item.id) }
+                                transitionHeroTheme(to: item.id)
                             }
                         })
                 .frame(width: size.width, height: size.height)
@@ -575,7 +626,7 @@ struct MobileHomeView: View {
         .frame(width: size.width, height: size.height)
     }
 
-    private func heroContent(_ item: JellyfinItem, size: CGSize) -> some View {
+    private func heroContent(_ item: MediaCard, size: CGSize) -> some View {
         let displayItem = heroDetails[item.id] ?? item
         return VStack(spacing: 11) {
                 if let artwork = heroArtworks[item.id] {
@@ -588,7 +639,7 @@ struct MobileHomeView: View {
                 }
                 HStack(spacing: 7) {
                     if let rating = displayItem.communityRating {
-                        Image(systemName: "star.fill").foregroundStyle(.yellow)
+                        Image(systemName: "star.fill").foregroundStyle(LucentUI.ratingTint)
                         Text(rating.formatted(.number.precision(.fractionLength(1))))
                     }
                     if let date = heroDisplayDate(for: displayItem) { Text("·  " + date) }
@@ -622,9 +673,9 @@ struct MobileHomeView: View {
         heroIndex = target
         rememberHeroSelection(at: target)
         indicatorIndex = target
+        transitionHeroTheme(to: latest[target].id)
         withAnimation(.easeOut(duration: 0.46)) {
             heroReveal = 1
-            themeColor = color(for: latest[target].id)
         }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(470))
@@ -655,6 +706,10 @@ struct MobileHomeView: View {
         withTransaction(Transaction(animation: nil)) { heroProgress = progress }
     }
 
+    private func isResumeCandidate(_ remote: MediaCard) -> Bool {
+        homeResumeCandidate(remote.legacyPresentation, sourceID: source?.id, library: library)
+    }
+
     private func loadHeroArtwork(at index: Int) async {
         guard latest.indices.contains(index), heroArtworks[latest[index].id] == nil else { return }
         let item = latest[index]
@@ -662,25 +717,27 @@ struct MobileHomeView: View {
            let embyToken = try? KeychainPasswordStore.embyToken(for: source.id), !embyToken.isEmpty,
            let detail = try? await ServerDetailClient.item(baseAddress: source.baseAddress,
                userID: source.userID, itemID: item.id, token: embyToken), !Task.isCancelled {
-            heroDetails[item.id] = detail
+            heroDetails[item.id] = MediaCard(server: detail)
             HomeSnapshotCache.details[source.id] = heroDetails
         }
         guard let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else {
             heroArtworks[item.id] = TMDBService.DetailArtwork(posterURL: nil, logoURL: nil)
             return
         }
-        let result = try? await TMDBService.detailArtwork(remote: heroDetails[item.id] ?? item, metadata: nil,
+        let requestedLanguage = LocalizationPreferences.current.contentID
+        let result = try? await TMDBService.detailArtwork(remote: (heroDetails[item.id] ?? item).legacyPresentation, metadata: nil,
             title: item.name, television: item.type == "Series",
             language: TMDBService.deviceLanguage, token: token,
             displayWidthPixels: Int(UIScreen.main.bounds.width * UIScreen.main.scale))
         guard !Task.isCancelled else { return }
+        guard requestedLanguage == LocalizationPreferences.current.contentID else { return }
         heroArtworks[item.id] = result ?? TMDBService.DetailArtwork(posterURL: nil, logoURL: nil)
         if let source { HomeSnapshotCache.artworks[source.id] = heroArtworks }
     }
 
-    private func heroDisplayDate(for item: JellyfinItem) -> String? {
+    private func heroDisplayDate(for item: MediaCard) -> String? {
         if let date = item.premiereDate, date.count >= 10 {
-            return String(date.prefix(10)).replacingOccurrences(of: "-", with: "/")
+            return LocalizationPreferences.current.releaseDate(date) ?? String(date.prefix(10))
         }
         return item.productionYear.map(String.init)
     }
@@ -732,6 +789,11 @@ struct MobileHomeView: View {
                                                     backdrop: true, width: 500)
                                         LinearGradient(colors: [.clear, .black.opacity(0.55)],
                                                        startPoint: .center, endPoint: .bottom)
+                                        if let rating = item.communityRating, rating > 0 {
+                                            LucentRatingBadge(rating: rating)
+                                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                                .padding(.trailing, 8).padding(.bottom, 22)
+                                        }
                                         ProgressView(value: progress(item))
                                             .tint(.white)
                                             .padding(10)
@@ -842,11 +904,8 @@ struct MobileHomeView: View {
                                     ZStack(alignment: .bottomTrailing) {
                                         EmbyArtwork(source: source, itemID: item.id,
                                                     backdrop: false, width: 350)
-                                        if let rating = item.communityRating {
-                                            Text(rating.formatted(.number.precision(.fractionLength(1))))
-                                                .font(.caption.bold()).foregroundStyle(.white)
-                                                .padding(5)
-                                                .background(.black.opacity(0.65), in: Capsule())
+                                        if let rating = item.communityRating ?? heroDetails[item.id]?.communityRating, rating > 0 {
+                                            LucentRatingBadge(rating: rating)
                                                 .padding(8)
                                         }
                                     }
@@ -855,11 +914,7 @@ struct MobileHomeView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 15))
                                     .modifier(HomeMatchedSource(key: "shelf:\(shelf.id):\(item.id)",
                                                                 namespace: detailTransition))
-                                    Text(item.name).font(.subheadline.weight(.medium))
-                                        .foregroundStyle(HomePalette.ink).lineLimit(1)
-                                    if let year = item.productionYear {
-                                        Text(String(year)).font(.caption).foregroundStyle(HomePalette.muted)
-                                    }
+                                    LucentPosterCaption(title: item.name, subtitle: item.productionYear.map(String.init), lines: 1)
                                 }
                                 .frame(width: HomePalette.posterWidth, alignment: .leading)
                             }
@@ -874,7 +929,7 @@ struct MobileHomeView: View {
 
     private func heading(_ title: String, count: Int?) -> some View {
         HStack(spacing: 6) {
-            Text(title).font(HomePalette.isPad ? .title2.bold() : .title3.bold())
+            Text(localLibrary ? title.lucentLocalized : title).font(HomePalette.isPad ? .title2.bold() : .title3.bold())
                 .foregroundStyle(HomePalette.ink)
             Spacer()
             if let count { Text(String(count)).font(.subheadline).foregroundStyle(HomePalette.muted) }
@@ -884,12 +939,12 @@ struct MobileHomeView: View {
         .padding(.horizontal, HomePalette.inset)
     }
 
-    private func progress(_ item: JellyfinItem) -> Double {
+    private func progress(_ item: MediaCard) -> Double {
         guard let total = item.runTimeTicks, total > 0 else { return 0 }
         return min(1, max(0, Double(item.userData?.playbackPositionTicks ?? 0) / Double(total)))
     }
 
-    private func open(_ item: JellyfinItem, transitionKey: String? = nil) {
+    private func open(_ item: MediaCard, transitionKey: String? = nil) {
         if localLibrary {
             selectedTransitionKey = transitionKey
             selectedItemID = UUID(uuidString: item.id)
@@ -901,7 +956,7 @@ struct MobileHomeView: View {
             return
         }
         selectedTransitionKey = transitionKey
-        selectedItemID = library.openEmbyItem(sourceID: source.id, remote: item).id
+        selectedItemID = library.openEmbyItem(sourceID: source.id, remote: item.legacyPresentation).id
     }
 
     private func transitionSource<Content: View>(_ content: Content, key: String) -> some View {
@@ -918,26 +973,48 @@ struct MobileHomeView: View {
         }
     }
 
-    private func loadLocalHome() {
+    private func refreshLocalContinuing() async {
         let files = library.localLibraryItems.filter { $0.missingSince == nil }
-        let cards = library.localCatalogCards
+        let result = await Task.detached(priority: .utility) {
+            Dictionary(grouping: files.filter { $0.isInProgress && $0.metadata != nil }, by: \.catalogGroupID).values.compactMap { $0.max { ($0.lastPlayedAt ?? .distantPast) < ($1.lastPlayedAt ?? .distantPast) } }.sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .map { MediaCard(local: $0, asSeries: $0.identity?.seriesName != nil) }
+        }.value
+        guard !Task.isCancelled else { return }
+        continuing = result; continuingTotal = result.count
+        HomeSnapshotCache.localItems = Dictionary(files.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { _, last in last })
+    }
+
+    private func loadLocalHome() async {
+        let files = library.localLibraryItems.filter { $0.missingSince == nil }
         HomeSnapshotCache.localItems = Dictionary(uniqueKeysWithValues: files.map { ($0.id.uuidString, $0) })
-        func mapped(_ values: [MediaItem]) -> [JellyfinItem] {
-            values.compactMap { $0.localDetailItem(asSeries: $0.identity?.seriesName != nil) }
-        }
-        func category(_ value: LocalCatalogCollection) -> JellyfinItem {
-            let data = try! JSONSerialization.data(withJSONObject: ["Id":value.rawValue,"Name":value.title,"Type":"CollectionFolder","IsFolder":true])
-            return try! JSONDecoder().decode(JellyfinItem.self, from:data)
-        }
-        let categories = LocalCatalogCollection.homeCategories
-        views = categories.filter { !$0.items(cards: cards, files: files).isEmpty }.map(category)
-        shelves = categories.compactMap { (value: LocalCatalogCollection) in
-            let values = value.items(cards: cards, files: files)
-            return values.isEmpty ? nil : HomeShelf(view:category(value),items:mapped(Array(values.prefix(20))))
-        }
-        continuing = mapped(LocalCatalogCollection.continueWatching.items(cards: cards, files: files))
+        let generation = UUID()
+        localHomeGeneration = generation
+        // Build each category once, and encode/decode presentation models away from scrolling.
+        let result = await Task.detached(priority: .userInitiated) {
+            let cards = LocalCatalogIndex(files: files).cards
+            func mapped(_ values: [MediaItem]) -> [MediaCard] {
+                values.map { MediaCard(local: $0, asSeries: $0.identity?.seriesName != nil) }
+            }
+            func category(_ value: LocalCatalogCollection) -> MediaCard {
+                MediaCard(id: value.rawValue, title: value.title, kind: "CollectionFolder", isFolder: true)
+            }
+            let groups = Dictionary(grouping: files, by: \.catalogGroupID)
+            let dates = groups.mapValues { $0.map(\.addedAt).max() ?? .distantPast }
+            let ordered = cards.sorted { (dates[$0.catalogGroupID] ?? $0.addedAt) > (dates[$1.catalogGroupID] ?? $1.addedAt) }
+            let categorized = Dictionary(grouping: ordered) { LocalCatalogCollection.category($0, members: groups[$0.catalogGroupID] ?? [$0]) }
+            let shelves = LocalCatalogCollection.homeCategories.compactMap { value -> HomeShelf? in
+                guard let values = categorized[value], !values.isEmpty else { return nil }
+                return HomeShelf(view: category(value), items: mapped(Array(values.prefix(20))))
+            }
+            let continuing = mapped(LocalCatalogCollection.continueWatching.items(cards: cards, files: files))
+            return (shelves, continuing, mapped(ordered))
+        }.value
+        guard !Task.isCancelled, localHomeGeneration == generation else { return }
+        shelves = result.0
+        views = result.0.map(\.view)
+        continuing = result.1
         continuingTotal = continuing.count
-        let available = mapped(LocalCatalogCollection.all.items(cards: cards, files: files))
+        let available = result.2
         let context = HomeSnapshotCache.localContext.id
         let old = HomeSnapshotCache.entries[context]
         let preserve = old.map { $0.refreshID == refreshID && Date().timeIntervalSince($0.loadedAt) < HomeSnapshotCache.lifetime } ?? false
@@ -945,25 +1022,26 @@ struct MobileHomeView: View {
         let retained = preserve ? (old?.latest.compactMap { byID[$0.id] } ?? []) : []
         latest = retained + Array(available.filter { candidate in !retained.contains { $0.id == candidate.id } }.shuffled().prefix(max(0,8-retained.count)))
         if !hasLoadedHome {
-            heroArtworks = HomeSnapshotCache.artworks[context] ?? [:]
+            heroArtworks = HomeSnapshotCache.artworkLanguage == contentLocalizationID ? HomeSnapshotCache.artworks[context] ?? [:] : [:]
             heroThemes = HomeSnapshotCache.themes[context] ?? [:]
             heroIndex = HomeSnapshotCache.selectedHeroIDs[context].flatMap { id in latest.firstIndex { $0.id == id } } ?? 0
         }
         if !latest.indices.contains(heroIndex) { heroIndex = 0 }
         indicatorIndex = heroIndex
-        themeColor = latest.indices.contains(heroIndex) ? color(for:latest[heroIndex].id) : fallbackTheme
+        selectedTheme = latest.indices.contains(heroIndex) ? heroThemes[latest[heroIndex].id] : nil
         HomeSnapshotCache.entries[context] = .init(refreshID:refreshID,loadedAt:preserve ? old!.loadedAt : Date(),views:views,latest:latest,continuing:continuing,continuingTotal:continuingTotal,shelves:shelves)
         hasLoadedHome = true
         errorMessage = files.isEmpty ? "请在片源页面添加存储并导入文件夹。" : nil
     }
 
     private func loadHome() async {
-        if localLibrary { loadLocalHome(); return }
+        HomeSnapshotCache.trim(validSources: Set(library.embySources.map(\.id)).union([HomeSnapshotCache.localContext.id]))
+        if localLibrary { await loadLocalHome(); return }
         guard let source else {
             views = []; latest = []; continuing = []; continuingTotal = 0; shelves = []
             heroIndex = 0; indicatorIndex = 0
             heroArtworks = [:]; heroDetails = [:]; heroThemes = [:]
-            themeColor = fallbackTheme
+            selectedTheme = nil
             hasLoadedHome = false
             return
         }
@@ -972,17 +1050,17 @@ struct MobileHomeView: View {
            Date().timeIntervalSince(snapshot.loadedAt) < HomeSnapshotCache.lifetime {
             views = snapshot.views
             latest = snapshot.latest
-            continuing = snapshot.continuing
+            continuing = snapshot.continuing.filter(isResumeCandidate)
             continuingTotal = snapshot.continuingTotal
             shelves = snapshot.shelves
-            heroArtworks = HomeSnapshotCache.artworks[source.id] ?? [:]
+            heroArtworks = HomeSnapshotCache.artworkLanguage == contentLocalizationID ? HomeSnapshotCache.artworks[source.id] ?? [:] : [:]
             heroDetails = HomeSnapshotCache.details[source.id] ?? [:]
             heroThemes = HomeSnapshotCache.themes[source.id] ?? [:]
             let selectedID = HomeSnapshotCache.selectedHeroIDs[source.id]
             heroIndex = selectedID.flatMap { id in latest.firstIndex(where: { $0.id == id }) } ?? 0
             indicatorIndex = heroIndex
             heroProgress = HomeSnapshotCache.heroProgress[source.id] ?? 0
-            themeColor = latest.indices.contains(heroIndex) ? color(for: latest[heroIndex].id) : fallbackTheme
+            selectedTheme = latest.indices.contains(heroIndex) ? heroThemes[latest[heroIndex].id] : nil
             hasLoadedHome = true
             errorMessage = nil
             return
@@ -998,12 +1076,27 @@ struct MobileHomeView: View {
             async let viewsRequest = EmbyClient.browse(source: source, token: token, parentID: nil)
             async let latestRequest = EmbyClient.latest(source: source, token: token)
             async let resumeRequest = EmbyClient.resume(source: source, token: token)
-            let viewPage = try? await viewsRequest
-            let recentMovies = try? await latestRequest
-            let resumePage = try? await resumeRequest
-            views = viewPage?.items ?? []
-            let candidates = (recentMovies ?? []).filter { $0.type == "Movie" || $0.type == "Series" }
-            latest = Array(candidates.shuffled().prefix(8))
+            let (viewPage, recentMovies, resumePage) = try await (viewsRequest, latestRequest, resumeRequest)
+            try Task.checkCancellation()
+            let fetchedViews = viewPage.items.map { MediaCard(server: $0) }
+            let candidates = recentMovies.map { MediaCard(server: $0) }.filter { $0.type == "Movie" || $0.type == "Series" }
+            let fetchedLatest = Array(candidates.shuffled().prefix(8))
+            let fetched = try await withThrowingTaskGroup(of: (String, [MediaCard]).self) { group in
+                for view in fetchedViews {
+                    group.addTask {
+                        let page = try await EmbyClient.featured(
+                            source: source, token: token, parentID: view.id,
+                            itemTypes: EmbyClient.featuredItemTypes(for: view.legacyPresentation))
+                        return (view.id, page.items.map { MediaCard(server: $0) })
+                    }
+                }
+                var results: [String: [MediaCard]] = [:]
+                for try await (id, items) in group { results[id] = items }
+                return results
+            }
+            try Task.checkCancellation()
+            views = fetchedViews
+            latest = fetchedLatest
             heroIndex = 0
             indicatorIndex = 0
             HomeSnapshotCache.selectedHeroIDs[source.id] = latest.first?.id
@@ -1016,35 +1109,35 @@ struct MobileHomeView: View {
             HomeSnapshotCache.artworks[source.id] = [:]
             HomeSnapshotCache.details[source.id] = [:]
             HomeSnapshotCache.themes[source.id] = [:]
-            themeColor = fallbackTheme
-            continuing = resumePage?.items ?? []
-            continuingTotal = resumePage?.totalCount ?? continuing.count
-            if views.isEmpty && latest.isEmpty && continuing.isEmpty {
-                errorMessage = "服务器暂时无法提供首页内容，请在片源中浏览目录。"
-            }
-            let fetched = await withTaskGroup(of: (String, [JellyfinItem]).self) { group in
-                for view in views {
-                    group.addTask {
-                        let page = try? await EmbyClient.featured(
-                            source: source, token: token, parentID: view.id,
-                            itemTypes: EmbyClient.featuredItemTypes(for: view))
-                        return (view.id, page?.items ?? [])
-                    }
-                }
-                var results: [String: [JellyfinItem]] = [:]
-                for await (id, items) in group { results[id] = items }
-                return results
-            }
+            selectedTheme = nil
+            continuing = resumePage.items.map { MediaCard(server: $0) }.filter(isResumeCandidate)
+            continuingTotal = resumePage.totalCount
             shelves = views.map { HomeShelf(view: $0, items: fetched[$0.id] ?? []) }
-            if !views.isEmpty || !latest.isEmpty || !continuing.isEmpty {
-                HomeSnapshotCache.entries[source.id] = .init(
-                    refreshID: refreshID, loadedAt: Date(), views: views, latest: latest,
-                    continuing: continuing, continuingTotal: continuingTotal, shelves: shelves)
-            }
+            do { try await library.synchronizeServerHome(sourceID: source.id, emby: true) }
+            catch is CancellationError { return }
+            catch { errorMessage = "首页已刷新，部分已打开条目未能同步，请稍后重试。" }
+            // A successfully fetched empty library is authoritative too; replace stale snapshots.
+            HomeSnapshotCache.entries[source.id] = .init(
+                refreshID: refreshID, loadedAt: Date(), views: views, latest: latest,
+                continuing: resumePage.items.map { MediaCard(server: $0) }, continuingTotal: continuingTotal, shelves: shelves)
         } catch {
             errorMessage = "无法读取推荐内容：\(error.localizedDescription)"
         }
     }
+}
+
+@MainActor private func homeResumeCandidate(_ remote: JellyfinItem, sourceID: UUID?, library: LibraryStore) -> Bool {
+    if let sourceID, let local = library.items.first(where: { item in
+        switch item.location {
+        case .embyItem(let id, let remoteID), .jellyfinItem(let id, let remoteID): return id == sourceID && remoteID == remote.id
+        default: return false
+        }
+    }), (local.stateUpdatedAt ?? .distantPast) >= (remote.remoteStateDate ?? .distantPast) {
+        return local.isInProgress
+    }
+    return PlaybackProgressPolicy.current.resumePosition(
+        position: Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000,
+        duration: remote.runTimeTicks.map { Double($0) / 10_000_000 }, watched: remote.userData?.played == true) > 0
 }
 
 private struct HomeContinuingList: View {
@@ -1082,6 +1175,7 @@ private struct HomeContinuingList: View {
                 do {
                     guard let token = try KeychainPasswordStore.embyToken(for:source.id) else { throw URLError(.userAuthenticationRequired) }
                     items = try await EmbyClient.resume(source:source,token:token,limit:10000).items
+                        .filter { homeResumeCandidate($0, sourceID: source.id, library: library) }
                 } catch { self.error = error.localizedDescription }
             }
         }
@@ -1123,30 +1217,7 @@ private struct SearchGroup: Identifiable, Sendable {
 private struct SearchRemotePoster: View {
     let request: URLRequest?
     let cacheKey: String
-    @State private var image: UIImage?
-
-    var body: some View {
-        ZStack {
-            Color(uiColor: .secondarySystemGroupedBackground)
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                Image(systemName: "film").font(.title).foregroundStyle(.tertiary)
-            }
-        }
-        .task(id: cacheKey) {
-            guard let request else { return }
-            let data = try? await LocalMediaCache.shared.imageData(key: cacheKey) {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                    throw URLError(.badServerResponse)
-                }
-                return data
-            }
-            guard !Task.isCancelled else { return }
-            image = data.flatMap(UIImage.init(data:))
-        }
-    }
+    var body: some View { LucentRemoteArtwork(request: request, cacheKey: cacheKey) }
 }
 
 struct MobileSearchView: View {

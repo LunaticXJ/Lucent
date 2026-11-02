@@ -15,6 +15,9 @@ private struct ServerBrandIcon: View {
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 25, height: 25)
+            case "fnos", "zspace", "ugreen":
+                Image(EmbyServerKind(rawValue: kind)?.assetName ?? "EmbyBrand")
+                    .resizable().scaledToFit().frame(width: 25, height: 25)
             case "jellyfin":
                 Image("JellyfinBrand")
                     .resizable()
@@ -36,20 +39,6 @@ private struct ServerBrandIcon: View {
     }
 }
 
-private struct MobileDockGlass: ViewModifier {
-    let circle: Bool
-
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            if circle { content.glassEffect(.regular, in: Circle()) }
-            else { content.glassEffect(.regular, in: Capsule()) }
-        } else {
-            if circle { content.background(.regularMaterial, in: Circle()) }
-            else { content.background(.regularMaterial, in: Capsule()) }
-        }
-    }
-}
-
 struct MobileSegmentedTabs<Value: Hashable>: View {
     let options: [(String, Value)]
     @Binding var selection: Value
@@ -58,7 +47,7 @@ struct MobileSegmentedTabs<Value: Hashable>: View {
         Picker("", selection: $selection) {
             ForEach(options.indices, id: \.self) { index in
                 let option = options[index]
-                Text(option.0).tag(option.1)
+                Text(LocalizedStringKey(option.0)).tag(option.1)
             }
         }
         .pickerStyle(.segmented)
@@ -68,243 +57,6 @@ struct MobileSegmentedTabs<Value: Hashable>: View {
     }
 }
 
-private struct ServerAddressDraft {
-    var name = ""
-    var host = ""
-    var path = ""
-    var port = ""
-    var usesHTTPS = true
-    var showsPassword = false
-
-    init(address: String = "", name: String = "", defaultPort: String = "") {
-        self.name = name
-        port = defaultPort
-        guard let parts = URLComponents(string: address), parts.host != nil else { return }
-        host = parts.host ?? ""
-        path = parts.path == "/" ? "" : parts.path
-        port = parts.port.map(String.init) ?? ""
-        usesHTTPS = parts.scheme?.lowercased() == "https"
-    }
-
-    mutating func absorbPastedAddress() {
-        let value = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.contains("://"), let parts = URLComponents(string: value),
-              ["https", "http"].contains(parts.scheme?.lowercased() ?? ""),
-              let parsedHost = parts.host, parts.user == nil, parts.password == nil else { return }
-        host = parsedHost
-        path = parts.path == "/" ? "" : parts.path
-        port = parts.port.map(String.init) ?? ""
-        usesHTTPS = parts.scheme?.lowercased() == "https"
-    }
-
-    var address: String? {
-        let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanHost.isEmpty, !cleanHost.contains("://"),
-              !cleanHost.contains(where: { $0.isWhitespace }),
-              !cleanHost.contains("/"), !cleanHost.contains("@"),
-              !cleanHost.contains("?"), !cleanHost.contains("#") else { return nil }
-        let cleanPort = port.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleanPort.isEmpty || Int(cleanPort).map({ (1...65535).contains($0) }) == true else { return nil }
-        var parts = URLComponents()
-        parts.scheme = usesHTTPS ? "https" : "http"
-        parts.host = cleanHost
-        parts.port = Int(cleanPort)
-        parts.path = cleanPath.isEmpty ? "/" : (cleanPath.hasPrefix("/") ? cleanPath : "/" + cleanPath)
-        return parts.url?.absoluteString
-    }
-}
-
-private struct ServerFormField<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(title)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.leading, 15)
-            content
-                .padding(.horizontal, 18)
-                .frame(minHeight: 52)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
-        }
-    }
-}
-
-private struct MobileStorageForm: View {
-    enum Kind { case smb, webDAV }
-    @EnvironmentObject private var library: LibraryStore
-    @StateObject private var discovery = SMBDiscovery()
-    let kind: Kind
-    var existingID: UUID? = nil
-    let close: () -> Void
-    @State private var name = ""
-    @State private var host = ""
-    @State private var path = ""
-    @State private var port = "443"
-    @State private var https = true
-    @State private var username = ""
-    @State private var password = ""
-    @State private var domain = ""
-    @State private var share = ""
-    @State private var syncAllowed = true
-    @State private var showPassword = false
-    @State private var loaded = false
-    @State private var passwordLoaded = false
-    @State private var shares: [String] = []
-    @State private var checking = false
-    @State private var shareRequest = UUID()
-    @State private var error: String?
-    private var title: String { (existingID == nil ? "添加 " : "编辑 ") + (kind == .smb ? "SMB" : "WebDAV") }
-    private var valid: Bool {
-        !name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && !host.isEmpty &&
-        (kind == .smb ? !share.isEmpty : address != nil)
-    }
-    private var address: String? {
-        let rawPort = port.trimmingCharacters(in:.whitespacesAndNewlines)
-        guard rawPort.isEmpty || (Int(rawPort).map { (1...65535).contains($0) } == true) else { return nil }
-        var value = URLComponents(); value.scheme = https ? "https" : "http"
-        value.host = host.trimmingCharacters(in:.whitespacesAndNewlines)
-        value.port = Int(rawPort)
-        let trimmed = path.trimmingCharacters(in:.whitespacesAndNewlines)
-        guard !trimmed.split(separator:"/").contains("..") else { return nil }
-        value.path = trimmed.isEmpty ? "/" : (trimmed.hasPrefix("/") ? trimmed : "/" + trimmed)
-        return value.url?.absoluteString
-    }
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing:22) {
-                    ServerFormField("名称") { TextField("必填",text:$name) }
-                    ServerFormField("同步") { Toggle("允许云端同步",isOn:$syncAllowed) }
-                    if kind == .webDAV {
-                        ServerFormField("协议") { Toggle("HTTPS",isOn:$https) }
-                    }
-                    ServerFormField("服务器地址") { TextField("必填（127.0.0.1 / sample.com）",text:$host).keyboardType(.URL) }
-                    if kind == .webDAV {
-                        ServerFormField("端口号") { TextField(https ? "443" : "80",text:$port).keyboardType(.numberPad) }
-                    }
-                    ServerFormField("用户名") { TextField("选填，留空以访客身份登录",text:$username).textContentType(.username) }
-                    ServerFormField("密码") {
-                        HStack {
-                            Group {
-                                if showPassword { TextField("选填",text:$password) }
-                                else { SecureField("选填",text:$password) }
-                            }.textContentType(.password).privacySensitive()
-                            Button { showPassword.toggle() } label: {
-                                Image(systemName:showPassword ? "eye.slash" : "eye").foregroundStyle(.secondary)
-                                    .frame(width:36,height:44)
-                            }.buttonStyle(.plain).accessibilityLabel(showPassword ? "隐藏密码" : "显示密码")
-                        }
-                    }
-                    if kind == .webDAV {
-                        ServerFormField("路径") { TextField("选填（/dav）",text:$path) }
-                    } else {
-                        ServerFormField("域名") { TextField("选填",text:$domain) }
-                        ServerFormField("共享名称") { TextField("必填，也可从下方选择",text:$share) }
-                        VStack(alignment:.leading,spacing:9) {
-                            HStack {
-                                Text("可用的共享").font(.system(size:15,weight:.semibold)).foregroundStyle(.secondary)
-                                Spacer()
-                                Button { findShares() } label: {
-                                    if checking { ProgressView().controlSize(.small) } else { Text("查找") }
-                                }.disabled(host.isEmpty || checking)
-                            }.padding(.horizontal,15)
-                            if !shares.isEmpty {
-                                VStack(spacing:0) {
-                                    ForEach(shares,id:\.self) { value in
-                                        Button { share = value } label: {
-                                            HStack { Text(value); Spacer(); Image(systemName:share == value ? "checkmark" : "chevron.right") }
-                                                .padding(18).contentShape(Rectangle())
-                                        }.buttonStyle(.plain)
-                                    }
-                                }.background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:24))
-                            }
-                            ForEach(discovery.hosts,id:\.self) { server in
-                                Button { host = server; findShares() } label: {
-                                    HStack { Text(server); Spacer(); Image(systemName:"chevron.right").foregroundStyle(.secondary) }
-                                        .padding(18).frame(maxWidth:.infinity)
-                                        .background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:24))
-                                }.buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    if let error { Text(error).font(.footnote).foregroundStyle(.red).frame(maxWidth:.infinity,alignment:.leading) }
-                }.padding(.horizontal,20).padding(.top,24).padding(.bottom,32)
-            }
-            .background(Color(uiColor:.systemGroupedBackground))
-            .textInputAutocapitalization(.never).autocorrectionDisabled()
-            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement:.cancellationAction) {
-                    Button(action:close) { Image(systemName:"chevron.left").frame(width:32,height:32) }.accessibilityLabel("返回")
-                }
-                ToolbarItem(placement:.confirmationAction) {
-                    Button(existingID == nil ? "添加" : "保存") { save() }.disabled(!valid)
-                }
-            }
-            .tint(.primary)
-            .toggleStyle(SwitchToggleStyle(tint:Color(red:0.16,green:0.72,blue:0.39)))
-            .onChange(of:https) { old,new in if port == (old ? "443" : "80") { port = new ? "443" : "80" } }
-            .onChange(of:host) { _,value in absorb(value) }
-            .onAppear {
-                guard !loaded else { return }; loaded = true
-                if kind == .smb { discovery.start() }
-                guard let id = existingID else { name = kind == .smb ? "我的 SMB" : "我的 WebDAV"; return }
-                if kind == .smb, let source = library.smbSources.first(where: { $0.id == id }) {
-                    name = source.name; host = source.host; share = source.share; username = source.username
-                    domain = source.domain ?? ""; syncAllowed = source.syncAllowed != false
-                    if let value = try? KeychainPasswordStore.get(for:id) { password = value; passwordLoaded = true }
-                } else if let source = library.webDAVSources.first(where: { $0.id == id }) {
-                    name = source.name; username = source.username; syncAllowed = source.syncAllowed != false
-                    absorb(source.baseAddress)
-                    if let value = try? KeychainPasswordStore.webDAVPassword(for:id) { password = value; passwordLoaded = true }
-                }
-            }
-            .onDisappear { discovery.stop() }
-        }
-    }
-    private func absorb(_ value: String) {
-        guard value.contains("://"), let url = URLComponents(string:value), url.user == nil, url.password == nil,
-              let server = url.host, ["smb","http","https"].contains(url.scheme?.lowercased() ?? "") else { return }
-        host = server
-        if kind == .webDAV { https = url.scheme == "https"; port = url.port.map(String.init) ?? (https ? "443" : "80"); path = url.path }
-        else if !url.path.isEmpty { share = url.path.trimmingCharacters(in:CharacterSet(charactersIn:"/")) }
-    }
-    private func findShares() {
-        let server = host, user = username, secret = password, realm = domain
-        checking = true; error = nil; shares = []
-        let request = UUID(); shareRequest = request
-        Task {
-            defer { if shareRequest == request { checking = false } }
-            do {
-                let values = try await Task.detached(priority:.userInitiated) { try SMBScanner.shares(host:server,username:user,password:secret,domain:realm) }.value
-                guard shareRequest == request, host == server, username == user, password == secret, domain == realm else { return }
-                shares = values
-            }
-            catch { if shareRequest == request { self.error = "无法读取共享，请检查地址与登录信息。可手动填写共享名称。" } }
-        }
-    }
-    private func save() {
-        let secret: String? = existingID == nil || passwordLoaded || !password.isEmpty ? password : nil
-        let success: Bool
-        if kind == .smb {
-            success = library.saveSMBConnection(id:existingID,name:name,host:host,share:share,username:username,
-                domain:domain,password:secret,syncAllowed:syncAllowed)
-        } else if let address {
-            success = library.saveWebDAVConnection(id:existingID,name:name,address:address,username:username,
-                password:secret,syncAllowed:syncAllowed)
-        } else { error = "请检查服务器地址、端口和路径。"; return }
-        if success { close() } else { error = library.errorMessage ?? "保存失败"; library.errorMessage = nil }
-    }
-}
 
 #endif
 
@@ -318,23 +70,22 @@ struct LibraryView: View {
     private enum MediaFilter { case all, unwatched, favorites }
     #if os(iOS)
     private enum MobileTab: Hashable { case home, sources, settings, search }
-    @AppStorage("lucent.appearance.theme") private var mobileAppearance = "system"
     @State private var mobileTab: MobileTab = .home
     @State private var mobileSearchText = ""
     @State private var mobileSubmittedSearchText = ""
+    @State private var embyServerKind: ServerKind = .emby
     @State private var serverDraft = ServerAddressDraft()
     @State private var serverSaving = false
     @AppStorage("lucent.home.selectedCatalog") private var selectedHomeCatalog = "auto"
     @AppStorage("lucent.sources.selectedKind") private var mobileSourceKind = 1
     @State private var homeRefreshID = UUID()
     @State private var showSourceChooser = false
+    @State private var storageOnlyChooser = false
     @State private var pendingSourceAddition: SourceAddition?
     @State private var pendingSourceRemoval: SourceRemoval?
-    @State private var renamingFileID: UUID?
-    @State private var fileNameDraft = ""
     @State private var serverChecks: [UUID: ServerCheck] = [:]
     @State private var checkingServers: Set<UUID> = []
-    private enum SourceAddition { case folder, smb, webDAV, cloud, dlna, emby, jellyfin, plex, importDirectories }
+    private enum SourceAddition { case folder, smb, webDAV, cloud, dlna, emby, fnos, zspace, ugreen, jellyfin, plex, importDirectories }
     @State private var showStorageManager = false
     @State private var pendingStorageEdit: UUID?
     @State private var addStorageAfterDismiss = false
@@ -349,13 +100,9 @@ struct LibraryView: View {
     }
 
     #endif
-    #if os(tvOS)
-    @AppStorage("lucent.playback.atmosLayout") private var tvAtmosLayout = "5.1.2"
-    @State private var tvShowLibrary = false
-    #endif
-    #if os(macOS)
-    private enum MacPage { case home, library }
-    @State private var macPage: MacPage = .home
+    #if !os(iOS)
+    @State private var nativePage: NativeAppPage = .home
+    @StateObject private var nativeHomeModel = NativeHomeModel()
     #endif
     @State private var renamingServerID: UUID?
     @State private var serverNameDraft = ""
@@ -502,17 +249,8 @@ struct LibraryView: View {
         Group {
             #if os(iOS)
             mobilePresentedShell
-            #elseif os(tvOS)
-            if tvShowLibrary {
-                navigationBody
-            } else {
-                NavigationStack {
-                    TVHomeView(showLibrary: { tvShowLibrary = true })
-                        .environmentObject(library)
-                }
-            }
-            #elseif os(macOS)
-            macShell
+            #elseif os(tvOS) || os(macOS)
+            nativeShell
             #else
             navigationBody
             #endif
@@ -522,6 +260,8 @@ struct LibraryView: View {
                     library.refreshFolders()
                     Task { await library.syncNow() }
                 } else {
+                    ArtworkImageDecoder.clear()
+                    Task { await library.flushPersistence() }
                     #if !os(tvOS)
                     if showBrowserUpload { showBrowserUpload = false; stopBrowserUpload() }
                     #endif
@@ -536,58 +276,34 @@ struct LibraryView: View {
             .sheet(isPresented: $showCacheSettings) { CacheSettingsView() }
     }
 
-    #if os(macOS)
-    private var macShell: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("LUCENT")
-                    .font(.system(size: 19, weight: .bold, design: .rounded))
-                    .tracking(3)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 14)
-                    .padding(.bottom, 34)
-                macSidebarButton(.home, title: "首页", symbol: "play.rectangle.fill")
-                macSidebarButton(.library, title: "片源与媒体库", symbol: "externaldrive.fill")
-                Spacer()
-                Text("电影，尽在眼前")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-            }
-            .padding(16)
-            .frame(width: 230, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor))
-            Divider()
-            Group {
-                switch macPage {
-                case .home:
-                    NavigationStack {
-                        MacHomeView(showLibrary: { macPage = .library })
-                            .environmentObject(library)
-                    }
-                case .library:
-                    navigationBody
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .frame(minWidth: 900, minHeight: 640)
-        .preferredColorScheme(.dark)
+    #if !os(iOS)
+    private var nativeShell: some View {
+        NativeAppShell(page: $nativePage, home: {
+            NativeHomeView(model: nativeHomeModel, showSources: { nativePage = .sources }).environmentObject(library)
+        }, sources: { navigationBody }, search: {
+            NativeSearchView().environmentObject(library)
+        }, settings: { nativeSettings })
+        .sheet(isPresented: $showProfiles) { profilesSheet }
+        .sheet(isPresented: $showProfileUnlock) { profileUnlockSheet }
+        .sheet(isPresented: $showTrakt, onDismiss: { traktAuthTask?.cancel(); traktAuthTask = nil }) { traktSheet }
     }
-
-    private func macSidebarButton(_ page: MacPage, title: String, symbol: String) -> some View {
-        Button { macPage = page } label: {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 14, weight: .medium))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .frame(height: 38)
-                .background(macPage == page ? Color.accentColor.opacity(0.16) : .clear,
-                            in: RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
+    private var nativeSettings: some View {
+        AppSettingsView(
+            sortSelection: Binding(get: { sortOrder == .newest ? "newest" : "title" }, set: { sortOrder = $0 == "title" ? .title : .newest }),
+            filterSelection: Binding(get: { switch mediaFilter { case .all: "all"; case .unwatched: "unwatched"; case .favorites: "favorites" } },
+                set: { mediaFilter = $0 == "favorites" ? .favorites : ($0 == "unwatched" ? .unwatched : .all) }),
+            onAction: { action in
+                switch action {
+                case .profiles: showProfiles = true
+                case .trakt: showTrakt = true
+                case .enrichMetadata: Task { await library.enrichMissingMetadata() }
+                case .purgeMissing: library.purgeMissingItems()
+                }
+            }, onSelectProfile: { id in
+                if library.activeProfile?.isChild == true && library.viewerProfiles.first(where: { $0.id == id })?.isChild == false {
+                    pendingProfileID = id; profileUnlockPIN = ""; showProfileUnlock = true
+                } else { _ = library.switchViewerProfile(id: id) }
+            }).environmentObject(library)
     }
     #endif
 
@@ -622,7 +338,9 @@ struct LibraryView: View {
     }
 
     private var homeCatalogKind: String {
-        if effectiveHomeCatalog.hasPrefix("emby:") { return "emby" }
+        if effectiveHomeCatalog.hasPrefix("emby:") {
+            return library.embySources.first(where: { effectiveHomeCatalog == "emby:\($0.id.uuidString)" })?.kind.rawValue ?? "emby"
+        }
         if effectiveHomeCatalog.hasPrefix("jellyfin:") { return "jellyfin" }
         if effectiveHomeCatalog.hasPrefix("plex:") { return "plex" }
         return "library"
@@ -672,8 +390,6 @@ struct LibraryView: View {
             case .failure(let error): library.errorMessage = error.localizedDescription
             }
         }
-        .preferredColorScheme(mobileAppearance == "system" ? nil :
-                              mobileAppearance == "light" ? .light : .dark)
     }
 
     /// One presentation owner for all tabs. Sharing a binding between a hidden
@@ -699,15 +415,6 @@ struct LibraryView: View {
             } message: { _ in
                 Text("会移除该片源的本机配置与关联媒体记录，存储中的原始文件不会删除。")
             }
-            .alert("重命名文件源", isPresented: Binding(get: { renamingFileID != nil },
-                                                      set: { if !$0 { renamingFileID = nil } })) {
-                TextField("名称", text: $fileNameDraft)
-                Button("保存") {
-                    if let id = renamingFileID { library.renameFileSource(id: id, name: fileNameDraft) }
-                    renamingFileID = nil
-                }.disabled(fileNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("取消", role: .cancel) { renamingFileID = nil }
-            }
             .sheet(item: $editingFolder) { source in folderEditSheet(source) }
             .sheet(isPresented: Binding(get: { browsingFolderID != nil }, set: { if !$0 { browsingFolderID = nil } })) {
                 if let id = browsingFolderID {
@@ -727,7 +434,7 @@ struct LibraryView: View {
                 mobileServerSheet(.jellyfin, existingID: source.id) { editingJellyfin = nil }
             }
             .sheet(item: $editingEmby) { source in
-                mobileServerSheet(.emby, existingID: source.id) { editingEmby = nil }
+                mobileServerSheet(ServerKind(source.kind), existingID: source.id) { editingEmby = nil }
             }
             #else
             .sheet(item: $editingJellyfin) { source in jellyfinTokenSheet(source) }
@@ -751,7 +458,7 @@ struct LibraryView: View {
             .sheet(item: $editingWebDAV) { source in webDAVCredentialsSheet(source) }
             #if os(iOS)
             .sheet(isPresented: $showJellyfin) { mobileServerSheet(.jellyfin) { showJellyfin = false } }
-            .sheet(isPresented: $showEmby) { mobileServerSheet(.emby) { showEmby = false } }
+            .sheet(isPresented: $showEmby) { mobileServerSheet(embyServerKind) { showEmby = false } }
             .sheet(isPresented: $showPlex) { mobileServerSheet(.plex) { showPlex = false } }
             #else
             .sheet(isPresented: $showJellyfin) { jellyfinSheet }
@@ -763,11 +470,6 @@ struct LibraryView: View {
             .sheet(item: $editingCloud) { source in cloudTokenSheet(source) }
             .sheet(isPresented: $showAddCollection) { collectionSheet }
             .sheet(isPresented: $showAddSmartPlaylist) { smartPlaylistSheet }
-            .sheet(isPresented: $showProfiles) { profilesSheet }
-            .sheet(isPresented: $showTrakt, onDismiss: { traktAuthTask?.cancel(); traktAuthTask = nil }) {
-                traktSheet
-            }
-            .sheet(isPresented: $showProfileUnlock) { profileUnlockSheet }
             #if !os(tvOS)
             .sheet(isPresented: $showBrowserUpload, onDismiss: stopBrowserUpload) {
                 browserUploadSheet
@@ -810,7 +512,7 @@ struct LibraryView: View {
                             Label("聚合媒体库", systemImage: "rectangle.stack").tag("library")
                         if !library.embySources.isEmpty || !library.jellyfinSources.isEmpty || !library.plexSources.isEmpty {
                             ForEach(library.embySources) { source in
-                                Label(source.name, image: "EmbyBrand")
+                                Label(source.name, image: source.kind.assetName)
                                     .tag("emby:\(source.id.uuidString)")
                             }
                             ForEach(library.jellyfinSources) { source in
@@ -836,7 +538,7 @@ struct LibraryView: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
-                        .modifier(MobileDockGlass(circle: false))
+                        .modifier(LucentGlass(shape: Capsule()))
                     }
                     .accessibilityLabel("首页片源：\(homeCatalogTitle)")
                     .padding(.leading, 20)
@@ -855,7 +557,7 @@ struct LibraryView: View {
 
     private var mobileSettingsShell: some View {
         NavigationStack {
-            MobileSettingsView(
+            AppSettingsView(
                         sortSelection: Binding(get: { sortOrder == .newest ? "newest" : "title" },
                                                set: { sortOrder = $0 == "title" ? .title : .newest }),
                         filterSelection: Binding(get: {
@@ -871,11 +573,11 @@ struct LibraryView: View {
                             default: mediaFilter = .all
                             }
                         }),
-                        onAction: handleMobileSettingsAction,
+                        onAction: handleAppSettingsAction,
                         onSelectProfile: selectMobileProfile)
                 .environmentObject(library)
         }
-        .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.16, green: 0.72, blue: 0.39)))
+        .toggleStyle(SwitchToggleStyle(tint: LucentUI.switchTint))
         .tint(.gray)
     }
 
@@ -891,7 +593,7 @@ struct LibraryView: View {
         }
     }
 
-    private func handleMobileSettingsAction(_ action: MobileSettingsAction) {
+    private func handleAppSettingsAction(_ action: AppSettingsAction) {
         switch action {
         case .profiles: showProfiles = true
         case .trakt: showTrakt = true
@@ -917,7 +619,7 @@ struct LibraryView: View {
     }
 
     private var mobileAddSourceMenu: some View {
-        Button { showSourceChooser = true } label: {
+        Button { storageOnlyChooser = false; showSourceChooser = true } label: {
             Image(systemName: "plus").font(.system(size: 19, weight: .semibold))
                 .frame(width: 44, height: 44).contentShape(Circle())
         }
@@ -928,13 +630,18 @@ struct LibraryView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    additionSection("影视服务器", detail: "直接使用服务器中的海报、分类和观看记录") {
-                        additionRow("Emby", detail: "账户密码或访问令牌", brand: "EmbyBrand", icon: "server.rack", choice: .emby)
-                        additionRow("Jellyfin", detail: "连接自己的影音服务器", brand: "JellyfinBrand", icon: "server.rack", choice: .jellyfin)
-                        additionRow("Plex", detail: "账户授权或访问令牌", brand: "PlexBrand", icon: "server.rack", choice: .plex)
-                    }
-                    additionSection("文件源", detail: "从已连接的存储选择目录，独立命名并扫描入库") {
-                        additionRow("从存储导入目录", detail: "支持跨目录多选与批量命名", icon: "folder.badge.plus", choice: .importDirectories)
+                    if !storageOnlyChooser {
+                        additionSection("影视服务器", detail: "直接使用服务器中的海报、分类和观看记录") {
+                            additionRow("Emby", detail: "账户密码或访问令牌", brand: "EmbyBrand", icon: "server.rack", choice: .emby)
+                            additionRow("Jellyfin", detail: "连接自己的影音服务器", brand: "JellyfinBrand", icon: "server.rack", choice: .jellyfin)
+                            additionRow("Plex", detail: "账户授权或访问令牌", brand: "PlexBrand", icon: "server.rack", choice: .plex)
+                            additionRow("飞牛私有云", detail: "连接飞牛影视媒体库", brand: "FnOSBrand", icon: "server.rack", choice: .fnos)
+                            additionRow("极空间影视", detail: "连接极影视媒体库", brand: "ZSpaceBrand", icon: "server.rack", choice: .zspace)
+                            additionRow("绿联云影视", detail: "连接绿联影视中心", brand: "UGREENBrand", icon: "server.rack", choice: .ugreen)
+                        }
+                        additionSection("文件源", detail: "从已连接的存储选择目录，独立命名并扫描入库") {
+                            additionRow("从存储导入目录", detail: "支持跨目录多选与批量命名", icon: "folder.badge.plus", choice: .importDirectories)
+                        }
                     }
                     additionSection("添加存储", detail: "仅建立连接，导入目录后才扫描入库") {
                         additionRow("本地文件夹", detail: "选择“文件”App 中的目录", icon: "folder", choice: .folder)
@@ -945,10 +652,10 @@ struct LibraryView: View {
                     additionSection("局域网设备", detail: "连接 DLNA 设备并浏览真实目录") {
                         additionRow("DLNA", detail: "发现或手动连接媒体设备", icon: "dot.radiowaves.left.and.right", choice: .dlna)
                     }
-                }.padding(20)
+                }.padding(LucentUI.pageInset)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("添加片源").navigationBarTitleDisplayMode(.inline)
+            .background(LucentUI.page)
+            .navigationTitle(storageOnlyChooser ? "添加存储" : "添加片源").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showSourceChooser = false } } }
         }
         .tint(.gray)
@@ -957,11 +664,11 @@ struct LibraryView: View {
     private func additionSection<Content: View>(_ title: String, detail: String,
                                                 @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.headline)
-            Text(detail).font(.caption).foregroundStyle(.secondary)
+            Text(LocalizedStringKey(title)).font(.headline)
+            Text(LocalizedStringKey(detail)).font(.caption).foregroundStyle(.secondary)
             VStack(spacing: 2, content: content)
                 .padding(6)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
+                .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: 22))
         }
     }
 
@@ -974,8 +681,8 @@ struct LibraryView: View {
                     else { Image(systemName: icon).font(.system(size: 22, weight: .medium)) }
                 }.frame(width: 32, height: 32).padding(8)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(title).font(.system(size: 16, weight: .semibold))
-                    Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(LocalizedStringKey(title)).font(.system(size: 16, weight: .semibold))
+                    Text(LocalizedStringKey(detail)).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
@@ -997,13 +704,21 @@ struct LibraryView: View {
             showCloud = true
         case .dlna: showDLNA = true
         case .emby: prepareNewServer(.emby); showEmby = true
+        case .fnos: prepareNewServer(.fnos); showEmby = true
+        case .zspace: prepareNewServer(.zspace); showEmby = true
+        case .ugreen: prepareNewServer(.ugreen); showEmby = true
         case .jellyfin: prepareNewServer(.jellyfin); showJellyfin = true
         case .plex: prepareNewServer(.plex); showPlex = true
         }
     }
 
     private func finishStorageManagement() {
-        if addStorageAfterDismiss { addStorageAfterDismiss = false; showSourceChooser = true; return }
+        if addStorageAfterDismiss {
+            addStorageAfterDismiss = false
+            storageOnlyChooser = true
+            showSourceChooser = true
+            return
+        }
         guard let id = pendingStorageEdit else { return }
         pendingStorageEdit = nil
         if let source = library.folders.first(where: { $0.id == id }) { editedFolderName = source.name; editingFolder = source }
@@ -1020,17 +735,6 @@ struct LibraryView: View {
         cloudToken = ""; cloudRefreshToken = ""; cloudClientID = ""; cloudClientSecret = ""
         cloudName = ""; dropboxAuthorizationCode = ""; dropboxAuthorizationMessage = nil
         dropboxAuthorization = nil; baiduDeviceCode = nil; open115Authorization = nil
-    }
-
-    private func fileSourceStatus(_ id: UUID, date: Date?) -> String {
-        if library.isScanningFileSource(id) { return "正在扫描，现有内容仍可浏览" }
-        if library.isFileSourceOffline(id) { return "连接或扫描失败 · 长按可重新扫描" }
-        if !library.isFileSourceIncluded(id) { return "仅浏览 · 未加入媒体库" }
-        return date.map { "更新于 " + $0.formatted(date: .abbreviated, time: .omitted) } ?? "等待首次扫描"
-    }
-
-    private func beginFileRename(_ id: UUID, name: String) {
-        fileNameDraft = name; renamingFileID = id
     }
 
     private func removePendingSource(_ source: SourceRemoval) {
@@ -1055,7 +759,7 @@ struct LibraryView: View {
                 ForEach(library.embySources) { source in
                     serverCard(id: source.id, name: source.name, address: source.baseAddress, kind: "emby",
                                username: source.username ?? source.userID,
-                               counts: serverMediaCounts[source.id]) {
+                               counts: serverMediaCounts[source.id], brandAsset: source.kind.assetName) {
                         selectedHomeCatalog = "emby:\(source.id.uuidString)"; mobileTab = .home
                     }
                     .task(id: source) {
@@ -1137,7 +841,7 @@ struct LibraryView: View {
     }
 
     private func serverCard(id: UUID, name: String, address: String, kind: String, username: String,
-                            counts: (movies: Int, series: Int)?,
+                            counts: (movies: Int, series: Int)?, brandAsset: String? = nil,
                             action: @escaping () -> Void) -> some View {
         let brand: Color = kind == "plex" ? .orange : kind == "jellyfin" ? .purple : .green
         return Button(action: action) {
@@ -1148,7 +852,7 @@ struct LibraryView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
-                    Image(kind == "emby" ? "EmbyBrand" : kind == "jellyfin" ? "JellyfinBrand" : "PlexBrand")
+                    Image(brandAsset ?? (kind == "emby" ? "EmbyBrand" : kind == "jellyfin" ? "JellyfinBrand" : "PlexBrand"))
                         .resizable().scaledToFit().frame(width: 34, height: 34)
                 }
                 Text("电影 \(counts.map { String($0.movies) } ?? "—") · 剧集 \(counts.map { String($0.series) } ?? "—")")
@@ -1231,10 +935,35 @@ struct LibraryView: View {
         else if let source = library.plexSources.first(where: { $0.id == id }) { await loadMediaCounts(source, force: true) }
     }
 
-    private enum ServerKind: String { case emby = "Emby", jellyfin = "Jellyfin", plex = "Plex" }
+    private enum ServerKind: String {
+        case emby = "Emby", jellyfin = "Jellyfin", plex = "Plex"
+        case fnos = "飞牛私有云", zspace = "极空间影视", ugreen = "绿联云影视"
+        init(_ kind: EmbyServerKind) {
+            switch kind {
+            case .emby: self = .emby
+            case .fnos: self = .fnos
+            case .zspace: self = .zspace
+            case .ugreen: self = .ugreen
+            }
+        }
+        var embyKind: EmbyServerKind? {
+            switch self {
+            case .emby: .emby
+            case .fnos: .fnos
+            case .zspace: .zspace
+            case .ugreen: .ugreen
+            default: nil
+            }
+        }
+    }
 
     private func prepareNewServer(_ kind: ServerKind) {
         serverDraft = ServerAddressDraft()
+        if let nas = kind.embyKind, nas != .emby {
+            serverDraft.port = nas.defaultPort
+            serverDraft.usesHTTPS = nas.usesHTTPS
+        }
+        embyServerKind = kind
         serverSaving = false
         embyToken = ""; embyUserID = ""; embyUsername = ""; embyPassword = ""
         jellyfinToken = ""; jellyfinUsername = ""; jellyfinPassword = ""
@@ -1244,27 +973,27 @@ struct LibraryView: View {
 
     private var serverAddressFields: some View {
         VStack(spacing: 20) {
-            ServerFormField("名称") {
+            LucentFormField("名称") {
                 TextField("选填，默认使用服务器地址", text: $serverDraft.name)
                     .textInputAutocapitalization(.never)
             }
-            ServerFormField("协议") {
+            LucentFormField("协议") {
                 Toggle("HTTPS", isOn: $serverDraft.usesHTTPS)
             }
-            ServerFormField("服务器地址") {
+            LucentFormField("服务器地址") {
                 TextField("域名、IP 或完整服务器网址", text: $serverDraft.host)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .onChange(of: serverDraft.host) { _, _ in serverDraft.absorbPastedAddress() }
             }
-            ServerFormField("路径") {
+            LucentFormField("路径") {
                 TextField("选填，例如 /emby", text: $serverDraft.path)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .textContentType(nil)
             }
-            ServerFormField("端口号") {
+            LucentFormField("端口号") {
                 TextField(serverDraft.usesHTTPS ? "选填，默认 443" : "选填，默认 80", text: $serverDraft.port)
                     .keyboardType(.numberPad)
             }
@@ -1273,19 +1002,19 @@ struct LibraryView: View {
 
     @ViewBuilder private func serverCredentialFields(_ kind: ServerKind, editing: Bool) -> some View {
         switch kind {
-        case .emby:
-            ServerFormField("登录方式") {
+        case .emby, .fnos, .zspace, .ugreen:
+            LucentFormField("登录方式") {
                 Toggle("使用访问令牌", isOn: editing ? $embyReplacementUsesToken : $embyUsesToken)
             }
             if editing ? embyReplacementUsesToken : embyUsesToken {
-                ServerFormField("访问令牌") {
+                LucentFormField("访问令牌") {
                     SecureField(editing ? "留空则沿用原令牌" : "必填", text: editing ? $replacementToken : $embyToken)
                 }
                 if !editing {
-                    ServerFormField("用户 ID") { TextField("必填", text: $embyUserID) }
+                    LucentFormField("用户 ID") { TextField("必填", text: $embyUserID) }
                 }
             } else {
-                ServerFormField("用户名") {
+                LucentFormField("用户名") {
                     TextField(editing ? "原用户名" : "必填",
                               text: editing ? $embyReplacementUsername : $embyUsername)
                         .textInputAutocapitalization(.never)
@@ -1294,14 +1023,14 @@ struct LibraryView: View {
                 serverPasswordField(editing ? $embyReplacementPassword : $embyPassword, editing: editing)
             }
         case .jellyfin:
-            ServerFormField("登录方式") { Toggle("使用访问令牌", isOn: $jellyfinUsesToken) }
+            LucentFormField("登录方式") { Toggle("使用访问令牌", isOn: $jellyfinUsesToken) }
             if jellyfinUsesToken {
-                ServerFormField("访问令牌") {
+                LucentFormField("访问令牌") {
                     SecureField(editing ? "留空则沿用原令牌" : "必填",
                                 text: editing ? $replacementToken : $jellyfinToken)
                 }
             } else {
-                ServerFormField("用户名") {
+                LucentFormField("用户名") {
                     TextField(editing ? "原用户名" : "必填", text: $jellyfinUsername)
                         .textInputAutocapitalization(.never)
                         .textContentType(.username)
@@ -1321,7 +1050,7 @@ struct LibraryView: View {
                     if plexAuthTask != nil { ProgressView("等待授权") }
                 }
             }
-            ServerFormField("访问令牌") {
+            LucentFormField("访问令牌") {
                 SecureField(editing ? "留空则沿用原令牌" : "必填",
                             text: editing ? $replacementToken : $plexToken)
             }
@@ -1329,23 +1058,9 @@ struct LibraryView: View {
     }
 
     private func serverPasswordField(_ password: Binding<String>, editing: Bool) -> some View {
-        ServerFormField("密码") {
-            HStack {
-                if serverDraft.showsPassword {
-                    TextField(editing ? "账户不变时可留空" : "选填，服务器允许时可留空", text: password)
-                        .textContentType(.password)
-                } else {
-                    SecureField(editing ? "账户不变时可留空" : "选填，服务器允许时可留空", text: password)
-                        .textContentType(.password)
-                }
-                Button {
-                    serverDraft.showsPassword.toggle()
-                } label: {
-                    Image(systemName: serverDraft.showsPassword ? "eye.slash" : "eye")
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel(serverDraft.showsPassword ? "隐藏密码" : "显示密码")
-            }
+        LucentFormField("密码") {
+            LucentPasswordInput(text: password, visible: $serverDraft.showsPassword,
+                placeholder: editing ? "账户不变时可留空" : "选填，服务器允许时可留空")
         }
     }
 
@@ -1367,31 +1082,24 @@ struct LibraryView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if serverSaving { ProgressView("正在连接服务器") }
+                    if serverSaving { LucentLoadingView(title: "正在连接服务器") }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, LucentUI.pageInset)
                 .padding(.top, 24)
                 .padding(.bottom, 36)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(LucentUI.page)
             .navigationTitle(editing ? "编辑 \(kind.rawValue)" : "添加 \(kind.rawValue)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: dismiss) { Image(systemName: "chevron.left") }
-                        .accessibilityLabel("返回")
-                        .disabled(serverSaving)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing ? "保存" : "添加") {
-                        Task { await saveServer(kind, existingID: existingID, dismiss: dismiss) }
-                    }
-                    .disabled(serverSaving || !canSaveServer(kind, editing: editing))
+                LucentEditorToolbar(actionTitle: editing ? "保存" : "添加", busy: serverSaving,
+                    canSave: canSaveServer(kind, editing: editing), close: dismiss) {
+                    Task { await saveServer(kind, existingID: existingID, dismiss: dismiss) }
                 }
             }
         }
-        .presentationDetents([.large])
-        .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.16, green: 0.72, blue: 0.39)))
+        .modifier(LucentSheetStyle(role: .editor))
+        .toggleStyle(SwitchToggleStyle(tint: LucentUI.switchTint))
         .tint(.gray)
         .interactiveDismissDisabled(serverSaving)
         .alert("无法连接服务器", isPresented: Binding(
@@ -1400,7 +1108,7 @@ struct LibraryView: View {
         )) {
             Button("好") { library.errorMessage = nil }
         } message: {
-            Text(library.errorMessage ?? "未知错误")
+            Text(LocalizedStringKey(library.errorMessage ?? "未知错误"))
         }
         .onDisappear {
             if kind == .plex {
@@ -1415,7 +1123,7 @@ struct LibraryView: View {
         guard serverDraft.address != nil else { return false }
         if editing { return true }
         switch kind {
-        case .emby: return embyUsesToken ? (!embyToken.isEmpty && !embyUserID.isEmpty) : !embyUsername.isEmpty
+        case .emby, .fnos, .zspace, .ugreen: return embyUsesToken ? (!embyToken.isEmpty && !embyUserID.isEmpty) : !embyUsername.isEmpty
         case .jellyfin: return jellyfinUsesToken ? !jellyfinToken.isEmpty : !jellyfinUsername.isEmpty
         case .plex: return !plexToken.isEmpty
         }
@@ -1429,16 +1137,16 @@ struct LibraryView: View {
         let saved: Bool
         if let id = existingID {
             let token: String? = switch kind {
-            case .emby: embyReplacementUsesToken ? replacementToken : nil
+            case .emby, .fnos, .zspace, .ugreen: embyReplacementUsesToken ? replacementToken : nil
             case .jellyfin: jellyfinUsesToken ? replacementToken : nil
             case .plex: replacementToken
             }
             let username: String? = switch kind {
-            case .emby: embyReplacementUsesToken ? nil : embyReplacementUsername
+            case .emby, .fnos, .zspace, .ugreen: embyReplacementUsesToken ? nil : embyReplacementUsername
             case .jellyfin: jellyfinUsesToken ? nil : jellyfinUsername
             case .plex: nil
             }
-            let password = kind == .emby ? embyReplacementPassword : jellyfinPassword
+            let password = kind.embyKind != nil ? embyReplacementPassword : jellyfinPassword
             let updatedID = await library.updateServerAddress(id: id, address: address,
                                                                replacementToken: token,
                                                                username: username, password: password)
@@ -1448,17 +1156,17 @@ struct LibraryView: View {
                     library.renameServer(id: updatedID, name: serverDraft.name)
                 }
                 if updatedID != id, selectedHomeCatalog.hasSuffix(id.uuidString) {
-                    selectedHomeCatalog = "\(kind.rawValue.lowercased()):\(updatedID.uuidString)"
+                    selectedHomeCatalog = "\(kind.embyKind != nil ? "emby" : kind.rawValue.lowercased()):\(updatedID.uuidString)"
                 }
             }
         } else {
             switch kind {
-            case .emby:
+            case .emby, .fnos, .zspace, .ugreen:
                 if embyUsesToken {
-                    saved = await library.addEmby(address: address, token: embyToken, userID: embyUserID)
+                    saved = await library.addEmby(address: address, token: embyToken, userID: embyUserID, kind: kind.embyKind ?? .emby)
                 } else {
                     saved = await library.addEmby(address: address, username: embyUsername,
-                                                  password: embyPassword)
+                                                  password: embyPassword, kind: kind.embyKind ?? .emby)
                 }
                 if saved, let id = library.embySources.last?.id { library.renameServer(id: id, name: serverDraft.name) }
             case .jellyfin:
@@ -1518,45 +1226,10 @@ struct LibraryView: View {
                     #if os(iOS)
                     mobileSourcesContent
                     #else
-                    if library.items.isEmpty && library.folders.isEmpty && library.smbSources.isEmpty &&
-                        library.webDAVSources.isEmpty && library.jellyfinSources.isEmpty &&
-                        library.embySources.isEmpty && library.plexSources.isEmpty &&
-                        library.cloudSources.isEmpty && library.dlnaSources.isEmpty {
-                        emptyLibrary
-                    } else {
-                        let visible = filtered
-                        let continuing = visible.filter(\.isInProgress)
-                        if !continuing.isEmpty {
-                            section("继续观看", items: continuing)
-                        }
-                        let downloads = visible.filter { library.downloadedURL(for: $0) != nil }
-                        if !downloads.isEmpty { section("已下载", items: downloads) }
-                        if mediaFilter == .all {
-                            let favorites = visible.filter(\.isFavorite)
-                            if !favorites.isEmpty { section("收藏", items: favorites) }
-                        }
-                        let recent = Array(visible.sorted { $0.addedAt > $1.addedAt }.prefix(12))
-                        if !recent.isEmpty { section("最近添加", items: recent) }
-                        let episodesBySeries = Dictionary(grouping: visible.filter { $0.identity?.seriesName != nil }) {
-                            $0.identity?.seriesName ?? ""
-                        }
-                        if !episodesBySeries.isEmpty { seriesSection(episodesBySeries) }
-                        if !library.collections.isEmpty { collectionsSection(visible) }
-                        if !library.smartPlaylists.isEmpty { smartPlaylistsSection(visible) }
-                        section("电影与其他视频", items: visible.filter { $0.identity?.seriesName == nil })
-                        if library.activeProfile?.isChild != true {
-                            if !library.smbSources.isEmpty { smbSection }
-                            if !library.webDAVSources.isEmpty { webDAVSection }
-                            if !library.jellyfinSources.isEmpty { jellyfinSection }
-                            if !library.embySources.isEmpty { embySection }
-                            if !library.plexSources.isEmpty { plexSection }
-                            if !library.cloudSources.isEmpty { cloudSection }
-                            if !library.dlnaSources.isEmpty { dlnaSection }
-                            #if !os(tvOS)
-                            if !library.folders.isEmpty { foldersSection }
-                            #endif
-                        }
-                    }
+                    NativeSourcesView(addCloud: { showCloud = true }, addDLNA: { showDLNA = true },
+                        addFolder: { showFolderImporter = true },
+                        editCloud: { id in editingCloud = library.cloudSources.first { $0.id == id } })
+                        .environmentObject(library)
                     #endif
                 }
                 .frame(maxWidth: 1100, alignment: .leading)
@@ -1565,7 +1238,7 @@ struct LibraryView: View {
             }
             .navigationTitle(sourcePageTitle)
             #if os(iOS)
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(LucentUI.page)
             .refreshable {
                 if mobileSourceKind == 0 {
                     for id in library.fileSourceIDs where library.isFileSourceIncluded(id) { library.refreshFileSource(id) }
@@ -1577,7 +1250,7 @@ struct LibraryView: View {
             }
             #endif
             #if !os(tvOS)
-            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.16, green: 0.72, blue: 0.39)))
+            .toggleStyle(SwitchToggleStyle(tint: LucentUI.switchTint))
             #endif
             .tint(.gray)
             #if os(iOS)
@@ -1587,111 +1260,7 @@ struct LibraryView: View {
                     ToolbarItem(placement: .topBarTrailing) { mobileAddSourceMenu }
                 }
             }
-            #elseif os(macOS)
-            .searchable(text: $search, prompt: "搜索媒体库")
-            #endif
-            #if !os(iOS)
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    Button("本地缓存", systemImage: "internaldrive") { showCacheSettings = true }
-                }
-                #if os(tvOS)
-                ToolbarItem(placement: .automatic) {
-                    Button("首页", systemImage: "house.fill") { tvShowLibrary = false }
-                }
-                ToolbarItem(placement: .automatic) {
-                    Menu("全景声布局", systemImage: "speaker.wave.3") {
-                        ForEach(["5.1.2", "5.1.4", "7.1.2", "7.1.4", "9.1.6"], id: \.self) { layout in
-                            Button(layout) { tvAtmosLayout = layout }
-                        }
-                    }
-                }
-                #endif
-                ToolbarItem(placement: .automatic) {
-                    Menu(library.activeProfile?.name ?? "资料", systemImage: "person.crop.circle") {
-                        ForEach(library.viewerProfiles) { profile in
-                            Button(profile.name) {
-                                if library.activeProfile?.isChild == true && !profile.isChild {
-                                    pendingProfileID = profile.id
-                                    profileUnlockPIN = ""
-                                    showProfileUnlock = true
-                                } else {
-                                    _ = library.switchViewerProfile(id: profile.id)
-                                }
-                            }
-                        }
-                        if library.activeProfile?.isChild == false {
-                            Divider()
-                            Button("管理资料") { showProfiles = true }
-                        }
-                    }
-                }
-                if library.activeProfile?.isChild != true {
-                    ToolbarItem(placement: .automatic) {
-                        Menu("iCloud", systemImage: "icloud") {
-                            Toggle("同步播放状态和收藏", isOn: $library.iCloudSyncEnabled)
-                            Button("立即同步") { Task { await library.syncNow() } }
-                                .disabled(!library.iCloudSyncEnabled || library.syncing)
-                            if let status = library.syncStatus { Text(status) }
-                        }
-                    }
-                    ToolbarItem(placement: .automatic) {
-                        Button("Trakt", systemImage: "arrow.triangle.2.circlepath") { showTrakt = true }
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    Menu("筛选", systemImage: "line.3.horizontal.decrease") {
-                        Button("全部") { mediaFilter = .all }
-                        Button("未看完") { mediaFilter = .unwatched }
-                        Button("收藏") { mediaFilter = .favorites }
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    Menu("排序", systemImage: "arrow.up.arrow.down") {
-                        Button("最近添加") { sortOrder = .newest }
-                        Button("标题") { sortOrder = .title }
-                    }
-                }
-                if library.activeProfile?.isChild != true {
-                ToolbarItem(placement: .automatic) {
-                    Button("补全影片资料", systemImage: "sparkles") {
-                        Task { await library.enrichMissingMetadata() }
-                    }
-                    .disabled(library.enrichingMetadata)
-                }
-                ToolbarItem(placement: .automatic) {
-                    Button("清理失效影片", systemImage: "trash", role: .destructive) {
-                        library.purgeMissingItems()
-                    }
-                    .disabled(!library.items.contains { $0.missingSince != nil })
-                }
-                ToolbarItem(placement: .automatic) {
-                    Menu {
-                        Button("添加网络地址", systemImage: "link") { showAddAddress = true }
-                        Button("添加 SMB 片源", systemImage: "externaldrive") { showSMB = true }
-                        Button("添加 WebDAV 片源", systemImage: "network") { showWebDAV = true }
-                        Button("连接 Jellyfin", systemImage: "server.rack") { showJellyfin = true }
-                        Button("连接 Emby", systemImage: "server.rack") { showEmby = true }
-                        Button("连接 Plex", systemImage: "play.tv") { showPlex = true }
-                        Button("连接云盘", systemImage: "cloud") { showCloud = true }
-                        Button("导入 DLNA 媒体", systemImage: "dot.radiowaves.left.and.right") { showDLNA = true }
-                        Button("新建合集", systemImage: "square.stack.3d.up") { showAddCollection = true }
-                        Button("新建智能播放列表", systemImage: "line.3.horizontal.decrease.circle") {
-                            showAddSmartPlaylist = true
-                        }
-                        #if !os(tvOS)
-                        Button("添加本地文件", systemImage: "folder") { showFileImporter = true }
-                        Button("添加文件夹", systemImage: "folder.badge.plus") { showFolderImporter = true }
-                        Button("通过浏览器上传", systemImage: "square.and.arrow.up.on.square") {
-                            showBrowserUpload = true
-                        }
-                        #endif
-                    } label: {
-                        Label("添加影片", systemImage: "plus")
-                    }
-                }
-                }
-            }
+
             #endif
             #if !os(iOS)
             .sheet(isPresented: $showAddAddress) { addAddressSheet }
@@ -1713,15 +1282,6 @@ struct LibraryView: View {
             } message: { _ in
                 Text("会移除该片源的本机配置与关联媒体记录，存储中的原始文件不会删除。")
             }
-            .alert("重命名文件源", isPresented: Binding(get: { renamingFileID != nil },
-                                                      set: { if !$0 { renamingFileID = nil } })) {
-                TextField("名称", text: $fileNameDraft)
-                Button("保存") {
-                    if let id = renamingFileID { library.renameFileSource(id: id, name: fileNameDraft) }
-                    renamingFileID = nil
-                }.disabled(fileNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("取消", role: .cancel) { renamingFileID = nil }
-            }
             .sheet(item: $editingFolder) { source in folderEditSheet(source) }
             .sheet(isPresented: Binding(get: { browsingFolderID != nil }, set: { if !$0 { browsingFolderID = nil } })) {
                 if let id = browsingFolderID {
@@ -1741,7 +1301,7 @@ struct LibraryView: View {
                 mobileServerSheet(.jellyfin, existingID: source.id) { editingJellyfin = nil }
             }
             .sheet(item: $editingEmby) { source in
-                mobileServerSheet(.emby, existingID: source.id) { editingEmby = nil }
+                mobileServerSheet(ServerKind(source.kind), existingID: source.id) { editingEmby = nil }
             }
             #else
             .sheet(item: $editingJellyfin) { source in jellyfinTokenSheet(source) }
@@ -1765,7 +1325,7 @@ struct LibraryView: View {
             .sheet(item: $editingWebDAV) { source in webDAVCredentialsSheet(source) }
             #if os(iOS)
             .sheet(isPresented: $showJellyfin) { mobileServerSheet(.jellyfin) { showJellyfin = false } }
-            .sheet(isPresented: $showEmby) { mobileServerSheet(.emby) { showEmby = false } }
+            .sheet(isPresented: $showEmby) { mobileServerSheet(embyServerKind) { showEmby = false } }
             .sheet(isPresented: $showPlex) { mobileServerSheet(.plex) { showPlex = false } }
             #else
             .sheet(isPresented: $showJellyfin) { jellyfinSheet }
@@ -1777,11 +1337,6 @@ struct LibraryView: View {
             .sheet(item: $editingCloud) { source in cloudTokenSheet(source) }
             .sheet(isPresented: $showAddCollection) { collectionSheet }
             .sheet(isPresented: $showAddSmartPlaylist) { smartPlaylistSheet }
-            .sheet(isPresented: $showProfiles) { profilesSheet }
-            .sheet(isPresented: $showTrakt, onDismiss: { traktAuthTask?.cancel(); traktAuthTask = nil }) {
-                traktSheet
-            }
-            .sheet(isPresented: $showProfileUnlock) { profileUnlockSheet }
             #if !os(tvOS)
             .sheet(isPresented: $showBrowserUpload, onDismiss: stopBrowserUpload) {
                 browserUploadSheet
@@ -1805,7 +1360,7 @@ struct LibraryView: View {
             )) {
                 Button("好") { library.errorMessage = nil }
             } message: {
-                Text(library.errorMessage ?? "未知错误")
+                Text(LocalizedStringKey(library.errorMessage ?? "未知错误"))
             }
             #if os(macOS)
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
@@ -1913,7 +1468,7 @@ struct LibraryView: View {
                             .disabled(traktAuthTask != nil || traktClientID.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                     if let traktMessage { Text(traktMessage).foregroundStyle(.secondary) }
-                    if let status = library.traktStatus { Text(status).foregroundStyle(.secondary) }
+                    if let status = library.traktStatus { Text(LocalizedStringKey(status)).foregroundStyle(.secondary) }
                 }
             }
             .navigationTitle("Trakt")
@@ -1963,7 +1518,7 @@ struct LibraryView: View {
                 #endif
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
             }
         }
     }
@@ -1996,7 +1551,7 @@ struct LibraryView: View {
                 #endif
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
             }
         }
     }
@@ -2028,7 +1583,7 @@ struct LibraryView: View {
                     #endif
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
             }
         }
     }
@@ -2055,7 +1610,7 @@ struct LibraryView: View {
                         Text("\(library.fileSourceItemCount(source.id)) 部影片 · \(library.isFileSourceIncluded(source.id) ? "已加入媒体库" : "未加入媒体库")")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(library.offlineCloudSources.contains(source.id) ? "当前不可访问" :
-                             source.lastScannedAt.map { "上次扫描：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "尚未扫描")
+                             source.lastScannedAt.map { String.lucentFormat("上次扫描：%@", $0.lucentFormatted()) } ?? "尚未扫描")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -2068,7 +1623,7 @@ struct LibraryView: View {
                         .labelsHidden()
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
                 .contextMenu {
                     Button("编辑授权") { cloudToken = ""; cloudClientID = source.oauthClientID ?? ""; cloudRefreshToken = ""; editingCloud = source }
                     Button("刷新") { library.scanCloud(id: source.id) }
@@ -2139,7 +1694,7 @@ struct LibraryView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(source.name).font(.headline)
                         Text(library.offlineDLNASources.contains(source.id) ? "当前不可访问" :
-                             source.lastScannedAt.map { "上次扫描：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "尚未扫描")
+                             source.lastScannedAt.map { String.lucentFormat("上次扫描：%@", $0.lucentFormatted()) } ?? "尚未扫描")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -2150,7 +1705,7 @@ struct LibraryView: View {
                     } label: { Image(systemName: "ellipsis") }
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
             }
         }
     }
@@ -2405,7 +1960,7 @@ struct LibraryView: View {
                         Text("\(library.fileSourceItemCount(source.id)) 部影片 · \(library.isFileSourceIncluded(source.id) ? "已加入媒体库" : "未加入媒体库")")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(library.offlineSMBSources.contains(source.id) ? "当前不可访问" :
-                             source.lastScannedAt.map { "上次扫描：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "尚未扫描")
+                             source.lastScannedAt.map { String.lucentFormat("上次扫描：%@", $0.lucentFormatted()) } ?? "尚未扫描")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -2418,7 +1973,7 @@ struct LibraryView: View {
                         .labelsHidden()
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
                 .contextMenu {
                     Button("编辑登录凭据") { editedSMBUsername = source.username; editedSMBPassword = ""; replaceSMBPassword = false; editingSMB = source }
                     Button("刷新") { library.scanSMB(id: source.id) }
@@ -2439,7 +1994,7 @@ struct LibraryView: View {
                         Text("\(library.fileSourceItemCount(source.id)) 部影片 · \(library.isFileSourceIncluded(source.id) ? "已加入媒体库" : "未加入媒体库")")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(library.offlineWebDAVSources.contains(source.id) ? "当前不可访问" :
-                             source.lastScannedAt.map { "上次扫描：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "尚未扫描")
+                             source.lastScannedAt.map { String.lucentFormat("上次扫描：%@", $0.lucentFormatted()) } ?? "尚未扫描")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -2452,7 +2007,7 @@ struct LibraryView: View {
                         .labelsHidden()
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
                 .contextMenu {
                     Button("编辑登录凭据") { editedWebDAVUsername = source.username; editedWebDAVPassword = ""; replaceWebDAVPassword = false; editingWebDAV = source }
                     Button("刷新") { library.scanWebDAV(id: source.id) }
@@ -2476,7 +2031,7 @@ struct LibraryView: View {
                 }
                 .padding(14)
                 .contentShape(RoundedRectangle(cornerRadius: 16))
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
                 #if os(iOS)
                 .onTapGesture { selectedHomeCatalog = "jellyfin:\(source.id.uuidString)"; mobileTab = .home }
                 #endif
@@ -2503,7 +2058,7 @@ struct LibraryView: View {
                 }
                 .padding(14)
                 .contentShape(RoundedRectangle(cornerRadius: 16))
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
                 .onTapGesture { browsingEmby = source }
                 .contextMenu {
                     Button("编辑名称") { serverNameDraft = source.name; renamingServerID = source.id }
@@ -2528,7 +2083,7 @@ struct LibraryView: View {
                 }
                 .padding(14)
                 .contentShape(RoundedRectangle(cornerRadius: 16))
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
                 #if os(iOS)
                 .onTapGesture { selectedHomeCatalog = "plex:\(source.id.uuidString)"; mobileTab = .home }
                 #endif
@@ -2571,7 +2126,7 @@ struct LibraryView: View {
                         Text("\(library.fileSourceItemCount(source.id)) 部影片 · \(library.isFileSourceIncluded(source.id) ? "已加入媒体库" : "未加入媒体库")")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(library.offlineFolders.contains(source.id) ? "当前不可访问" :
-                             source.lastScannedAt.map { "上次扫描：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "尚未扫描")
+                             source.lastScannedAt.map { String.lucentFormat("上次扫描：%@", $0.lucentFormatted()) } ?? "尚未扫描")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -2588,7 +2143,7 @@ struct LibraryView: View {
                         .labelsHidden()
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
                 .contextMenu {
                     Button("编辑名称") { editedFolderName = source.name; editingFolder = source }
                     Button("刷新") { library.scanFolder(id: source.id) }
@@ -2638,7 +2193,7 @@ struct LibraryView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text([item.identity?.episodeLabel, item.title].compactMap { $0 }.joined(separator: " · "))
                                     .font(.headline).lineLimit(2)
-                                Text(item.watched ? "已看完" : item.isInProgress ? "继续播放" : "未观看")
+                                Text(LocalizedStringKey(item.watched ? "已看完" : item.isInProgress ? "继续播放" : "未观看"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if item.progress > 0 {
@@ -2669,12 +2224,12 @@ struct LibraryView: View {
                     .accessibilityLabel("\(item.title)的更多操作")
                 }
                 .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 16)))
     }
 
     private var smbSheet: some View {
         #if os(iOS)
-        MobileStorageForm(kind: .smb, close: { showSMB = false }).environmentObject(library)
+        StorageConnectionEditor(kind: .smb, close: { showSMB = false }).environmentObject(library)
         #else
         NavigationStack {
             Form {
@@ -2726,7 +2281,7 @@ struct LibraryView: View {
 
     private var webDAVSheet: some View {
         #if os(iOS)
-        MobileStorageForm(kind: .webDAV, close: { showWebDAV = false }).environmentObject(library)
+        StorageConnectionEditor(kind: .webDAV, close: { showWebDAV = false }).environmentObject(library)
         #else
         NavigationStack {
             Form {
@@ -2764,7 +2319,7 @@ struct LibraryView: View {
 
     private func webDAVCredentialsSheet(_ source: WebDAVSource) -> some View {
         #if os(iOS)
-        MobileStorageForm(kind: .webDAV, existingID: source.id, close: { editingWebDAV = nil }).environmentObject(library)
+        StorageConnectionEditor(kind: .webDAV, existingID: source.id, close: { editingWebDAV = nil }).environmentObject(library)
         #else
         NavigationStack {
             Form {
@@ -2797,7 +2352,7 @@ struct LibraryView: View {
 
     private func smbCredentialsSheet(_ source: SMBSource) -> some View {
         #if os(iOS)
-        MobileStorageForm(kind: .smb, existingID: source.id, close: { editingSMB = nil }).environmentObject(library)
+        StorageConnectionEditor(kind: .smb, existingID: source.id, close: { editingSMB = nil }).environmentObject(library)
         #else
         NavigationStack {
             Form {
@@ -3355,7 +2910,7 @@ private struct MobileScannedSourceBrowserView: View {
                 if let failure {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("无法读取目录", systemImage: "wifi.exclamationmark").font(.headline)
-                        Text(failure).font(.caption).foregroundStyle(.secondary)
+                        Text(LocalizedStringKey(failure)).font(.caption).foregroundStyle(.secondary)
                         Button("重新连接") { Task { await loadDirectory() } }
                     }.padding(.vertical, 8)
                 }
@@ -3366,7 +2921,7 @@ private struct MobileScannedSourceBrowserView: View {
                 if !loading && visibleEntries.isEmpty && failure == nil {
                     ContentUnavailableView(search.isEmpty ? "没有可播放的视频" : "没有匹配的文件",
                                            systemImage: search.isEmpty ? "folder" : "magnifyingglass",
-                                           description: Text(search.isEmpty ? "可刷新目录或检查访问权限" : "试试其他文件名"))
+                                           description: Text(LocalizedStringKey(search.isEmpty ? "可刷新目录或检查访问权限" : "试试其他文件名")))
                     if !liveDirectory && search.isEmpty {
                         Button("更新文件索引", systemImage: "arrow.clockwise") { library.refreshFileSource(sourceID) }
                             .disabled(library.isScanningFileSource(sourceID))
@@ -3425,9 +2980,7 @@ private struct MobileScannedSourceBrowserView: View {
         .tint(.gray)
         .task(id: directory) { await loadDirectory() }
         .refreshable { await loadDirectory(refreshIndex: true) }
-        .fullScreenCover(item: $playingItem, onDismiss: {
-            LucentOrientationDelegate.setPlaybackPresented(false)
-        }) { item in
+        .discPlaybackCover(item: $playingItem) { item in
             PlaybackView(item: item).environmentObject(library)
         }
     }
@@ -3456,7 +3009,6 @@ private struct MobileScannedSourceBrowserView: View {
     private func play(_ entry: SourceDirectoryEntry) {
         guard let item = resolvedItem(entry) else { return }
         playingItem = item
-        LucentOrientationDelegate.setPlaybackPresented(true)
     }
 
     @MainActor private func loadDirectory(refreshIndex: Bool = false) async {

@@ -42,10 +42,15 @@ struct EmbyBrowserView: View {
     let source: EmbySource
     var parentID: String? = nil
     var title: String? = nil
+    var embedded = false
 
     var body: some View {
-        NavigationStack {
-            EmbyBrowserPageView(source: source, parentID: parentID, title: title ?? source.name)
+        if embedded {
+            EmbyBrowserPageView(source: source, parentID: parentID, title: title ?? source.name, showsDone: false)
+        } else {
+            NavigationStack {
+                EmbyBrowserPageView(source: source, parentID: parentID, title: title ?? source.name)
+            }
         }
     }
 }
@@ -56,6 +61,7 @@ private struct EmbyBrowserPageView: View {
     let source: EmbySource
     let parentID: String?
     let title: String
+    var showsDone = true
     var catalogLibraryID: String? = nil
     var catalogType: CatalogType? = nil
     var facet: EmbyClient.BrowseFacet? = nil
@@ -171,7 +177,7 @@ private struct EmbyBrowserPageView: View {
                             section = option
                             Task { await reload() }
                         } label: {
-                            Text(option == .programs && activeCatalog == .movies ? "电影" : option.rawValue)
+                            Text(LocalizedStringKey(option == .programs && activeCatalog == .movies ? "电影" : option.rawValue))
                                 .font(.system(size: 14, weight: section == option ? .semibold : .regular))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 34)
@@ -280,7 +286,7 @@ private struct EmbyBrowserPageView: View {
         }
         .navigationTitle(title)
         .toolbar { ToolbarItem(placement: .cancellationAction) {
-            Button("完成") { dismiss() }
+            if showsDone { Button("完成") { dismiss() } }
         }}
         .refreshable { await reload() }
     }
@@ -292,7 +298,7 @@ private struct EmbyBrowserPageView: View {
                 .padding(.vertical, 18)
                 .disabled(loading)
         }
-        if loading { ProgressView("正在读取目录…").frame(maxWidth: .infinity).padding(16) }
+        if loading { LucentLoadingView(title: "正在读取目录…").frame(maxWidth: .infinity).padding(16) }
         if let errorMessage {
             VStack(spacing: 10) {
                 Text(errorMessage).font(.subheadline).foregroundStyle(.secondary)
@@ -301,7 +307,7 @@ private struct EmbyBrowserPageView: View {
             .frame(maxWidth: .infinity).padding(20)
         }
         if loaded && entries.isEmpty && errorMessage == nil {
-            ContentUnavailableView("暂无内容", systemImage: "square.grid.3x3")
+            LucentStateView(title: "暂无内容", symbol: "square.grid.3x3")
                 .frame(maxWidth: .infinity).padding(.top, 60)
         }
     }
@@ -415,8 +421,7 @@ private struct SeriesPosterTile: View {
         VStack(alignment: .leading, spacing: 3) {
             GeometryReader { geometry in
                 ZStack {
-                    RoundedRectangle(cornerRadius: 13)
-                        .fill(Color(red: 0.18, green: 0.22, blue: 0.28))
+                    LucentArtworkPlaceholder(showsSymbol: artwork == nil)
                     if let artwork {
                         #if os(macOS)
                         Image(nsImage: artwork)
@@ -429,46 +434,25 @@ private struct SeriesPosterTile: View {
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped()
                         #endif
-                    } else {
-                        Image(systemName: "film")
-                            .font(.system(size: 28, weight: .light))
-                            .foregroundStyle(.white.opacity(0.55))
                     }
                     if showUnplayed, !folder,
                        let count = entry.userData?.unplayedItemCount, count > 0 {
-                        Text(String(count))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .frame(minHeight: 22)
-                            .background(Color(red: 0.02, green: 0.57, blue: 0.94), in: Capsule())
+                        LucentCountBadge(count: count)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                             .padding(7)
                     }
                     if !folder, let rating = entry.communityRating, rating > 0 {
-                        Text(rating.formatted(.number.precision(.fractionLength(1))))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(.black.opacity(0.66), in: RoundedRectangle(cornerRadius: 4))
+                        LucentRatingBadge(rating: rating)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             .padding(5)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 13))
+                .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
             }
-            .aspectRatio(0.68, contentMode: .fit)
-            Text(entry.name)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .padding(.top, 3)
-            if !folder, let year = entry.productionYear {
-                Text(yearLabel(start: year, endDate: entry.endDate))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
+            .aspectRatio(2.0 / 3.0, contentMode: .fit)
+            LucentPosterCaption(title: entry.name,
+                subtitle: !folder ? entry.productionYear.map { yearLabel(start: $0, endDate: entry.endDate) } : nil,
+                lines: 1)
         }
         .accessibilityElement(children: .combine)
         .task(id: entry.id) {

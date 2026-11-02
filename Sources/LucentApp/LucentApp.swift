@@ -50,16 +50,19 @@ struct LucentApp: App {
 
     var body: some Scene {
         WindowGroup {
+            Group {
             #if os(iOS) && DEBUG
             if ProcessInfo.processInfo.environment["LUCENT_PLAYBACK_AUDIT"] == "1" {
                 PlaybackAuditEntry().environmentObject(library)
             } else {
-                LibraryView().environmentObject(library)
+                LibraryView().environmentObject(library).modifier(LocalizationEnvironment())
             }
             #else
             LibraryView()
-                .environmentObject(library)
+                .environmentObject(library).modifier(LocalizationEnvironment())
             #endif
+            }
+            .modifier(AppAppearance())
         }
     }
 }

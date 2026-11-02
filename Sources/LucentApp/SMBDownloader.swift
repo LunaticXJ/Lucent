@@ -3,6 +3,7 @@ import Foundation
 enum SMBDownloader {
     static func copy(source: SMBSource, password: String?, path: String, to destination: URL,
                      progress: @escaping @Sendable (Double) -> Void) throws {
+        try NetworkUsagePolicy.shared.requireDownloadAllowed()
         let first = try SMBScanner.readRange(source: source, password: password, path: path,
                                              offset: 0, length: 1_048_576)
         guard first.totalSize > 0, !first.data.isEmpty else { throw CocoaError(.fileReadUnknown) }
@@ -35,6 +36,7 @@ enum SMBDownloader {
         progress(Double(offset) / Double(first.totalSize))
         while offset < first.totalSize {
             try Task<Never, Never>.checkCancellation()
+            try NetworkUsagePolicy.shared.requireDownloadAllowed()
             let next = try SMBScanner.readRange(source: source, password: password, path: path,
                                                 offset: offset, length: 1_048_576)
             guard !next.data.isEmpty, next.totalSize == first.totalSize else { throw CocoaError(.fileReadUnknown) }

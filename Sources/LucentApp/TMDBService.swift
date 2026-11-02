@@ -31,19 +31,7 @@ struct TMDBSearchResult: Decodable, Identifiable, Sendable {
 }
 
 enum TMDBService {
-    static var deviceLanguage: String {
-        let preferred = Locale.preferredLanguages.first ?? Locale.current.identifier
-        let parts = preferred.replacingOccurrences(of: "_", with: "-").split(separator: "-").map(String.init)
-        guard let language = parts.first?.lowercased(), !language.isEmpty else { return "en-US" }
-        let script = parts.first { $0.caseInsensitiveCompare("Hans") == .orderedSame ||
-            $0.caseInsensitiveCompare("Hant") == .orderedSame }
-        let region = parts.dropFirst().first { $0.count == 2 || ($0.count == 3 && $0.allSatisfy(\.isNumber)) }?.uppercased()
-        if language == "zh" {
-            if let region { return "zh-\(region)" }
-            return script?.caseInsensitiveCompare("Hant") == .orderedSame ? "zh-TW" : "zh-CN"
-        }
-        return region.map { "\(language)-\($0)" } ?? language
-    }
+    static var deviceLanguage: String { LocalizationPreferences.current.contentLanguage }
     private static func authorize(_ components: inout URLComponents, credential: String) -> String? {
         let credential = credential.trimmingCharacters(in: .whitespacesAndNewlines)
         if credential.count == 32 && credential.allSatisfy({ $0.isHexDigit }) {
@@ -114,6 +102,7 @@ enum TMDBService {
         components.queryItems = [
             URLQueryItem(name: "append_to_response", value: "images"),
             URLQueryItem(name: "language", value: locale),
+            URLQueryItem(name: "region", value: LocalizationPreferences.current.regionCode),
             URLQueryItem(name: "include_image_language", value: "\(locale),\(lang),null")
         ]
         let authorization = authorize(&components, credential: token)
@@ -190,6 +179,7 @@ enum TMDBService {
     }
 
     static func catalog(id: Int, television: Bool, token: String) async throws -> MediaMetadata {
+        let localizationKey = LocalizationPreferences.current.contentID
         let data = try await catalogData(path: "\(television ? "tv" : "movie")/\(id)", token: token, credits: true)
         let value = try JSONDecoder().decode(CatalogResponse.self, from: data)
         let date = value.release_date ?? value.first_air_date
@@ -199,20 +189,22 @@ enum TMDBService {
             genres: value.genres?.map(\.name), genreIDs: value.genres?.compactMap(\.id) ?? [],
             originCountries: value.origin_country ?? value.production_countries?.map(\.iso_3166_1) ?? [],
             originalLanguage: value.original_language, backdropPath: value.backdrop_path,
-            cast: value.credits?.cast.prefix(30).map { .init(id: $0.id, name: $0.name, character: $0.character, profilePath: $0.profile_path) })
+            cast: value.credits?.cast.prefix(30).map { .init(id: $0.id, name: $0.name, character: $0.character, profilePath: $0.profile_path) },
+            localizationKey: localizationKey)
     }
 
     static func catalogEpisode(id: Int, season: Int, number: Int, token: String) async throws -> CatalogEpisode {
         struct Episode: Decodable {
             let name: String; let overview: String?; let still_path: String?; let air_date: String?; let vote_average: Double?
         }
+        let localizationKey = LocalizationPreferences.current.contentID
         let value = try JSONDecoder().decode(Episode.self, from: await catalogData(path: "tv/\(id)/season/\(season)/episode/\(number)", token: token))
-        return .init(name: value.name, overview: value.overview, stillPath: value.still_path, airDate: value.air_date, rating: value.vote_average)
+        return .init(name: value.name, overview: value.overview, stillPath: value.still_path, airDate: value.air_date, rating: value.vote_average, localizationKey: localizationKey)
     }
 
     private static func catalogData(path: String, token: String, credits: Bool = false) async throws -> Data {
         var components = URLComponents(string: "https://api.themoviedb.org/3/\(path)")!
-        components.queryItems = [.init(name: "language", value: deviceLanguage)]
+        components.queryItems = [.init(name: "language", value: deviceLanguage), .init(name: "region", value: LocalizationPreferences.current.regionCode)]
         if credits { components.queryItems?.append(.init(name: "append_to_response", value: "credits")) }
         let authorization = authorize(&components, credential: token)
         var request = URLRequest(url: components.url!)
@@ -226,7 +218,7 @@ enum TMDBService {
     // Matching requests use their own typed responses, without pulling credits/images.
     private static func recognitionData(path: String, query: [URLQueryItem] = [], token: String) async throws -> Data? {
         var components = URLComponents(string: "https://api.themoviedb.org/3/\(path)")!
-        components.queryItems = [.init(name: "language", value: deviceLanguage)] + query
+        components.queryItems = [.init(name: "language", value: deviceLanguage), .init(name: "region", value: LocalizationPreferences.current.regionCode)] + query
         let authorization = authorize(&components, credential: token)
         var request = URLRequest(url: components.url!); request.timeoutInterval = 20
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
@@ -289,7 +281,7 @@ enum TMDBService {
         var components = URLComponents(string: "https://api.themoviedb.org/3/search/\(television ? "tv" : "movie")")!
         components.queryItems = [
             URLQueryItem(name: "query", value: title),
-            URLQueryItem(name: "language", value: deviceLanguage),
+            URLQueryItem(name: "language", value: deviceLanguage), .init(name: "region", value: LocalizationPreferences.current.regionCode),
             URLQueryItem(name: "include_adult", value: "false")
         ]
         let authorization = authorize(&components, credential: token)
@@ -307,7 +299,7 @@ enum TMDBService {
     static func extras(id: Int, television: Bool, token: String) async throws -> Extras {
         var components = URLComponents(string: "https://api.themoviedb.org/3/\(television ? "tv" : "movie")/\(id)")!
         components.queryItems = [URLQueryItem(name: "append_to_response", value: "credits,videos"),
-                                 URLQueryItem(name: "language", value: "zh-CN")]
+                                 URLQueryItem(name: "language", value: deviceLanguage), .init(name: "region", value: LocalizationPreferences.current.regionCode)]
         let authorization = authorize(&components, credential: token)
         var request = URLRequest(url: components.url!)
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }

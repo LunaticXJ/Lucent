@@ -4,7 +4,7 @@ Does not launch Lucent, use credentials, or contact a real storage service.
 """
 import pathlib, subprocess, tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-models = (ROOT / 'Sources/LucentApp/AggregateLibraryModels.swift').read_text()
+models = (ROOT / 'Sources/LucentApp/AggregateLibraryModels.swift').read_text() + '\n' + (ROOT / 'Sources/LucentApp/LibraryWorkCoordinators.swift').read_text()
 chinese = (ROOT / 'Sources/LucentApp/ChineseCloudClient.swift').read_text()
 cloud = (ROOT / 'Sources/LucentApp/CloudDriveClient.swift').read_text()
 # Route every request in the copied production client into an ephemeral offline fixture session.
@@ -24,7 +24,7 @@ imports = """
 struct ImportSnapshot: Codable { let scopes: [LibraryFileSource] }
 final class ImportDatabase {
  var fail = false
- func save(_ snapshot: ImportSnapshot) throws { if fail { throw LibraryScopeError.unavailable } }
+ func saveAsync(_ snapshot: ImportSnapshot) async throws { if fail { throw LibraryScopeError.unavailable } }
 }
 final class ImportStore {
  var libraryStorages: [LibraryStorage] = []
@@ -98,6 +98,14 @@ final class Fixture: URLProtocol {
 }
 @main struct Check {
  static func main() async throws {
+  let discovered = try await LibraryScanCoordinator.discover(root: .root, read: { directory in
+   if directory.identifier.isEmpty {
+    return [.init(identifier: "child", name: "child", path: "child", isDirectory: true), .init(identifier: "child", name: "child", path: "child", isDirectory: true), .init(identifier: "a.mkv", name: "a.mkv", path: "a.mkv", isDirectory: false)]
+   }
+   return [.root, .init(identifier: "b.mkv", name: "b.mkv", path: "child/b.mkv", isDirectory: false)]
+  }, progress: { _ in })
+  precondition(discovered.count == 2)
+
   precondition(LibraryScopePath.contains("", "电影/2026"))
   precondition(LibraryScopePath.contains("电影", "电影/2026"))
   precondition(!LibraryScopePath.contains("电影", "电影合集"))
@@ -112,18 +120,18 @@ final class Fixture: URLProtocol {
   importStore.libraryStorages = [.init(id: storageID, name: "NAS", subtitle: "SMB", kind: .smb)]
   let first = StorageDirectory(identifier: "movies", name: "电影", path: "电影", isDirectory: true)
   let second = StorageDirectory(identifier: "tv", name: "剧集", path: "剧集", isDirectory: true)
-  try importStore.importDirectories(storageID: storageID, directories: [(first, "家庭影院"), (second, "我的剧集")], scanImmediately: true)
+  try await importStore.importDirectories(storageID: storageID, directories: [(first, "家庭影院"), (second, "我的剧集")], scanImmediately: true)
   precondition(importStore.fileSources.count == 2 && importStore.scanned.count == 2)
   let before = importStore.fileSources
   do {
-   try importStore.importDirectories(storageID: storageID, directories: [(.root, "整盘")], scanImmediately: true)
+   try await importStore.importDirectories(storageID: storageID, directories: [(.root, "整盘")], scanImmediately: true)
    fatalError("Parent overlap was accepted")
   } catch LibraryScopeError.overlap { }
   precondition(importStore.fileSources == before)
   let third = StorageDirectory(identifier: "docs", name: "纪录片", path: "纪录片", isDirectory: true)
   importStore.database!.fail = true
   do {
-   try importStore.importDirectories(storageID: storageID, directories: [(third, "纪录片")], scanImmediately: false)
+   try await importStore.importDirectories(storageID: storageID, directories: [(third, "纪录片")], scanImmediately: false)
    fatalError("Failed transaction was accepted")
   } catch LibraryScopeError.unavailable { }
   precondition(importStore.fileSources == before && importStore.scanned.count == 2)

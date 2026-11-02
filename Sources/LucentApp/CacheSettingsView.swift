@@ -76,6 +76,7 @@ struct CacheSettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            .modifier(LucentSettingsPageStyle())
             .navigationTitle("缓存与存储")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

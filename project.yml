@@ -1,5 +1,6 @@
 name: Lucent
 options:
+  developmentLanguage: zh-Hans
   bundleIdPrefix: com.lucent
   deploymentTarget:
     iOS: '18.0'
@@ -8,6 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: '6.0'
+    CURRENT_PROJECT_VERSION: '6062'
 packages:
   SwiftSMB:
     url: https://github.com/RuiNelson/SwiftSMB.git
@@ -40,7 +42,9 @@ targets:
       path: Generated/iOS-Info.plist
       properties:
         CFBundleDisplayName: Lucent
-        UILaunchScreen: {}
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: AppBackground
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -87,6 +91,8 @@ targets:
       path: Generated/tvOS-Info.plist
       properties:
         CFBundleDisplayName: Lucent
+        UIBackgroundModes: [audio]
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源。
         NSBonjourServices: [_smb._tcp]
         NSAppTransportSecurity:
@@ -122,6 +128,7 @@ targets:
       path: Generated/macOS-Info.plist
       properties:
         CFBundleDisplayName: Lucent
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSBonjourServices: [_smb._tcp]
         NSLocalNetworkUsageDescription: Lucent 需要发现和访问你添加的局域网媒体片源。
         NSAppTransportSecurity:

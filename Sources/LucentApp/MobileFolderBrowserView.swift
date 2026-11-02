@@ -25,7 +25,7 @@ struct MobileFolderBrowserView: View {
     var body: some View {
         List {
             if loading { ProgressView("正在读取文件夹…") }
-            if let message { ContentUnavailableView("无法打开文件夹", systemImage: "folder.badge.questionmark", description: Text(message)) }
+            if let message { ContentUnavailableView("无法打开文件夹", systemImage: "folder.badge.questionmark", description: Text(LocalizedStringKey(message))) }
             if !loading && message == nil && entries.isEmpty {
                 ContentUnavailableView("没有可播放的文件", systemImage: "folder")
             }
@@ -41,8 +41,7 @@ struct MobileFolderBrowserView: View {
                     Button {
                         guard let item = library.browsedFileItem(sourceID: sourceID, path: entry.relativePath) else { return }
                         playingItem = item
-                        LucentOrientationDelegate.setPlaybackPresented(true)
-                    } label: {
+                                    } label: {
                         Label(entry.name, systemImage: "play.rectangle")
                     }
                     .foregroundStyle(.primary)
@@ -68,9 +67,7 @@ struct MobileFolderBrowserView: View {
         }
         .task(id: relativePath) { await loadDirectory() }
         .refreshable { await loadDirectory() }
-        .fullScreenCover(item: $playingItem, onDismiss: {
-            LucentOrientationDelegate.setPlaybackPresented(false)
-        }) { item in
+        .discPlaybackCover(item: $playingItem) { item in
             PlaybackView(item: item).environmentObject(library)
         }
     }

@@ -1,7 +1,7 @@
-#if os(iOS)
 import SwiftUI
 
 struct MovieDetailView: View {
+    @Environment(\.contentLocalizationID) private var contentLocalizationID
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     let item: MediaItem
@@ -39,12 +39,15 @@ struct MovieDetailView: View {
     private var source: JellyfinItem.MediaSource? { detail?.mediaSources?.first }
     private var streams: [JellyfinItem.MediaSource.Stream] { source?.mediaStreams ?? [] }
     private var video: JellyfinItem.MediaSource.Stream? { streams.first { $0.type == "Video" } }
-    private var audio: [JellyfinItem.MediaSource.Stream] { streams.filter { $0.type == "Audio" } }
-    private var subtitles: [JellyfinItem.MediaSource.Stream] { streams.filter { $0.type == "Subtitle" } }
     private var progressSeconds: Double {
-        max(item.position, Double(detail?.userData?.playbackPositionTicks ?? 0) / 10_000_000)
+        let local = library.items.first { $0.id == item.id } ?? item
+        if let updated = local.stateUpdatedAt, updated >= (detail?.remoteStateDate ?? .distantPast) { return local.resumePosition }
+        return PlaybackProgressPolicy.current.resumePosition(
+            position: Double(detail?.userData?.playbackPositionTicks ?? 0) / 10_000_000,
+            duration: detail?.runTimeTicks.map { Double($0) / 10_000_000 } ?? local.duration,
+            watched: detail?.userData?.played ?? local.watched)
     }
-    private var isInProgress: Bool { progressSeconds > 30 && !item.watched }
+    private var isInProgress: Bool { progressSeconds > 0 }
 
     var body: some View {
         GeometryReader { geometry in
@@ -61,10 +64,10 @@ struct MovieDetailView: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.white.opacity(0.88))
                                     .lineSpacing(4)
-                                    .lineLimit(overviewExpanded ? nil : 4)
+                                    .lineLimit(4)
                                 if summary.count > 110 {
-                                    Button(overviewExpanded ? "收起简介" : "展开简介") {
-                                        withAnimation(.easeInOut(duration: 0.2)) { overviewExpanded.toggle() }
+                                    Button("展开简介") {
+                                        overviewExpanded = true
                                     }
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.white)
@@ -114,7 +117,7 @@ struct MovieDetailView: View {
             serverConnection = resolveServer()
             await load()
         }
-        .task(id: "\(item.id)|\(item.metadata?.providerID ?? 0)") {
+        .task(id: "\(item.id)|\(item.metadata?.providerID ?? 0)|\(contentLocalizationID)") {
             artwork = nil
             artworkResolved = false
             artworkRetriedID = nil
@@ -127,16 +130,15 @@ struct MovieDetailView: View {
             guard artworkResolved, artwork?.posterURL == nil, let detail else { return }
             Task { await loadArtwork(remote: detail) }
         }
+        .sheet(isPresented: $overviewExpanded) {
+            LucentSynopsisSheet(title: "简介", text: detail?.overview ?? item.metadata?.summary ?? item.serverSummary ?? "") { overviewExpanded = false }
+        }
         .preferredColorScheme(.dark)
     }
 
     private var topControls: some View {
                 HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .frame(width: 46, height: 46)
-                            .background(.black.opacity(0.5), in: Circle())
-                    }
+                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: .videoOverlay) { dismiss() }
                     Spacer()
                     Menu {
                         Button(item.watched ? "标记为未观看" : "标记为已看完") {
@@ -152,12 +154,12 @@ struct MovieDetailView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                             .frame(width: 46, height: 46)
-                            .background(.black.opacity(0.5), in: Circle())
+                            .modifier(LucentGlass(shape: Circle(), role: .videoOverlay))
                     }
                 }
         .font(.title3.weight(.semibold))
         .foregroundStyle(.white)
-        .buttonStyle(.plain)
+        .lucentContentButtonStyle()
         .padding(.horizontal, 26)
     }
 
@@ -184,7 +186,7 @@ struct MovieDetailView: View {
                 }
                 HStack(spacing: 7) {
                     if let rating = detail?.communityRating ?? item.metadata?.rating {
-                        Image(systemName: "star.fill").foregroundStyle(.white)
+                        Image(systemName: "star.fill").foregroundStyle(LucentUI.ratingTint)
                         Text(rating.formatted(.number.precision(.fractionLength(1))))
                     }
                     if let date = displayDate { Text("·  " + date) }
@@ -197,22 +199,7 @@ struct MovieDetailView: View {
                 Text(technicalSummary)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.8))
-                Button { play() } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "play.fill")
-                        VStack(spacing: 2) {
-                            Text(isInProgress ? "继续播放" : "开始播放").font(.headline)
-                            if isInProgress {
-                                Text("上次播放到：\(clock(progressSeconds))").font(.caption)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: 330)
-                    .frame(height: 54)
-                    .foregroundStyle(.black)
-                    .background(.white, in: Capsule())
-                }
-                .buttonStyle(.plain)
+                LucentPlayButton(resumeTime: isInProgress ? clock(progressSeconds) : nil) { play() }
                 HStack(spacing: 42) {
                     Button { library.toggleFavorite(id: item.id) } label: {
                         Image(systemName: item.isFavorite ? "heart.fill" : "heart")
@@ -235,7 +222,7 @@ struct MovieDetailView: View {
 
     private var displayDate: String? {
         if let raw = detail?.premiereDate, raw.count >= 10 {
-            return String(raw.prefix(10)).replacingOccurrences(of: "-", with: "/")
+            return LocalizationPreferences.current.releaseDate(raw) ?? String(raw.prefix(10))
         }
         if let year = detail?.productionYear { return String(year) }
         return nil
@@ -341,10 +328,9 @@ struct MovieDetailView: View {
         let result = try? await TMDBService.detailArtwork(remote: remote,
             metadata: item.metadata, title: remote?.name ?? item.title, television: false,
             language: TMDBService.deviceLanguage, token: token,
-            displayWidthPixels: Int(UIScreen.main.bounds.width * UIScreen.main.scale))
+            displayWidthPixels: LucentDisplay.maximumArtworkPixels)
         guard !Task.isCancelled else { return }
         if let result, result.posterURL != nil || artwork == nil { artwork = result }
         artworkResolved = true
     }
 }
-#endif

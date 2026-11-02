@@ -45,19 +45,23 @@ final class LocalMediaCache: @unchecked Sendable {
         trimVideo()
     }
 
-    @MainActor func imageData(key: String, fetch: () async throws -> Data) async throws -> Data {
-        let url = imageDirectory.appendingPathComponent(digest(key) + ".img")
-        let fresh = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
-            .map { Date().timeIntervalSince($0) < 7 * 24 * 3600 } ?? false
-        if fresh, let data = try? Data(contentsOf: url), !data.isEmpty {
-            touch(url)
+    @MainActor private static var imageRequests: [String: Task<Data, Error>] = [:]
+    @MainActor func imageData(key: String, fetch: @escaping @MainActor () async throws -> Data) async throws -> Data {
+        if let task = Self.imageRequests[key] {
+            let data = try await task.value
+            try Task.checkCancellation()
             return data
         }
-        let data = try await fetch()
-        guard !data.isEmpty else { return data }
-        try? FileManager.default.createDirectory(at: imageDirectory, withIntermediateDirectories: true)
-        if hasSpace(for: data.count) { try? data.write(to: url, options: .atomic) }
-        trim(directory: imageDirectory, limit: 300 * 1_048_576, protected: [])
+        let task = Task { @MainActor in
+            if let cached = await ArtworkDiskStore.shared.read(key) { return cached }
+            let data = try await fetch()
+            if !data.isEmpty { await ArtworkDiskStore.shared.store(data, key: key) }
+            return data
+        }
+        Self.imageRequests[key] = task
+        defer { Self.imageRequests[key] = nil }
+        let data = try await task.value
+        try Task.checkCancellation()
         return data
     }
 

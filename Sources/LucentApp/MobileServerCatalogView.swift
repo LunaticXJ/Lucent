@@ -3,30 +3,11 @@ import SwiftUI
 
 private struct ServerPoster: View {
     let request: URLRequest?
-    @State private var image: UIImage?
-
+    let cacheKey: String
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(uiColor: .secondarySystemGroupedBackground))
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                Image(systemName: "film")
-                    .font(.system(size: 28, weight: .ultraLight))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(height: 175)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .task(id: request?.url) {
-            image = nil
-            guard let request,
-                  let (data, response) = try? await URLSession.shared.data(for: request),
-                  (response as? HTTPURLResponse)?.statusCode == 200 else { return }
-            image = UIImage(data: data)
-        }
+        LucentRemoteArtwork(request: request, cacheKey: cacheKey)
+            .aspectRatio(2.0 / 3.0, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
     }
 }
 
@@ -58,10 +39,9 @@ struct MobileServerCatalogView: View {
                 Text(catalog.hasPrefix("plex:") ? "Plex" : "Jellyfin")
                     .font(.largeTitle.bold())
                     .padding(.top, 68)
-                if loading { ProgressView("正在读取服务器内容…") }
+                if loading { LucentLoadingView(title: "正在读取服务器内容…") }
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.secondary)
-                    Button("重试") { Task { await load() } }
+                    LucentStateView(title: "无法读取服务器内容", symbol: "wifi.exclamationmark", message: errorMessage, actionTitle: "重试") { Task { await load() } }
                 }
                 if !loading && errorMessage == nil && jellyfinItems.isEmpty && plexItems.isEmpty {
                     Text("服务器暂时没有可展示的影片。")
@@ -77,10 +57,10 @@ struct MobileServerCatalogView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 7) {
                                     ServerPoster(request: JellyfinClient.posterRequest(
-                                        source: source, token: token, itemID: item.id))
+                                        source: source, token: token, itemID: item.id), cacheKey: "jellyfin|\(sourceID)|\(item.id)")
                                         .modifier(HomeMatchedSource(key: "jellyfin:\(item.id)",
                                                                     namespace: detailTransition))
-                                    Text(item.name).font(.caption.weight(.medium)).lineLimit(2)
+                                    LucentPosterCaption(title: item.name, subtitle: item.productionYear.map(String.init))
                                 }
                             }
                             .buttonStyle(.plain)
@@ -96,10 +76,10 @@ struct MobileServerCatalogView: View {
                                 VStack(alignment: .leading, spacing: 7) {
                                     ServerPoster(request: item.thumb.flatMap {
                                         PlexClient.posterRequest(source: source, token: token, thumb: $0)
-                                    })
+                                    }, cacheKey: "plex|\(sourceID)|\(item.ratingKey)")
                                     .modifier(HomeMatchedSource(key: "plex:\(item.ratingKey)",
                                                                 namespace: detailTransition))
-                                    Text(item.title).font(.caption.weight(.medium)).lineLimit(2)
+                                    LucentPosterCaption(title: item.title, subtitle: item.year.map(String.init))
                                 }
                             }
                             .buttonStyle(.plain)
@@ -157,6 +137,7 @@ struct MobileServerCatalogView: View {
                 jellyfinItems += page.filter { !known.contains($0.id) }
                 nextStart += 60
                 hasMore = page.count == 60
+                if reset { try await library.synchronizeServerHome(sourceID: sourceID, emby: false) }
             } else if let source = library.plexSources.first(where: { $0.id == sourceID }),
                       let token = try KeychainPasswordStore.plexToken(for: sourceID) {
                 let page = try await PlexClient.browsePage(source: source, token: token,
@@ -165,6 +146,7 @@ struct MobileServerCatalogView: View {
                 plexItems += page.filter { !known.contains($0.ratingKey) }
                 nextStart += 40
                 hasMore = !page.isEmpty
+                if reset { try await library.synchronizePlexHome(sourceID: sourceID) }
             } else {
                 errorMessage = "无法读取服务器授权，请在片源页面更新登录凭据。"
             }

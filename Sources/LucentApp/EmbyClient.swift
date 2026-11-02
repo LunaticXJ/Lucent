@@ -322,7 +322,8 @@ enum EmbyClient {
             URLQueryItem(name: "Limit", value: String(limit)),
             URLQueryItem(name: "SortBy", value: "DateCreated"),
             URLQueryItem(name: "SortOrder", value: "Descending"),
-            URLQueryItem(name: "EnableUserData", value: "true")
+            URLQueryItem(name: "EnableUserData", value: "true"),
+            URLQueryItem(name: "Fields", value: "CommunityRating")
         ]
         request.url = components.url
         let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
@@ -418,6 +419,7 @@ enum EmbyClient {
                                favorite: Bool? = nil) async throws {
         var request = try makeRequest(baseAddress: source.baseAddress,
                                       path: "Users/\(source.userID)/Items/\(itemID)/UserData", token: token)
+        request.allowsCellularAccess = NetworkUsagePolicy.allowsSync
         let current = try await fetch(request)
         var fields = (try JSONSerialization.jsonObject(with: current)) as? [String: Any] ?? [:]
         if let position { fields["PlaybackPositionTicks"] = Int64(max(0, position) * 10_000_000) }
@@ -559,6 +561,8 @@ enum EmbyClient {
     }
 
     private static func fetch(_ request: URLRequest) async throws -> Data {
+        var request = request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse,
               (200..<300).contains(response.statusCode) else { throw EmbyError.requestFailed }

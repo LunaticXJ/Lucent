@@ -2,7 +2,7 @@
 
 Lucent 是面向 iPhone、iPad、Apple TV 和 Mac 的个人媒体库播放器。用户可以连接本地文件、NAS 和家庭媒体服务器，把影片整理成可浏览的媒体库并稳定播放，并在多台 Apple 设备间继续观看。Lucent 不提供影视内容或资源搜索服务。
 
-> 当前状态：P0/P1 尚未达到验收标准，P2 能力仍在补齐。仓库中的多数功能处于“代码已写入、待真机与真实服务器验收”阶段，详见[当前进度](#当前进度)。当前 iOS 开发构建为 6044（2026-10-30）。
+> 当前状态：P0/P1 尚未达到验收标准，P2 能力仍在补齐。仓库中的多数功能处于“代码已写入、待真机与真实服务器验收”阶段，详见[当前进度](#当前进度)。当前三端开发构建为 6062（2026-11-02）；构建通过不代表运行验收完成。
 
 ## 平台
 
@@ -20,7 +20,7 @@ Lucent 是面向 iPhone、iPad、Apple TV 和 Mac 的个人媒体库播放器。
 
 ### 片源与聚合媒体库
 
-- iOS 片源页分为「影视服务器」和「聚合媒体库」，使用统一添加入口。
+- 三端片源页分为「影视服务器」和「聚合媒体库」，使用统一添加入口。
 - **存储 → 文件源 → 聚合媒体库**：先连接本地文件夹、SMB、WebDAV、网盘或 DLNA，再浏览并多选目录、逐个命名导入。添加存储不会自动扫描整个存储。
 - 文件源可浏览、重命名、禁用、重新扫描或移除；启用的目录共同组成设备上的一个聚合媒体库。移除文件源不删除原始文件。
 - SMB 支持局域网发现、共享枚举、访客/账户登录与域名；WebDAV 支持协议、端口和根路径。新增与编辑共用表单，凭据保存在 Keychain。
@@ -47,7 +47,7 @@ Lucent 是面向 iPhone、iPad、Apple TV 和 Mac 的个人媒体库播放器。
 - 字幕：SRT/VTT 文本叠加，ASS/SSA/SUP 走 MPVKit 原生字幕路径；支持同目录外挂字幕、内嵌字幕轨和 OpenSubtitles 搜索下载（需自备 API key）。
 - 音轨切换、外挂音轨、倍速、章节、快进快退；AVPlayer 路径拖动时生成画面预览，并提供系统音频输出路由选择（AirPlay、蓝牙等）。
 - 续播、已看状态、下一集与连续播放；片头、前情和片尾标记，支持自动跳过和手动设置。
-- AVPlayer 路径支持 iOS 画中画与 AirPlay。
+- 三端原生 AVPlayer 画面支持显式系统画中画及音频输出选择；仅在系统与当前画面支持时启用，MPV 画面不启用系统画中画。
 - 播放信息面板展示实际内核、直连或转码、选路原因、缓冲状态与中断次数。
 - 服务端转码：Jellyfin/Emby/Plex 可选择画质或 HLS 转码，直连失败时可回退。
 
@@ -57,7 +57,7 @@ Lucent 是面向 iPhone、iPad、Apple TV 和 Mac 的个人媒体库播放器。
 
 Dolby Vision Profile 5 只有 IPT-PQ 视频，没有 HDR10 基础层。Lucent 使用 AetherEngine 的正常加载路径，由内核负责探测、封装和显示条件；不再为 P5 开启诊断用的色彩条件选项或额外重载。若原生路径失败，P5 不会自动切换到无法正确呈现其颜色的软件解码路径，而会显示原生错误。此调整参考 Sodalite 的加载方式，仍需在真机上确认《后室》的实际画面。
 
-实现参考并依赖 [AetherEngine](https://github.com/superuser404notfound/AetherEngine/blob/main/docs/architecture.md) 和 [MPVKit](https://github.com/mpvkit/MPVKit)。两个内核仍各自解复用；Lucent 没有单一共享 FFmpeg 解复用器，也没有公开 CoreAudio API 可供手工写入 Dolby MAT。已实现原生路径与 MPV 的双向预热切换、进度对齐、播放意图保留和失败回退；这些机制不等于所有素材均可无感切换，音频中断及偶发失败仍需真机验收。MPV 真机路径为 gpu-next/Vulkan/MoltenVK 到 CAMetalLayer，不承诺固定的能耗降幅。发行前须审查 AetherEngine 的 LGPL-3.0、App Store 例外和传递依赖及相关专利授权。
+实现参考并依赖 [AetherEngine](https://github.com/superuser404notfound/AetherEngine/blob/main/docs/architecture.md) 和 [MPVKit](https://github.com/mpvkit/MPVKit)。两个内核仍各自解复用；Lucent 没有单一共享 FFmpeg 解复用器，也没有公开 CoreAudio API 可供手工写入 Dolby MAT。已实现原生路径与 MPV 的双向预热切换、进度对齐、播放意图保留和失败回退；这些机制不等于所有素材均可无感切换，音频中断及偶发失败仍需真机验收。iOS/tvOS 的 MPV 真机路径为 gpu-next/Vulkan/MoltenVK 到 CAMetalLayer，macOS 继续使用现有 OpenGL render API，不承诺固定的能耗降幅。发行前须审查 AetherEngine 的 LGPL-3.0、App Store 例外和传递依赖及相关专利授权。
 
 影片详情展示服务器提供的播放版本、分辨率、编码、动态范围与容器；播放页的“播放信息”面板显示实际播放器内核、直连或转码、选路原因和缓冲状态。系统播放器路径在拖动进度时生成画面预览；MPV 路径暂无进度缩略图。
 
@@ -76,6 +76,21 @@ open Lucent.xcodeproj
 MPVKit 由 SwiftPM 拉取 `project.yml` 中锁定的 revision。三个 target 为 `Lucent-iOS`、`Lucent-tvOS` 和 `Lucent-macOS`。
 
 ## 当前进度
+
+### 2026-11-02 更新（6062）
+
+- macOS 原生侧栏与 tvOS 原生 TabView 补齐首页、片源、搜索、设置入口；使用同一个目录文件源模型、详情页、字幕/弹幕、进度/跳过、缓存及账户设置。
+- 两端支持全部现有服务器类型的新增/编辑、官方图标与媒体数量、存储多目录导入和文件源管理；服务器分页浏览保留剧/季层级，搜索按服务器分组。
+- 扩展后台图片解码、按账户/资料隔离的一天首页缓存、异步本地栏目索引、显式画中画及前后台状态核对；适配键鼠与遥控器焦点、进度预览和防休眠。
+- 完成 iOS、macOS、tvOS arm64 的编译检查及 7 组离线逻辑检查；没有启动应用或执行视听/界面验收。平台文件选择器、输入方式、渲染后端等边界见[三端能力对齐清单](docs/design/platform-parity-6062.md)。
+
+### 2026-11-01 更新
+
+- 在线字幕接入播放器：OpenSubtitles 搜索/语言选择/分页、账户登录及下载额度错误提示、本地文件导入，安装后立即应用到播放会话。
+- 新增弹幕搜索/选集、TMDB 资料匹配及 JSON/XML 导入；独立时间轴渲染、暂停/seek 同步、字号/透明度/区域/速度/偏移与屏蔽词。服务凭据由用户在设置填写。
+- 服务器首页刷新重新请求并替换成功快照，同时核对本机已打开条目；同步失败不据此删除缓存条目，保留用户下载文件。
+- 播放增加可关闭的光盘缩入/反向展开转场及详情背景渐隐/渐现，新图标采用白底简约科技风。
+- 实现说明、开源参考与验证边界见[字幕、弹幕与刷新设计](docs/playback/subtitles-danmaku-and-refresh.md)。
 
 ### 2026-10-30 更新
 
@@ -109,6 +124,8 @@ python3 scripts/verify-source-management.py
 python3 scripts/verify-modal-ownership.py
 python3 scripts/verify-playback-metadata.py
 python3 scripts/verify-playback-routing.py
+python3 scripts/verify-playback-services.py
+python3 scripts/verify-network-usage.py
 ```
 
 这些脚本验证数据与静态契约，不能代替画面、字幕、声音和切换体验验收。真实 Emby 检查使用 `scripts/verify_emby_direct.py`，通过环境变量指定地址与用户名，从系统钥匙串读取密码；请勿向仓库提交令牌、签名媒体地址或账号密码。

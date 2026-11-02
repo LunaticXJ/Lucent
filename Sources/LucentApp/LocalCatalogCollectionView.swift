@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 
 enum LocalCatalogCollection: String, Identifiable, Hashable {
@@ -98,41 +97,18 @@ struct LocalCatalogArtwork: View {
     @EnvironmentObject private var library: LibraryStore
     let item: MediaItem
     var landscape = false
-    @State private var image: UIImage?
     private var url: URL? {
         let hasBackdrop = landscape && item.metadata?.backdropPath != nil
         let path = hasBackdrop ? item.metadata?.backdropPath : item.metadata?.posterPath
         return path.flatMap { URL(string: "https://image.tmdb.org/t/p/\(hasBackdrop ? "w780" : "w500")\($0)") }
     }
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(Color(uiColor: .secondarySystemBackground))
-                if let image {
-                    Image(uiImage: image).resizable().scaledToFill()
-                        .frame(width: geometry.size.width, height: geometry.size.height).clipped()
-                } else {
-                    Image(systemName: item.identity?.seriesName == nil ? "film" : "tv")
-                        .font(.system(size: 28, weight: .ultraLight)).foregroundStyle(.tertiary)
-                }
-            }.frame(width: geometry.size.width, height: geometry.size.height)
-        }
-        .accessibilityHidden(true)
-        .task(id: "\(url?.absoluteString ?? "")|\(item.posterFileName ?? "")") {
-            image = nil
-            if let file = library.posterURL(for: item), let stored = UIImage(contentsOfFile: file.path) {
-                image = stored
-                return
-            }
-            guard let url else { return }
-            guard let data = try? await LocalMediaCache.shared.imageData(key: "tmdb|\(url.absoluteString)", fetch: {
-                var request = URLRequest(url: url); request.timeoutInterval = 15
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-                return data
-            }), !Task.isCancelled else { return }
-            image = UIImage(data: data)
-        }
+        let file = library.posterURL(for: item)
+        let target = file ?? url
+        LucentRemoteArtwork(request: target.map { URLRequest(url: $0) },
+            cacheKey: file.map { "local|\(item.id)|\($0.lastPathComponent)" } ?? "tmdb|\(url?.absoluteString ?? "")",
+            maximumPixels: landscape ? 780 : 750,
+            symbol: item.identity?.seriesName == nil ? "film" : "tv")
     }
 }
 
@@ -141,14 +117,12 @@ struct LocalCatalogPosterCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             LocalCatalogArtwork(item: item)
+                .overlay(alignment: .bottomTrailing) {
+                    if let rating = item.metadata?.rating { LucentRatingBadge(rating: rating).padding(5) }
+                }
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            Text(item.catalogDisplayTitle)
-                .font(.system(size: 14, weight: .medium))
-                .lineLimit(2, reservesSpace: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(item.metadata?.year.map(String.init) ?? " ")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
+            LucentPosterCaption(title: item.catalogDisplayTitle, subtitle: item.metadata?.year.map(String.init) ?? " ")
         }
         .contentShape(Rectangle())
     }
@@ -195,9 +169,9 @@ struct LocalCatalogCollectionView: View {
                             NavigationLink(value:category) {
                                 ZStack(alignment:.bottomLeading) {
                                     if let first = values.first { LocalCatalogArtwork(item:first,landscape:true) }
-                                    else { Color(uiColor:.secondarySystemBackground) }
+                                    else { LucentUI.panel }
                                     LinearGradient(colors:[.clear,.black.opacity(0.8)],startPoint:.top,endPoint:.bottom)
-                                    HStack { Text(category.title).bold(); Spacer(); Text(values.count.formatted()) }
+                                    HStack { Text(LocalizedStringKey(category.title)).bold(); Spacer(); Text(values.count.formatted(.number.locale(LocalizationPreferences.current.displayLocale))) }
                                         .font(.subheadline).foregroundStyle(.white).padding(14)
                                 }.frame(height:112).clipShape(RoundedRectangle(cornerRadius:16))
                             }.buttonStyle(.plain)
@@ -221,14 +195,16 @@ struct LocalCatalogCollectionView: View {
                     }
                 }.padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 32)
                 if displayed.isEmpty {
-                    ContentUnavailableView("暂无影片", systemImage: collection.icon, description: Text("可以调整筛选条件，或在片源页面添加内容。"))
+                    LucentStateView(title: "暂无影片", symbol: collection.icon, message: "可以调整筛选条件，或在片源页面添加内容。")
                         .padding(.top, 80)
                 }
                 }
-            }.background(Color(uiColor: .systemBackground))
+            }.background(LucentUI.page)
         }
-        .navigationTitle(collection.title).navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(collection.title).lucentNavigationTitleStyle()
+        #if os(iOS)
         .toolbar(.visible, for: .navigationBar)
+        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -253,13 +229,16 @@ struct LocalCatalogCollectionView: View {
             LocalCatalogCollectionView(collection:destination,detailPresented:$detailPresented).environmentObject(library)
         }
         .navigationDestination(item: $selectedItemID) { id in
+            #if os(iOS)
             if #available(iOS 18, *), let transitionKey {
                 MediaDetailView(itemID: id).environmentObject(library)
                     .navigationTransition(.zoom(sourceID: transitionKey, in: detailTransition))
             } else { MediaDetailView(itemID: id).environmentObject(library) }
+            #else
+            MediaDetailView(itemID: id).environmentObject(library)
+            #endif
         }
         .onChange(of: selectedItemID) { _, value in detailPresented = value != nil }
         .sheet(item: $matchingItem) { item in MetadataMatchView(item: item).environmentObject(library) }
     }
 }
-#endif

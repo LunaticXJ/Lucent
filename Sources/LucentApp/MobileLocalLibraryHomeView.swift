@@ -112,9 +112,9 @@ struct MobileLocalLibraryHomeView: View {
                                 Image(systemName: collection.icon).font(.system(size: 27, weight: .light))
                                     .foregroundStyle(.primary.opacity(0.85))
                                 HStack {
-                                    Text(collection.title).font(.system(size: 15, weight: .semibold))
+                                    Text(LocalizedStringKey(collection.title)).font(.system(size: 15, weight: .semibold))
                                     Spacer(minLength: 5)
-                                    Text(count.formatted()).font(.caption).foregroundStyle(.secondary)
+                                    Text(count.formatted(.number.locale(LocalizationPreferences.current.displayLocale))).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(15).frame(width: 146, alignment: .leading)
@@ -189,7 +189,7 @@ struct MobileLocalLibraryHomeView: View {
 
     private func shelfHeader(_ collection: LocalCatalogCollection) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(collection.title).font(.title3.bold())
+            Text(LocalizedStringKey(collection.title)).font(.title3.bold())
             Spacer()
             Button { selectedCollection = collection } label: {
                 HStack(spacing: 4) {

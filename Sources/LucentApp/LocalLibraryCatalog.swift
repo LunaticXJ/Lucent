@@ -28,6 +28,7 @@ struct CatalogEpisode: Codable, Equatable, Sendable {
     var stillPath: String?
     var airDate: String?
     var rating: Double?
+    var localizationKey: String? = nil
 }
 
 enum CatalogMatching {

@@ -49,7 +49,7 @@ struct MediaDetailView: View {
     @State private var showExtraPicker = false
     @State private var showOnlineSubtitles = false
     @State private var subtitleAPIKey = ""
-    @State private var subtitleLanguage = "zh-CN"
+    @State private var subtitleLanguage = LocalizationPreferences.current.subtitleSearchLanguage
     @State private var subtitleMatches: [OpenSubtitlesClient.Result] = []
     @State private var subtitleStatus: String?
     @State private var subtitleBusy = false
@@ -71,7 +71,6 @@ struct MediaDetailView: View {
             Group {
                 if let item {
                     if item.identity?.seriesName != nil {
-                        #if os(iOS)
                         SeriesDetailView(item: item, onPlay: { selected in
                             selectedServerMediaSourceID = nil
                             selectedPlexPartID = nil
@@ -82,11 +81,8 @@ struct MediaDetailView: View {
                             selectedTranscodeBitrate = nil
                             presentPlayback(selected)
                         }, onMore: { selected in advancedDetailItem = selected })
-                        #else
-                        legacyDetail(item)
-                        #endif
+
                     } else {
-                        #if os(iOS)
                         MovieDetailView(item: item, onPlay: { selected in
                             selectedServerMediaSourceID = nil
                             selectedPlexPartID = nil
@@ -97,12 +93,10 @@ struct MediaDetailView: View {
                             selectedTranscodeBitrate = nil
                             presentPlayback(selected)
                         }, onMore: { advancedDetailItem = item })
-                        #else
-                        legacyDetail(item)
-                        #endif
+
                     }
                 } else {
-                    ContentUnavailableView("影片已移除", systemImage: "film")
+                    LucentStateView(title: "影片已移除", symbol: "film")
                 }
             }
             .navigationTitle("")
@@ -120,17 +114,9 @@ struct MediaDetailView: View {
             .task(id: advancedDetailItem?.id) {
                 if let selected = advancedDetailItem { await loadServerVersions(for: selected) }
             }
-            #if os(iOS)
-            .fullScreenCover(item: $playingItem, onDismiss: {
-                LucentOrientationDelegate.setPlaybackPresented(false)
-            }) { item in
+            .discPlaybackCover(item: $playingItem) { item in
                 playbackContent(for: item)
             }
-            #else
-            .sheet(item: $playingItem) { item in
-                playbackContent(for: item)
-            }
-            #endif
             .task(id: itemID) { await loadServerVersions() }
             .sheet(item: $editingItem) { item in
                 MediaEditView(item: item).environmentObject(library)
@@ -163,14 +149,20 @@ struct MediaDetailView: View {
                     }
                 }
             }
+            #if os(iOS)
+            .sheet(isPresented: $showOnlineSubtitles) {
+                if let item { SubtitleSearchView(item: item).environmentObject(library) }
+            }
+            #else
             .sheet(isPresented: $showOnlineSubtitles) { onlineSubtitleSheet }
+            #endif
             .alert("无法完成操作", isPresented: Binding(
                 get: { library.errorMessage != nil },
                 set: { if !$0 { library.errorMessage = nil } }
             )) {
                 Button("好") { library.errorMessage = nil }
             } message: {
-                Text(library.errorMessage ?? "未知错误")
+                Text(LocalizedStringKey(library.errorMessage ?? "未知错误"))
             }
             .task(id: "\(itemID.uuidString)|\(item?.metadata?.posterPath ?? "")|\(item?.serverPosterKey ?? "")") {
                 await library.ensurePoster(id: itemID)
@@ -194,12 +186,7 @@ struct MediaDetailView: View {
     }
 
     private func presentPlayback(_ selected: MediaItem) {
-        #if os(iOS)
-        // The orientation mask must change before UIKit creates the full-screen cover.
-        LucentOrientationDelegate.setPlaybackPresented(true)
-        #endif
-        var transaction = Transaction(animation: nil)
-        transaction.disablesAnimations = true
+        var transaction = Transaction(animation: nil); transaction.disablesAnimations = true
         withTransaction(transaction) { playingItem = selected }
     }
 
@@ -229,7 +216,7 @@ struct MediaDetailView: View {
                                 if let label = item.identity?.episodeLabel {
                                     Text(label).foregroundStyle(.secondary)
                                 }
-                                Text(item.watched ? "已看完" : item.isInProgress ? "观看中" : "未观看")
+                                Text(LocalizedStringKey(item.watched ? "已看完" : item.isInProgress ? "观看中" : "未观看"))
                                     .foregroundStyle(.secondary)
                                 if item.progress > 0 { ProgressView(value: item.progress) }
                                 if let version = activeVersion(for: item), version.isDolbyVision {
@@ -361,7 +348,6 @@ struct MediaDetailView: View {
                                 }
                                 .buttonStyle(.bordered)
                             }
-                            #if !os(tvOS)
                             if library.downloadedURL(for: item) != nil {
                                 Button("移除离线文件", role: .destructive) { library.removeDownload(id: item.id) }
                                     .buttonStyle(.bordered)
@@ -389,7 +375,6 @@ struct MediaDetailView: View {
                                     }
                                 }
                             }
-                            #endif
                             let attachedExtras = library.visibleItems.filter {
                                 (item.extraItemIDs ?? []).contains($0.id)
                             }
@@ -409,9 +394,9 @@ struct MediaDetailView: View {
 
                             VStack(alignment: .leading, spacing: 12) {
                                 detailRow("来源", sourceDescription(item))
-                                detailRow("添加时间", item.addedAt.formatted(date: .abbreviated, time: .shortened))
+                                detailRow("添加时间", item.addedAt.lucentFormatted())
                             if let date = item.lastPlayedAt {
-                                    detailRow("上次播放", date.formatted(date: .abbreviated, time: .shortened))
+                                    detailRow("上次播放", date.lucentFormatted())
                                 }
                                 if let duration = item.duration {
                                     detailRow("时长", duration.formatted(.number.precision(.fractionLength(0))) + " 秒")
@@ -743,7 +728,7 @@ struct MediaDetailView: View {
 
     private func detailRow(_ title: String, _ value: String) -> some View {
         HStack(alignment: .top) {
-            Text(title).foregroundStyle(.secondary).frame(width: 80, alignment: .leading)
+            Text(LocalizedStringKey(title)).foregroundStyle(.secondary).frame(width: 80, alignment: .leading)
             Text(value)
         }
         .font(.subheadline)

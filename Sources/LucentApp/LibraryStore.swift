@@ -7,8 +7,16 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var storageConnectionStates: [UUID: String] = [:]
     @Published private(set) var scopeScanStates: [UUID: String] = [:]
     private var storageFileIdentities: [String: UUID] = [:]
-    private var scopeScanTasks: [UUID: Task<Void, Never>] = [:]
-    private var pendingScopeScans: [UUID] = []
+    private let scanCoordinator = LibraryScanCoordinator()
+    private var scopeScanTasks: [UUID: Task<Void, Never>] {
+        get { scanCoordinator.tasks }
+        set { scanCoordinator.tasks = newValue }
+    }
+    private var pendingScopeScans: [UUID] {
+        get { scanCoordinator.pending }
+        set { scanCoordinator.pending = newValue }
+    }
+    @Published private(set) var catalogStructureRevision = UUID()
     @Published private(set) var items: [MediaItem] = []
     @Published private(set) var folders: [FolderSource] = []
     @Published private(set) var smbSources: [SMBSource] = []
@@ -58,7 +66,8 @@ final class LibraryStore: ObservableObject {
     @Published var diagnosticMessage: String?
 
     private let fileURL: URL
-    private var database: LibraryDatabase?
+    private lazy var serverOutbox = ServerStateOutbox(url: fileURL.deletingLastPathComponent().appendingPathComponent("server-state-outbox.json"))
+    private var database: LibraryRepository?
     @Published private(set) var processingItemTitle: String?
     @Published private(set) var catalogProcessingStatus: String?
     @Published private(set) var mediaProbeEnabled = UserDefaults.standard.bool(forKey: "lucent.library.mediaProbeEnabled")
@@ -66,7 +75,7 @@ final class LibraryStore: ObservableObject {
     private var catalogArtworkTask: Task<Void, Never>?
     private var warmedCatalogArtwork: Set<URL> = []
     private var catalogMetadataCache: [String: MediaMetadata] = [:]
-    private var metadataDrainTask: Task<Void, Never>?
+    private let metadataCoordinator = MetadataCoordinator()
     private var metadataEnrichmentFailed = false
     private var metadataRetryRequested = false
     private var syncTask: Task<Void, Never>?
@@ -79,6 +88,7 @@ final class LibraryStore: ObservableObject {
     private var cancelledDownloads: Set<UUID> = []
     private var pausedSMBDownloads: Set<UUID> = []
     private var restoredInterruptedDownloads = false
+    private var networkObserver: NSObjectProtocol?
     private var userPausedDownloadIDs: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: "lucent.userPausedDownloads") ?? []) }
         set { UserDefaults.standard.set(Array(newValue), forKey: "lucent.userPausedDownloads") }
@@ -110,7 +120,7 @@ final class LibraryStore: ObservableObject {
         fileURL = directory.appendingPathComponent("library.json")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let sqlite = try LibraryDatabase(url: directory.appendingPathComponent("library.sqlite"))
+            let sqlite = try LibraryRepository(url: directory.appendingPathComponent("library.sqlite"))
             database = sqlite
             let stored = try sqlite.load()
             if sqlite.hasStoredConfiguration || !stored.items.isEmpty ||
@@ -163,8 +173,28 @@ final class LibraryStore: ObservableObject {
             items[index].technicalProbeAttemptedAt = nil
         }
         lastNetworkConfiguration = networkConfiguration()
+        _ = NetworkUsagePolicy.shared
+        networkObserver = NotificationCenter.default.addObserver(forName: NetworkUsagePolicy.changed, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if NetworkUsagePolicy.shared.route == .cellular && !NetworkUsagePolicy.allowsDownloads {
+                    for id in Array(self.downloading) { await self.pauseDownload(id: id) }
+                }
+                if NetworkUsagePolicy.syncPermitted(on: NetworkUsagePolicy.shared.route, allowed: NetworkUsagePolicy.allowsSync) {
+                    self.scheduleSync(); self.scheduleTraktSync()
+                    await self.resumeServerStateSync()
+                }
+                if NetworkUsagePolicy.shared.route != .cellular || NetworkUsagePolicy.allowsDownloads {
+                    self.restoreInterruptedDownloads()
+                }
+            }
+        }
         pumpScopeScans()
         scheduleMetadataEnrichment()
+        Task { [weak self] in
+            _ = await NetworkUsagePolicy.shared.readyRoute()
+            await self?.resumeServerStateSync()
+        }
     }
 
     private func applySnapshot(_ snapshot: LibrarySnapshot) {
@@ -307,27 +337,6 @@ final class LibraryStore: ObservableObject {
         return true
     }
 
-    func importDLNAVideos(_ videos: [DLNAClient.Video]) -> Int {
-        guard isDefaultProfile else { return 0 }
-        var known = Set(items.compactMap { item -> URL? in
-            if case .remote(let url) = item.location { return url }
-            return nil
-        })
-        var added = 0
-        for video in videos {
-            guard let scheme = video.url.scheme?.lowercased(), let host = video.url.host,
-                  scheme == "https" || (scheme == "http" && Self.isLocalHost(host)),
-                  known.insert(video.url).inserted else { continue }
-            let parsed = MediaNameParser.parse(filename: video.url.lastPathComponent)
-            let title = video.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            items.insert(MediaItem(title: title.isEmpty ? parsed.title : title,
-                                   location: .remote(video.url), identity: parsed.identity), at: 0)
-            added += 1
-        }
-        if added > 0 { save(); scheduleMetadataEnrichment() }
-        return added
-    }
-
     func addDLNA(device: DLNAClient.Device, videos: [DLNAClient.Video]) -> Int {
         guard isDefaultProfile else { return 0 }
         let source: DLNASource
@@ -342,27 +351,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func scanDLNA(id: UUID) {
-        #if os(iOS)
         for scope in fileSources where scope.storageID == id && scope.enabled && !scope.needsConfirmation { scanFileScope(scope.id) }
-        #else
-        guard isDefaultProfile, let source = dlnaSources.first(where: { $0.id == id }),
-              let url = URL(string: source.descriptionAddress),
-              !scanningDLNASources.contains(id) else { return }
-        scanningDLNASources.insert(id)
-        Task {
-            defer { scanningDLNASources.remove(id) }
-            do {
-                let device = try await DLNAClient.connect(descriptionURL: url)
-                let videos = try await DLNAClient.scan(device: device)
-                guard dlnaSources.contains(where: { $0.id == id }) else { return }
-                _ = reconcileDLNA(id: id, videos: videos)
-                offlineDLNASources.remove(id)
-            } catch {
-                offlineDLNASources.insert(id)
-                errorMessage = "DLNA 扫描失败：\(error.localizedDescription)"
-            }
-        }
-        #endif
     }
 
     func removeDLNA(id: UUID) {
@@ -482,11 +471,7 @@ final class LibraryStore: ObservableObject {
             let source = FolderSource(name: url.lastPathComponent, bookmark: bookmark)
             folders.append(source)
             save()
-            #if os(iOS)
             setFileSourceIncluded(false, id: source.id)
-            #else
-            scanFolder(id: source.id)
-            #endif
         } catch {
             errorMessage = "无法保存文件夹访问权限：\(error.localizedDescription)"
         }
@@ -498,6 +483,54 @@ final class LibraryStore: ObservableObject {
         folders[index].name = trimmed
         save()
     }
+
+    func scanFolder(id: UUID) {
+        for scope in fileSources where scope.storageID == id && scope.enabled && !scope.needsConfirmation { scanFileScope(scope.id) }
+    }
+
+    func removeFolder(id: UUID) {
+        folders.removeAll { $0.id == id }
+        offlineFolders.remove(id)
+        removeItemsAndAssets {
+            if case .folderFile(let sourceID, _) = $0.location { return sourceID == id }
+            return false
+        }
+        save()
+    }
+
+    private func makeBookmark(for url: URL) throws -> Data {
+        #if os(macOS)
+        return try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        #else
+        return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        #endif
+    }
+
+    private func resolveBookmark(_ data: Data) throws -> URL {
+        var stale = false
+        #if os(macOS)
+        let url = try URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                          relativeTo: nil, bookmarkDataIsStale: &stale)
+        #else
+        let url = try URL(resolvingBookmarkData: data, options: [],
+                          relativeTo: nil, bookmarkDataIsStale: &stale)
+        #endif
+        if stale { throw CocoaError(.fileReadNoPermission) }
+        return url
+    }
+
+    private static func bookmarkedFilename(_ data: Data) throws -> String {
+        var stale = false
+        #if os(macOS)
+        let url = try URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                          relativeTo: nil, bookmarkDataIsStale: &stale)
+        #else
+        let url = try URL(resolvingBookmarkData: data, options: [],
+                          relativeTo: nil, bookmarkDataIsStale: &stale)
+        #endif
+        return url.lastPathComponent
+    }
+    #endif
 
     func updateServerAddress(id: UUID, address: String, replacementToken: String? = nil,
                              username: String? = nil, password: String = "") async -> UUID? {
@@ -548,6 +581,7 @@ final class LibraryStore: ObservableObject {
                     }
                     var replacement = EmbySource(baseAddress: normalized, userID: userID)
                     replacement.displayName = source.displayName
+                    replacement.serverKind = source.serverKind
                     replacement.username = resolvedName ?? loginName
                     replacement.usesTokenLogin = false
                     try KeychainPasswordStore.setEmbyToken(token, for: replacement.id)
@@ -647,87 +681,7 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func scanFolder(id: UUID) {
-        #if os(iOS)
-        for scope in fileSources where scope.storageID == id && scope.enabled && !scope.needsConfirmation { scanFileScope(scope.id) }
-        #else
-        guard let source = folders.first(where: { $0.id == id }), !scanningFolders.contains(id) else { return }
-        scanningFolders.insert(id)
-        Task {
-            defer { scanningFolders.remove(id) }
-            do {
-                let bookmark = source.bookmark
-                let paths = try await Task.detached(priority: .utility) {
-                    try FolderScanner.scan(bookmark: bookmark)
-                }.value
-                guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
-                reconcileFolder(id: id, paths: paths)
-                folders[index].lastScannedAt = Date()
-                offlineFolders.remove(id)
-                save()
-                scheduleMetadataEnrichment()
-            } catch {
-                offlineFolders.insert(id)
-                errorMessage = "扫描失败：\(error.localizedDescription)"
-            }
-        }
-        #endif
-    }
-
-    func removeFolder(id: UUID) {
-        folders.removeAll { $0.id == id }
-        offlineFolders.remove(id)
-        removeItemsAndAssets {
-            if case .folderFile(let sourceID, _) = $0.location { return sourceID == id }
-            return false
-        }
-        save()
-    }
-
-    private func makeBookmark(for url: URL) throws -> Data {
-        #if os(macOS)
-        return try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-        #else
-        return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-        #endif
-    }
-
-    private func resolveBookmark(_ data: Data) throws -> URL {
-        var stale = false
-        #if os(macOS)
-        let url = try URL(resolvingBookmarkData: data, options: .withSecurityScope,
-                          relativeTo: nil, bookmarkDataIsStale: &stale)
-        #else
-        let url = try URL(resolvingBookmarkData: data, options: [],
-                          relativeTo: nil, bookmarkDataIsStale: &stale)
-        #endif
-        if stale { throw CocoaError(.fileReadNoPermission) }
-        return url
-    }
-
-    private static func bookmarkedFilename(_ data: Data) throws -> String {
-        var stale = false
-        #if os(macOS)
-        let url = try URL(resolvingBookmarkData: data, options: .withSecurityScope,
-                          relativeTo: nil, bookmarkDataIsStale: &stale)
-        #else
-        let url = try URL(resolvingBookmarkData: data, options: [],
-                          relativeTo: nil, bookmarkDataIsStale: &stale)
-        #endif
-        return url.lastPathComponent
-    }
-    #endif
-
     var localLibraryItems: [MediaItem] {
-        #if !os(iOS)
-        return items.filter { item in
-            switch item.location {
-            case .folderFile(let id, _), .smbFile(let id, _), .webDAVFile(let id, _), .cloudFile(let id, _, _): return !excludedFileSourceIDs.contains(id)
-            case .jellyfinItem, .embyItem, .plexItem: return false
-            case .remote, .bookmark: return true
-            }
-        }
-        #else
         let included = fileSources.filter { $0.enabled && !$0.needsConfirmation }.reduce(into: Set<UUID>()) { $0.formUnion($1.itemIDs) }
         let storedDLNA = Set(dlnaSources.flatMap(\.mediaIDs)).union(storageFileIdentities.values)
         return items.filter { item in
@@ -738,16 +692,11 @@ final class LibraryStore: ObservableObject {
             default: return false
             }
         }
-        #endif
     }
 
     func isFileSourceIncluded(_ id: UUID) -> Bool {
-        #if !os(iOS)
-        return !excludedFileSourceIDs.contains(id)
-        #else
         if let scope = fileSources.first(where: { $0.id == id }) { return scope.enabled && !scope.needsConfirmation }
         return fileSources.contains { $0.storageID == id && $0.enabled && !$0.needsConfirmation }
-        #endif
     }
 
     func fileSourceItemCount(_ id: UUID) -> Int {
@@ -787,23 +736,13 @@ final class LibraryStore: ObservableObject {
     }
 
     var fileSourceIDs: [UUID] {
-        #if os(iOS)
         fileSources.map(\.id)
-        #else
-        folders.map(\.id) + smbSources.map(\.id) + webDAVSources.map(\.id) + cloudSources.map(\.id)
-        #endif
     }
 
     func isScanningFileSource(_ id: UUID) -> Bool {
         if scopeScanTasks[id] != nil || pendingScopeScans.contains(id) { return true }
         return scanningFolders.contains(id) || scanningSMBSources.contains(id) ||
         scanningWebDAVSources.contains(id) || scanningCloudSources.contains(id)
-    }
-
-    func isFileSourceOffline(_ id: UUID) -> Bool {
-        if let state = scopeScanStates[id] { return state.hasPrefix("失败") }
-        return offlineFolders.contains(id) || offlineSMBSources.contains(id) ||
-        offlineWebDAVSources.contains(id) || offlineCloudSources.contains(id)
     }
 
     func refreshFileSource(_ id: UUID) {
@@ -863,26 +802,12 @@ final class LibraryStore: ObservableObject {
 
     func refreshFolders() {
         guard isDefaultProfile else { return }
-        #if os(iOS)
         scheduleMetadataEnrichment()
         pumpScopeScans()
         let interval = (UserDefaults.standard.object(forKey: "lucent.library.autoScanInterval") as? Double) ?? 86_400
         guard interval > 0 else { return }
         let before = Date().addingTimeInterval(-interval)
         for scope in fileSources where scope.enabled && !scope.needsConfirmation && (scope.lastScannedAt ?? scope.importedAt ?? .distantPast) < before { scanFileScope(scope.id) }
-        #else
-        #if !os(tvOS)
-        for source in folders where isFileSourceIncluded(source.id) { scanFolder(id: source.id) }
-        #endif
-        for source in smbSources where isFileSourceIncluded(source.id) { scanSMB(id: source.id) }
-        for source in webDAVSources where isFileSourceIncluded(source.id) { scanWebDAV(id: source.id) }
-        #if !os(iOS)
-        for source in jellyfinSources { scanJellyfin(id: source.id) }
-        for source in plexSources { scanPlex(id: source.id) }
-        #endif
-        for source in cloudSources where isFileSourceIncluded(source.id) { scanCloud(id: source.id) }
-        for source in dlnaSources { scanDLNA(id: source.id) }
-        #endif
     }
 
     func saveSMBConnection(id: UUID?, name: String, host: String, share: String, username: String,
@@ -952,11 +877,7 @@ final class LibraryStore: ObservableObject {
             try KeychainPasswordStore.set(password, for: source.id)
             smbSources.append(source)
             save()
-            #if os(iOS)
             setFileSourceIncluded(false, id: source.id)
-            #else
-            scanSMB(id: source.id)
-            #endif
             return true
         } catch {
             errorMessage = "无法保存 SMB 凭据：\(error.localizedDescription)"
@@ -965,36 +886,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func scanSMB(id: UUID) {
-        #if os(iOS)
         for scope in fileSources where scope.storageID == id && scope.enabled && !scope.needsConfirmation { scanFileScope(scope.id) }
-        #else
-        guard let source = smbSources.first(where: { $0.id == id }),
-              !scanningSMBSources.contains(id) else { return }
-        let password: String?
-        do { password = try KeychainPasswordStore.get(for: id) }
-        catch {
-            errorMessage = "无法读取 SMB 凭据：\(error.localizedDescription)"
-            return
-        }
-        scanningSMBSources.insert(id)
-        Task {
-            defer { scanningSMBSources.remove(id) }
-            do {
-                let paths = try await Task.detached(priority: .utility) {
-                    try SMBScanner.scan(source: source, password: password)
-                }.value
-                guard let index = smbSources.firstIndex(where: { $0.id == id }) else { return }
-                reconcileSMB(id: id, paths: paths)
-                smbSources[index].lastScannedAt = Date()
-                offlineSMBSources.remove(id)
-                save()
-                scheduleMetadataEnrichment()
-            } catch {
-                offlineSMBSources.insert(id)
-                errorMessage = "SMB 扫描失败：\(error.localizedDescription)"
-            }
-        }
-        #endif
     }
 
     func updateSMBCredentials(id: UUID, username: String, password: String?) -> Bool {
@@ -1043,11 +935,7 @@ final class LibraryStore: ObservableObject {
             try KeychainPasswordStore.setWebDAVPassword(password, for: source.id)
             webDAVSources.append(source)
             save()
-            #if os(iOS)
             setFileSourceIncluded(false, id: source.id)
-            #else
-            scanWebDAV(id: source.id)
-            #endif
             return true
         } catch {
             errorMessage = "无法保存 WebDAV 凭据：\(error.localizedDescription)"
@@ -1056,34 +944,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func scanWebDAV(id: UUID) {
-        #if os(iOS)
         for scope in fileSources where scope.storageID == id && scope.enabled && !scope.needsConfirmation { scanFileScope(scope.id) }
-        #else
-        guard let source = webDAVSources.first(where: { $0.id == id }),
-              !scanningWebDAVSources.contains(id) else { return }
-        let password: String?
-        do { password = try KeychainPasswordStore.webDAVPassword(for: id) }
-        catch { errorMessage = "无法读取 WebDAV 凭据：\(error.localizedDescription)"; return }
-        scanningWebDAVSources.insert(id)
-        Task {
-            defer { scanningWebDAVSources.remove(id) }
-            do {
-                let paths = try await WebDAVClient.scan(source: source, password: password)
-                guard let index = webDAVSources.firstIndex(where: { $0.id == id }) else { return }
-                reconcile(paths: paths, existingPath: { item in
-                    if case .webDAVFile(let sourceID, let path) = item.location, sourceID == id { return path }
-                    return nil
-                }, location: { .webDAVFile(sourceID: id, relativePath: $0) })
-                webDAVSources[index].lastScannedAt = Date()
-                offlineWebDAVSources.remove(id)
-                save()
-                scheduleMetadataEnrichment()
-            } catch {
-                offlineWebDAVSources.insert(id)
-                errorMessage = "WebDAV 扫描失败：\(error.localizedDescription)"
-            }
-        }
-        #endif
     }
 
     func updateWebDAVCredentials(id: UUID, username: String, password: String?) -> Bool {
@@ -1136,9 +997,6 @@ final class LibraryStore: ObservableObject {
             try KeychainPasswordStore.setJellyfinToken(token, for: source.id)
             jellyfinSources.append(source)
             save()
-            #if !os(iOS)
-            scanJellyfin(id: source.id)
-            #endif
             return true
         } catch {
             errorMessage = "连接 Jellyfin 失败：\(error.localizedDescription)"
@@ -1156,7 +1014,6 @@ final class LibraryStore: ObservableObject {
             errorMessage = "请输入有效的 Jellyfin 地址与用户名。"
             return false
         }
-        let normalized = raw.hasSuffix("/") ? raw : raw + "/"
         do {
             let token = try await JellyfinClient.authenticate(baseAddress: raw, username: username,
                                                                 password: password)
@@ -1288,9 +1145,6 @@ final class LibraryStore: ObservableObject {
             jellyfinSources[index].username = user.name ?? jellyfinSources[index].username
             offlineJellyfinSources.remove(id)
             save()
-            #if !os(iOS)
-            scanJellyfin(id: id)
-            #endif
             return true
         } catch {
             errorMessage = "无法更新 Jellyfin 令牌：\(error.localizedDescription)"
@@ -1298,14 +1152,14 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func addEmby(address: String, token: String, userID: String) async -> Bool {
+    func addEmby(address: String, token: String, userID: String, kind: EmbyServerKind = .emby) async -> Bool {
         let raw = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme), let host = url.host,
               url.user == nil, url.password == nil,
               scheme == "https" || Self.isLocalHost(host),
               !token.isEmpty, !userID.isEmpty else {
-            errorMessage = "请输入有效的 Emby 地址、访问令牌和用户 ID。"
+            errorMessage = "请输入有效的 \(kind.title) 地址、访问令牌和用户 ID。"
             return false
         }
         let normalized = Self.embyAPIAddress(raw)
@@ -1314,10 +1168,11 @@ final class LibraryStore: ObservableObject {
             guard !embySources.contains(where: {
                 $0.baseAddress == normalized && $0.userID.caseInsensitiveCompare(userID) == .orderedSame
             }) else {
-                errorMessage = "这个 Emby 用户已添加。"
+                errorMessage = "这个服务器用户已添加。"
                 return false
             }
             var source = EmbySource(baseAddress: normalized, userID: userID)
+            source.serverKind = kind
             source.username = username
             source.usesTokenLogin = true
             try KeychainPasswordStore.setEmbyToken(token, for: source.id)
@@ -1325,26 +1180,26 @@ final class LibraryStore: ObservableObject {
             save()
             return true
         } catch {
-            errorMessage = "连接 Emby 失败：\(error.localizedDescription)"
+            errorMessage = "连接 \(kind.title) 失败：\(error.localizedDescription)"
             return false
         }
     }
 
-    func addEmby(address: String, username: String, password: String) async -> Bool {
+    func addEmby(address: String, username: String, password: String, kind: EmbyServerKind = .emby) async -> Bool {
         let raw = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme), let host = url.host,
               url.user == nil, url.password == nil,
               scheme == "https" || Self.isLocalHost(host),
               !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "请输入有效的 Emby 地址与用户名。"
+            errorMessage = "请输入有效的 \(kind.title) 地址与用户名。"
             return false
         }
         let normalized = Self.embyAPIAddress(raw)
         do {
             let login = try await EmbyClient.authenticate(baseAddress: normalized, username: username,
                                                            password: password)
-            let added = await addEmby(address: raw, token: login.token, userID: login.userID)
+            let added = await addEmby(address: raw, token: login.token, userID: login.userID, kind: kind)
             if added, let index = embySources.indices.last {
                 embySources[index].username = login.username
                 embySources[index].usesTokenLogin = false
@@ -1352,9 +1207,106 @@ final class LibraryStore: ObservableObject {
             }
             return added
         } catch {
-            errorMessage = "Emby 登录失败：\(error.localizedDescription)"
+            errorMessage = "\(kind.title) 登录失败：\(error.localizedDescription)"
             return false
         }
+    }
+
+    func synchronizePlexHome(sourceID: UUID) async throws {
+        guard let source = plexSources.first(where: { $0.id == sourceID }),
+              let token = try KeychainPasswordStore.plexToken(for: sourceID) else { throw ServerCatalogSync.Failure.requestFailed }
+        let keys = items.compactMap { value -> String? in
+            if case .plexItem(let id, let key, _) = value.location, id == sourceID { return key }; return nil
+        }
+        guard !keys.isEmpty else { return }
+        var remote: [String: PlexItem] = [:]
+        // Bounded concurrency prevents refresh from flooding a NAS with metadata requests.
+        for start in stride(from: 0, to: keys.count, by: 4) {
+            let batch = Array(keys[start..<min(start + 4, keys.count)])
+            let values = try await withThrowingTaskGroup(of: (String, PlexItem?).self) { group in
+                for key in batch { group.addTask { (key, try await PlexClient.cachedItem(source: source, token: token, ratingKey: key)) } }
+                var result: [String: PlexItem] = [:]
+                for try await (key, item) in group { if let item { result[key] = item } }
+                return result
+            }
+            remote.merge(values) { _, new in new }
+        }
+        try Task.checkCancellation()
+        guard plexSources.contains(where: { $0.id == sourceID && $0.baseAddress == source.baseAddress }) else { return }
+        let requested = Set(keys)
+        var removed = Set<UUID>()
+        for index in items.indices {
+            guard case .plexItem(let id, let key, _) = items[index].location, id == sourceID, requested.contains(key) else { continue }
+            guard let value = remote[key] else {
+                if downloadedURL(for: items[index]) == nil { removed.insert(items[index].id) }
+                else { items[index].missingSince = items[index].missingSince ?? Date() }
+                continue
+            }
+            items[index].title = value.title; items[index].identity = value.identity
+            items[index].serverSummary = value.summary; items[index].serverPosterKey = value.thumb
+            items[index].missingSince = nil
+            if let part = value.partKey { items[index].location = .plexItem(sourceID: sourceID, ratingKey: key, partKey: part) }
+            if let duration = value.duration { items[index].duration = duration / 1000 }
+        }
+        items.removeAll { removed.contains($0.id) }
+        for index in collections.indices { collections[index].itemIDs.removeAll { removed.contains($0) } }
+        save()
+    }
+
+    func synchronizeServerHome(sourceID: UUID, emby: Bool) async throws {
+        let cached = items.compactMap { item -> String? in
+            switch item.location {
+            case .embyItem(let id, let remoteID) where emby && id == sourceID: return remoteID
+            case .jellyfinItem(let id, let remoteID) where !emby && id == sourceID: return remoteID
+            default: return nil
+            }
+        }
+        guard !cached.isEmpty else { return }
+        let base: String, userID: String, token: String
+        if emby, let source = embySources.first(where: { $0.id == sourceID }),
+           let value = try KeychainPasswordStore.embyToken(for: sourceID) {
+            base = source.baseAddress; userID = source.userID; token = value
+        } else if !emby, let source = jellyfinSources.first(where: { $0.id == sourceID }),
+                  let value = try KeychainPasswordStore.jellyfinToken(for: sourceID) {
+            base = source.baseAddress; userID = source.userID; token = value
+        } else { throw ServerCatalogSync.Failure.requestFailed }
+        let remote = try await ServerCatalogSync.cachedItems(base: base, userID: userID, token: token, ids: cached)
+        try Task.checkCancellation()
+        // A connection may have been edited/removed while requests were in flight.
+        guard emby ? embySources.contains(where: { $0.id == sourceID && $0.userID == userID && $0.baseAddress == base }) :
+            jellyfinSources.contains(where: { $0.id == sourceID && $0.userID == userID && $0.baseAddress == base }) else { return }
+        let byID = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
+        let requested = Set(cached)
+        var removed = Set<UUID>()
+        for index in items.indices {
+            let key: String
+            switch items[index].location {
+            case .embyItem(let id, let remoteID) where emby && id == sourceID: key = remoteID
+            case .jellyfinItem(let id, let remoteID) where !emby && id == sourceID: key = remoteID
+            default: continue
+            }
+            guard requested.contains(key) else { continue }
+            guard let value = byID[key] else {
+                // Keep downloaded bytes and progress; do not erase user downloads on server deletion.
+                if downloadedURL(for: items[index]) == nil { removed.insert(items[index].id) }
+                else { items[index].missingSince = items[index].missingSince ?? Date() }
+                continue
+            }
+            items[index].missingSince = nil
+            items[index].title = value.name; items[index].identity = value.identity
+            items[index].serverSummary = value.overview; items[index].serverPosterKey = value.imageTags?.primary
+            items[index].serverFileExtension = value.fileExtension
+            if let ticks = value.runTimeTicks, ticks > 0 { items[index].duration = Double(ticks) / 10_000_000 }
+            if let date = value.remoteStateDate, date >= (items[index].stateUpdatedAt ?? .distantPast) {
+                items[index].position = Double(value.userData?.playbackPositionTicks ?? 0) / 10_000_000
+                items[index].watched = value.userData?.played ?? items[index].watched
+                items[index].favorite = value.userData?.isFavorite ?? items[index].favorite
+                items[index].stateUpdatedAt = date
+            }
+        }
+        items.removeAll { removed.contains($0.id) }
+        for index in collections.indices { collections[index].itemIDs.removeAll { removed.contains($0) } }
+        save()
     }
 
     func openEmbyItem(sourceID: UUID, remote: JellyfinItem) -> MediaItem {
@@ -1456,9 +1408,6 @@ final class LibraryStore: ObservableObject {
             try KeychainPasswordStore.setPlexToken(token, for: source.id)
             plexSources.append(source)
             save()
-            #if !os(iOS)
-            scanPlex(id: source.id)
-            #endif
             return true
         } catch {
             errorMessage = "连接 Plex 失败：\(error.localizedDescription)"
@@ -1601,9 +1550,6 @@ final class LibraryStore: ObservableObject {
             plexSources[index].username = username ?? plexSources[index].username
             offlinePlexSources.remove(id)
             save()
-            #if !os(iOS)
-            scanPlex(id: id)
-            #endif
             return true
         } catch {
             errorMessage = "无法更新 Plex 令牌：\(error.localizedDescription)"
@@ -1628,7 +1574,7 @@ final class LibraryStore: ObservableObject {
                                                        refreshToken: refreshToken,
                                                        clientSecret: clientSecret) : nil
             let access = refreshed?.accessToken ?? token
-            let entries = try await CloudDriveClient.contents(source: source, token: access, directoryID: "")
+            _ = try await CloudDriveClient.contents(source: source, token: access, directoryID: "")
             try KeychainPasswordStore.setCloudToken(access, for: source.id)
             if !clientSecret.isEmpty {
                 try KeychainPasswordStore.setCloudClientSecret(clientSecret, for: source.id)
@@ -1642,18 +1588,8 @@ final class LibraryStore: ObservableObject {
                 }
             }
             cloudSources.append(source)
-            #if os(iOS)
             setFileSourceIncluded(false, id: source.id)
-            #else
-            reconcileCloud(id: source.id, entries: entries.filter { !$0.isDirectory }.map { .init(identifier: $0.identifier, filename: $0.name) })
-            if let index = cloudSources.firstIndex(where: { $0.id == source.id }) {
-                cloudSources[index].lastScannedAt = Date()
-            }
-            #endif
             save()
-            #if !os(iOS)
-            scheduleMetadataEnrichment()
-            #endif
             return true
         } catch {
             errorMessage = "云盘连接失败：\(error.localizedDescription)"
@@ -1662,29 +1598,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func scanCloud(id: UUID) {
-        #if os(iOS)
         for scope in fileSources where scope.storageID == id && scope.enabled && !scope.needsConfirmation { scanFileScope(scope.id) }
-        #else
-        guard isDefaultProfile, let source = cloudSources.first(where: { $0.id == id }),
-              !scanningCloudSources.contains(id) else { return }
-        scanningCloudSources.insert(id)
-        Task {
-            defer { scanningCloudSources.remove(id) }
-            do {
-                let token = try await validCloudToken(source: source)
-                let entries = try await CloudDriveClient.scan(source: source, token: token)
-                guard let index = cloudSources.firstIndex(where: { $0.id == id }) else { return }
-                reconcileCloud(id: id, entries: entries)
-                cloudSources[index].lastScannedAt = Date()
-                offlineCloudSources.remove(id)
-                save()
-                scheduleMetadataEnrichment()
-            } catch {
-                offlineCloudSources.insert(id)
-                errorMessage = "云盘扫描失败：\(error.localizedDescription)"
-            }
-        }
-        #endif
     }
 
     func updateCloudToken(id: UUID, token: String) async -> Bool {
@@ -1943,24 +1857,32 @@ final class LibraryStore: ObservableObject {
     }
 
     func updateProgress(id: UUID, position: Double, duration: Double?) {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        let safePosition = position.isFinite ? max(0, position) : 0
-        let safeDuration = duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
-        items[index].position = safePosition
-        if safePosition > 0 { items[index].lastPlayedAt = Date() }
+        guard let index = items.firstIndex(where: { $0.id == id }), position.isFinite, position >= 0 else { return }
+        let wasWatched = items[index].watched
+        if let duration, duration.isFinite, duration > 0 {
+            items[index].duration = duration
+            if items[index].technicalInfo?.duration == 0 { items[index].technicalInfo?.duration = duration.rounded() }
+        }
+        switch PlaybackProgressPolicy.current.state(position: position, duration: items[index].duration) {
+        case .unavailable: return // Wait for a duration; never replace a good checkpoint with loading clocks.
+        case .beginning: items[index].position = 0
+        case .resumable(let seconds): items[index].position = wasWatched ? 0 : seconds
+        case .completed: items[index].position = 0; items[index].watched = true
+        }
+        if position > 0 { items[index].lastPlayedAt = Date() }
         items[index].stateUpdatedAt = Date()
-        if let safeDuration {
-            items[index].duration = safeDuration
-            if items[index].technicalInfo?.duration == 0 { items[index].technicalInfo?.duration = safeDuration.rounded() }
-        }
-        if let total = items[index].duration, total > 0, safePosition / total >= 0.95 {
-            items[index].watched = true
-        }
-        if Date().timeIntervalSince(lastServerReport[id] ?? .distantPast) >= 10 {
+        let justCompleted = !wasWatched && items[index].watched
+        if justCompleted { markWatched(id: id) }
+        if justCompleted || Date().timeIntervalSince(lastServerReport[id] ?? .distantPast) >= 10 {
             lastServerReport[id] = Date()
             reportServerProgress(item: items[index], stopped: false)
         }
-        save()
+        if let database {
+            database.enqueueItem(items[index], profileID: activeProfileID) { [weak self] failure in
+                Task { @MainActor in self?.errorMessage = "无法保存观看进度：\(failure)" }
+            }
+            scheduleSync()
+        } else { save() }
     }
 
     func markUnwatched(id: UUID) {
@@ -1971,24 +1893,7 @@ final class LibraryStore: ObservableObject {
         if isDefaultProfile, let key = Self.traktKey(for: items[index]) {
             pendingTraktUnwatched.insert(key)
         }
-        if isDefaultProfile, case .jellyfinItem(let sourceID, let itemID) = items[index].location,
-           let source = jellyfinSources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.jellyfinToken(for: sourceID), !token.isEmpty {
-            Task { try? await JellyfinClient.updateUserData(source: source, token: token,
-                                                             itemID: itemID, position: 0, played: false) }
-        }
-        if isDefaultProfile, case .embyItem(let sourceID, let itemID) = items[index].location,
-           let source = embySources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.embyToken(for: sourceID), !token.isEmpty {
-            Task { try? await EmbyClient.updateUserData(source: source, token: token,
-                                                        itemID: itemID, position: 0, played: false) }
-        }
-        if isDefaultProfile, case .plexItem(let sourceID, let ratingKey, _) = items[index].location,
-           let source = plexSources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.plexToken(for: sourceID), !token.isEmpty {
-            Task { try? await PlexClient.markPlayed(source: source, token: token,
-                                                    ratingKey: ratingKey, played: false) }
-        }
+        reportServerProgress(item: items[index], stopped: true)
         save()
         scheduleTraktSync()
     }
@@ -1996,28 +1901,12 @@ final class LibraryStore: ObservableObject {
     func markWatched(id: UUID) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].watched = true
+        items[index].position = 0
         items[index].stateUpdatedAt = Date()
         if let key = Self.traktKey(for: items[index]) {
             pendingTraktUnwatched.remove(key)
         }
-        if isDefaultProfile, case .jellyfinItem(let sourceID, let itemID) = items[index].location,
-           let source = jellyfinSources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.jellyfinToken(for: sourceID), !token.isEmpty {
-            Task { try? await JellyfinClient.updateUserData(source: source, token: token,
-                                                             itemID: itemID, played: true) }
-        }
-        if isDefaultProfile, case .embyItem(let sourceID, let itemID) = items[index].location,
-           let source = embySources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.embyToken(for: sourceID), !token.isEmpty {
-            Task { try? await EmbyClient.updateUserData(source: source, token: token,
-                                                        itemID: itemID, played: true) }
-        }
-        if isDefaultProfile, case .plexItem(let sourceID, let ratingKey, _) = items[index].location,
-           let source = plexSources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.plexToken(for: sourceID), !token.isEmpty {
-            Task { try? await PlexClient.markPlayed(source: source, token: token,
-                                                    ratingKey: ratingKey, played: true) }
-        }
+        reportServerProgress(item: items[index], stopped: true)
         save()
         scheduleTraktSync()
     }
@@ -2026,20 +1915,7 @@ final class LibraryStore: ObservableObject {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].favorite = !items[index].isFavorite
         items[index].stateUpdatedAt = Date()
-        if isDefaultProfile, case .jellyfinItem(let sourceID, let itemID) = items[index].location,
-           let source = jellyfinSources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.jellyfinToken(for: sourceID), !token.isEmpty {
-            let favorite = items[index].isFavorite
-            Task { try? await JellyfinClient.updateUserData(source: source, token: token,
-                                                             itemID: itemID, favorite: favorite) }
-        }
-        if isDefaultProfile, case .embyItem(let sourceID, let itemID) = items[index].location,
-           let source = embySources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.embyToken(for: sourceID), !token.isEmpty {
-            let favorite = items[index].isFavorite
-            Task { try? await EmbyClient.updateUserData(source: source, token: token,
-                                                        itemID: itemID, favorite: favorite) }
-        }
+        reportServerProgress(item: items[index], stopped: true)
         save()
     }
 
@@ -2107,27 +1983,51 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    private func resumeServerStateSync() async {
+        await serverOutbox.resume { [weak self] value in try await self?.deliverServerState(value) }
+        guard isDefaultProfile else { return }
+        // One-time migration of the pre-outbox restricted-network queue.
+        // Keep its recovery key until the new queue has durably accepted every entry.
+        let legacyKey = "lucent.network.pendingServerStates"
+        guard let legacy = UserDefaults.standard.stringArray(forKey: legacyKey) else { return }
+        do {
+            for raw in legacy {
+                guard let id = UUID(uuidString: raw), let item = items.first(where: { $0.id == id }) else { continue }
+                let record = ServerStateOutbox.Record(item: item, stopped: true, revision: Date())
+                try await serverOutbox.submit(record) { [weak self] value in try await self?.deliverServerState(value) }
+            }
+            UserDefaults.standard.removeObject(forKey: legacyKey)
+        } catch { errorMessage = "无法迁移待同步观看状态：\(error.localizedDescription)" }
+    }
+
     private func reportServerProgress(item: MediaItem, stopped: Bool) {
-        if isDefaultProfile, case .jellyfinItem(let sourceID, let itemID) = item.location,
-           let source = jellyfinSources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.jellyfinToken(for: sourceID), !token.isEmpty {
-            Task { try? await JellyfinClient.updateUserData(source: source, token: token,
-                                                             itemID: itemID, position: item.position,
-                                                             played: item.watched) }
+        guard isDefaultProfile else { return }
+        switch item.location { case .embyItem, .jellyfinItem, .plexItem: break; default: return }
+        let record = ServerStateOutbox.Record(item: item, stopped: stopped, revision: Date())
+        Task { [self] in
+            do { try await serverOutbox.submit(record) { [weak self] value in try await self?.deliverServerState(value) } }
+            catch { errorMessage = "无法保存待同步观看状态：\(error.localizedDescription)" }
         }
-        if isDefaultProfile, case .embyItem(let sourceID, let itemID) = item.location,
-           let source = embySources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.embyToken(for: sourceID), !token.isEmpty {
-            Task { try? await EmbyClient.updateUserData(source: source, token: token,
-                                                        itemID: itemID, position: item.position,
-                                                        played: item.watched) }
-        }
-        if isDefaultProfile, case .plexItem(let sourceID, let ratingKey, _) = item.location,
-           let source = plexSources.first(where: { $0.id == sourceID }),
-           let token = try? KeychainPasswordStore.plexToken(for: sourceID), !token.isEmpty {
-            Task { try? await PlexClient.reportProgress(source: source, token: token,
-                                                        ratingKey: ratingKey, position: item.position,
-                                                        duration: item.duration, stopped: stopped) }
+    }
+
+    private func deliverServerState(_ record: ServerStateOutbox.Record) async throws {
+        guard NetworkUsagePolicy.syncPermitted(on: NetworkUsagePolicy.shared.route, allowed: NetworkUsagePolicy.allowsSync) else { throw URLError(.notConnectedToInternet) }
+        let item = record.item
+        switch item.location {
+        case .embyItem(let id, let remoteID):
+            guard let source = embySources.first(where: { $0.id == id }) else { return }
+            guard let token = try KeychainPasswordStore.embyToken(for: id) else { throw URLError(.userAuthenticationRequired) }
+            try await EmbyClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched, favorite: item.isFavorite)
+        case .jellyfinItem(let id, let remoteID):
+            guard let source = jellyfinSources.first(where: { $0.id == id }) else { return }
+            guard let token = try KeychainPasswordStore.jellyfinToken(for: id) else { throw URLError(.userAuthenticationRequired) }
+            try await JellyfinClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched, favorite: item.isFavorite)
+        case .plexItem(let id, let remoteID, _):
+            guard let source = plexSources.first(where: { $0.id == id }) else { return }
+            guard let token = try KeychainPasswordStore.plexToken(for: id) else { throw URLError(.userAuthenticationRequired) }
+            try await PlexClient.markPlayed(source: source, token: token, ratingKey: remoteID, played: item.watched)
+            try await PlexClient.reportProgress(source: source, token: token, ratingKey: remoteID, position: item.position, duration: item.duration, stopped: record.stopped)
+        default: return
         }
     }
 
@@ -2159,6 +2059,45 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    /// Refresh translations by stable TMDB identity; never rematch or clear user data.
+    func refreshLocalizedMetadata() async {
+        guard isDefaultProfile, !enrichingMetadata,
+              let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else { return }
+        let languageID = LocalizationPreferences.current.contentID
+        let groups = Dictionary(grouping: localLibraryItems.filter {
+            $0.missingSince == nil && $0.metadata != nil && ($0.metadata?.localizationKey != languageID || ($0.needsCatalogEpisode && $0.catalogEpisode?.localizationKey != languageID))
+        }, by: { "\($0.metadata?.catalogKind?.rawValue ?? ($0.identity?.seriesName == nil ? "movie" : "tv")):\($0.metadata!.providerID)" })
+        guard !groups.isEmpty else { return }
+        enrichingMetadata = true
+        defer { enrichingMetadata = false; catalogProcessingStatus = nil; save() }
+        for files in groups.values {
+            guard !Task.isCancelled, LocalizationPreferences.current.contentID == languageID,
+                  let first = files.first, let old = first.metadata else { return }
+            catalogProcessingStatus = "正在更新本地化资料：\(first.title)"
+            do {
+                let television = old.catalogKind == .tv || first.identity?.seriesName != nil
+                let translated = try await TMDBService.catalog(id: old.providerID, television: television, token: token)
+                guard !Task.isCancelled, LocalizationPreferences.current.contentID == languageID else { return }
+                for file in files {
+                    var episode: CatalogEpisode?
+                    if case .episode(_, let season, let number, _) = file.identity, number > 0 {
+                        episode = try? await TMDBService.catalogEpisode(id: old.providerID, season: season, number: number, token: token)
+                    }
+                    guard !Task.isCancelled, LocalizationPreferences.current.contentID == languageID else { return }
+                    if let index = items.firstIndex(where: { $0.id == file.id && $0.metadata?.providerID == old.providerID }) {
+                        items[index].metadata = translated
+                        if let episode { items[index].catalogEpisode = episode }
+                        if !television { items[index].title = translated.localizedTitle ?? items[index].title }
+                    }
+                }
+                save()
+                try await Task.sleep(for: .milliseconds(300))
+            } catch { return } // Keep existing metadata on outage; a later refresh can retry.
+        }
+        catalogMetadataCache.removeAll()
+        scheduleCatalogArtwork()
+    }
+
     func enrichMissingMetadata(showResult: Bool = true) async {
         guard isDefaultProfile, !enrichingMetadata else { return }
         scheduleTechnicalProbes()
@@ -2170,6 +2109,7 @@ final class LibraryStore: ObservableObject {
         metadataEnrichmentFailed = false
         defer { enrichingMetadata = false }
         var matched = 0
+        let localizationID = LocalizationPreferences.current.contentID
         let recognizer = TMDBCatalogRecognizer(token: token)
         for item in Array(pendingCatalogItems.prefix(30)) {
             guard !Task.isCancelled, localLibraryItems.contains(where: { $0.id == item.id }),
@@ -2194,7 +2134,7 @@ final class LibraryStore: ObservableObject {
                         }
                         continue
                     }
-                    let lookup = "\(result.kind.rawValue):\(result.id)"
+                    let lookup = "\(LocalizationPreferences.current.contentID)|\(result.kind.rawValue):\(result.id)"
                     if let cached = catalogMetadataCache[lookup] { metadata = cached }
                     else {
                         let value = try await TMDBService.catalog(id: result.id, television: result.kind == .tv, token: token)
@@ -2202,7 +2142,7 @@ final class LibraryStore: ObservableObject {
                         metadata = value
                     }
                 }
-                guard !Task.isCancelled, localLibraryItems.contains(where: { $0.id == item.id }),
+                guard !Task.isCancelled, LocalizationPreferences.current.contentID == localizationID, localLibraryItems.contains(where: { $0.id == item.id }),
                       let index = items.firstIndex(where: { $0.id == item.id }),
                       items[index].metadata?.providerID == item.metadata?.providerID else { continue }
                 let television = metadata.catalogKind == .tv || (metadata.catalogKind == nil && item.identity?.seriesName != nil)
@@ -2292,12 +2232,11 @@ final class LibraryStore: ObservableObject {
         guard isDefaultProfile else { return }
         scheduleTechnicalProbes()
         scheduleCatalogArtwork()
-        guard metadataDrainTask == nil else { return }
+        guard !metadataCoordinator.isRunning else { return }
         guard let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else {
             catalogProcessingStatus = mediaProbeEnabled ? "请在设置中配置 TMDB 令牌，媒体探测仍会继续" : "请在设置中配置 TMDB 令牌"; return
         }
-        metadataDrainTask = Task {
-            defer { metadataDrainTask = nil }
+        metadataCoordinator.start { [self] in
             while !Task.isCancelled {
                 if enrichingMetadata { try? await Task.sleep(for: .milliseconds(500)); continue }
                 if metadataRetryRequested {
@@ -2330,6 +2269,8 @@ final class LibraryStore: ObservableObject {
     }
 
     func restoreInterruptedDownloads() {
+        let route = NetworkUsagePolicy.shared.route
+        guard route != .unknown, route != .cellular || NetworkUsagePolicy.allowsDownloads else { return }
         guard !restoredInterruptedDownloads else { return }
         restoredInterruptedDownloads = true
         let paused = userPausedDownloadIDs
@@ -2369,12 +2310,13 @@ final class LibraryStore: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    func installSubtitle(id: UUID, data: Data, filename: String) {
+    @discardableResult
+    func installSubtitle(id: UUID, data: Data, filename: String) -> Bool {
         let suffix = (filename as NSString).pathExtension.lowercased()
         guard SubtitleParser.supportedExtensions.contains(suffix), data.count <= 5_000_000,
               let index = items.firstIndex(where: { $0.id == id }) else {
             errorMessage = "字幕格式无效或超过 5 MB。"
-            return
+            return false
         }
         do {
             let directory = fileURL.deletingLastPathComponent().appendingPathComponent("Subtitles", isDirectory: true)
@@ -2386,7 +2328,8 @@ final class LibraryStore: ObservableObject {
             }
             items[index].customSubtitleFileName = destination.lastPathComponent
             save()
-        } catch { errorMessage = "无法保存字幕：\(error.localizedDescription)" }
+            return true
+        } catch { errorMessage = "无法保存字幕：\(error.localizedDescription)"; return false }
     }
 
     #if !os(tvOS)
@@ -2476,6 +2419,9 @@ final class LibraryStore: ObservableObject {
     }
 
     func download(id: UUID) async {
+        _ = await NetworkUsagePolicy.shared.readyRoute()
+        do { try NetworkUsagePolicy.shared.requireDownloadAllowed() }
+        catch { errorMessage = error.localizedDescription; return }
         guard let item = items.first(where: { $0.id == id }), !downloading.contains(id) else { return }
         userPausedDownloadIDs.remove(id.uuidString)
         let extensionName: String
@@ -2565,10 +2511,11 @@ final class LibraryStore: ObservableObject {
                     }
                 }
                 smbDownloadOperations[id] = transfer
-                try await withTaskCancellationHandler {
-                    try await transfer.value
-                } onCancel: {
-                    transfer.cancel()
+                do {
+                    try await withTaskCancellationHandler { try await transfer.value } onCancel: { transfer.cancel() }
+                } catch {
+                    if error is NetworkUsageError { pausedSMBDownloads.insert(id) }
+                    throw error
                 }
             case .bookmark, .folderFile: return
             }
@@ -2583,7 +2530,10 @@ final class LibraryStore: ObservableObject {
                 save()
             }
         } catch {
-            if !Task.isCancelled && !cancelledDownloads.contains(id) && !(error is CancellationError) {
+            if error is NetworkUsageError || (!NetworkUsagePolicy.allowsDownloads && NetworkUsagePolicy.shared.route == .cellular) {
+                userPausedDownloadIDs.insert(id.uuidString)
+                errorMessage = NetworkUsageError.downloadsRestricted.localizedDescription
+            } else if !Task.isCancelled && !cancelledDownloads.contains(id) && !(error is CancellationError) {
                 errorMessage = "下载失败：\(error.localizedDescription)"
             }
         }
@@ -2697,6 +2647,10 @@ final class LibraryStore: ObservableObject {
     }
 
     func syncTrakt() async {
+        let route = await NetworkUsagePolicy.shared.readyRoute()
+        guard NetworkUsagePolicy.syncPermitted(on: route, allowed: NetworkUsagePolicy.allowsSync) else {
+            traktStatus = "等待 Wi-Fi 同步"; return
+        }
         guard isDefaultProfile, !traktSyncing else { return }
         let clientID = UserDefaults.standard.string(forKey: "lucent.trakt.clientID") ?? ""
         guard !clientID.isEmpty,
@@ -2797,11 +2751,31 @@ final class LibraryStore: ObservableObject {
         scheduleTraktSync()
     }
 
-    func rename(id: UUID, title: String) {
-        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, let index = items.firstIndex(where: { $0.id == id }) else { return }
-        items[index].title = value
-        items[index].stateUpdatedAt = Date()
+    func updateSkipTimes(id: UUID, introEnd: Double?, creditsDuration: Double?, applyToSeason: Bool) {
+        guard let target = items.first(where: { $0.id == id }) else { return }
+        func source(_ location: MediaLocation) -> String {
+            switch location {
+            case .folderFile(let id, _): "folder:\(id)"
+            case .smbFile(let id, _): "smb:\(id)"
+            case .webDAVFile(let id, _): "dav:\(id)"
+            case .embyItem(let id, _): "emby:\(id)"
+            case .jellyfinItem(let id, _): "jellyfin:\(id)"
+            case .plexItem(let id, _, _): "plex:\(id)"
+            case .cloudFile(let id, _, _): "cloud:\(id)"
+            case .remote, .bookmark: "local"
+            }
+        }
+        for index in items.indices {
+            let sameSeason: Bool
+            if applyToSeason, case .episode(_, let season, _, _) = target.identity,
+               case .episode(_, let candidateSeason, _, _) = items[index].identity {
+                sameSeason = season == candidateSeason && target.catalogGroupID == items[index].catalogGroupID && source(target.location) == source(items[index].location)
+            } else { sameSeason = false }
+            guard items[index].id == id || sameSeason else { continue }
+            items[index].skipIntroEnd = introEnd
+            items[index].skipCreditsDuration = creditsDuration
+            items[index].skipCreditsStart = nil
+        }
         save()
     }
 
@@ -2812,6 +2786,7 @@ final class LibraryStore: ObservableObject {
         items[index].title = value
         items[index].identity = identity
         items[index].skipIntroEnd = skipIntroEnd
+        if items[index].skipCreditsStart != skipCreditsStart { items[index].skipCreditsDuration = nil }
         items[index].skipCreditsStart = skipCreditsStart
         items[index].stateUpdatedAt = Date()
         save()
@@ -2822,23 +2797,26 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
+    func flushPersistence() async { await database?.flush() }
+
     private func save() {
-        do {
-            let currentNetworkConfiguration = networkConfiguration()
-            if currentNetworkConfiguration != lastNetworkConfiguration {
-                libraryConfigUpdatedAt = Date()
-                lastNetworkConfiguration = currentNetworkConfiguration
-            }
-            if let database { try database.save(snapshot()) }
-            else {
-                let data = try JSONEncoder().encode(snapshot())
-                try data.write(to: fileURL, options: .atomic)
-            }
-            if syncing { syncRequestedDuringRun = true }
-            else { scheduleSync() }
-        } catch {
-            errorMessage = "无法保存媒体库：\(error.localizedDescription)"
+        catalogStructureRevision = UUID()
+        let currentNetworkConfiguration = networkConfiguration()
+        if currentNetworkConfiguration != lastNetworkConfiguration {
+            libraryConfigUpdatedAt = Date()
+            lastNetworkConfiguration = currentNetworkConfiguration
         }
+        if let database {
+            database.enqueue(snapshot()) { [weak self] failure in
+                Task { @MainActor in self?.errorMessage = "无法保存媒体库：\(failure)" }
+            }
+        } else {
+            LibraryRepository.saveJSON(snapshot(), to: fileURL) { [weak self] failure in
+                Task { @MainActor in self?.errorMessage = "无法保存媒体库：\(failure)" }
+            }
+        }
+        if syncing { syncRequestedDuringRun = true }
+        else { scheduleSync() }
     }
 
     private func networkConfiguration() -> NetworkSourceConfiguration {
@@ -2863,6 +2841,10 @@ final class LibraryStore: ObservableObject {
 
     func syncNow() async {
         guard iCloudSyncEnabled, !syncing else { return }
+        let route = await NetworkUsagePolicy.shared.readyRoute()
+        guard NetworkUsagePolicy.syncPermitted(on: route, allowed: NetworkUsagePolicy.allowsSync) else {
+            syncStatus = "等待 Wi-Fi 同步"; return
+        }
         guard isDefaultProfile else {
             syncStatus = "其他观看资料仅保存在本机"
             return
@@ -2968,7 +2950,7 @@ final class LibraryStore: ObservableObject {
                                               smartPlaylists: smartPlaylists,
                                               networkSources: networkConfiguration()))
             }
-            syncStatus = "上次同步：\(Date().formatted(date: .abbreviated, time: .shortened))"
+            syncStatus = String.lucentFormat("上次同步：%@", Date().lucentFormatted())
         } catch {
             syncStatus = "iCloud 同步失败：\(error.localizedDescription)"
         }
@@ -3104,7 +3086,7 @@ extension LibraryStore {
         fileSources.first { $0.storageID == storageID && ($0.directoryID == directory.identifier || LibraryScopePath.overlaps($0.path, directory.path)) }
     }
 
-    func importDirectories(storageID: UUID, directories: [(StorageDirectory, String)], scanImmediately: Bool) throws {
+    func importDirectories(storageID: UUID, directories: [(StorageDirectory, String)], scanImmediately: Bool) async throws {
         guard libraryStorages.contains(where: { $0.id == storageID }), !directories.isEmpty else { throw LibraryScopeError.unavailable }
         var additions: [LibraryFileSource] = []
         for (directory, name) in directories {
@@ -3117,7 +3099,7 @@ extension LibraryStore {
         let original = fileSources
         fileSources.append(contentsOf: additions)
         do {
-            if let database { try database.save(snapshot()) }
+            if let database { try await database.saveAsync(snapshot()) }
             else { try JSONEncoder().encode(snapshot()).write(to: fileURL, options: .atomic) }
         } catch { fileSources = original; throw error }
         if scanImmediately { for source in additions { scanFileScope(source.id) } }
@@ -3238,8 +3220,7 @@ extension LibraryStore {
     func stopFileScopeScan(_ id: UUID) { cancelScopeScan(id); save(); pumpScopeScans() }
 
     private func cancelScopeScan(_ id: UUID) {
-        pendingScopeScans.removeAll { $0 == id }
-        scopeScanTasks[id]?.cancel()
+        scanCoordinator.cancel(id)
         scopeScanStates[id] = "已停止"
     }
 
@@ -3253,38 +3234,34 @@ extension LibraryStore {
         pumpScopeScans()
     }
 
+    private func updateScanProgress(id: UUID, count: Int) {
+        scopeScanStates[id] = "已发现 \(count) 个视频"
+    }
+
     private func pumpScopeScans() {
         pendingScopeScans.removeAll { id in !fileSources.contains { $0.id == id && $0.enabled && !$0.needsConfirmation } }
         let occupied = Set(fileSources.filter { scopeScanTasks[$0.id] != nil }.map(\.storageID))
-        guard scopeScanTasks.count < 2,
+        guard scopeScanTasks.count < scanCoordinator.concurrency,
               let next = pendingScopeScans.firstIndex(where: { id in
                   fileSources.contains { $0.id == id && $0.enabled && !occupied.contains($0.storageID) }
               }) else { return }
         let id = pendingScopeScans.remove(at: next)
         guard let scope = fileSources.first(where: { $0.id == id }) else { return }
         scopeScanStates[id] = "正在读取目录"
-        scopeScanTasks[id] = Task {
+        scopeScanTasks[id] = Task { [self] in
             defer {
                 scopeScanTasks.removeValue(forKey: id)
                 save()
                 pumpScopeScans()
             }
             do {
-                var directories = [StorageDirectory(identifier: scope.directoryID, name: scope.name, path: scope.path, isDirectory: true)]
-                var visited = Set<String>()
-                var files: [StorageDirectory] = []
-                while !directories.isEmpty {
-                    try Task.checkCancellation()
-                    let current = directories.removeFirst()
-                    guard visited.insert(current.identifier).inserted else { continue }
-                    let entries = try await storageContents(scope.storageID, directory: current)
-                    for entry in entries {
-                        if entry.isDirectory { directories.append(entry) }
-                        else { files.append(entry) }
-                    }
-                    if files.count + visited.count + directories.count > 50_000 { throw LibraryScopeError.limit }
-                    scopeScanStates[id] = "已发现 \(files.count) 个视频"
-                }
+                let root = StorageDirectory(identifier: scope.directoryID, name: scope.name, path: scope.path, isDirectory: true)
+                let files = try await LibraryScanCoordinator.discover(root: root, read: { [weak self] current in
+                    guard let self else { throw CancellationError() }
+                    return try await self.storageContents(scope.storageID, directory: current)
+                }, progress: { [weak self] count in
+                    await self?.updateScanProgress(id: id, count: count)
+                })
                 try Task.checkCancellation()
                 guard let index = fileSources.firstIndex(where: { $0.id == id && $0.enabled }) else { return }
                 // Reconciliation starts only after a complete successful traversal.
@@ -3433,7 +3410,7 @@ extension LibraryStore {
             catalogProcessingStatus = "请切换到主用户后重试获取影片资料"
             return
         }
-        if metadataDrainTask != nil || enrichingMetadata {
+        if metadataCoordinator.isRunning || enrichingMetadata {
             metadataRetryRequested = true
             catalogProcessingStatus = "已安排重试，将在当前批次结束后重新获取未完成的资料"
         } else {
@@ -3453,15 +3430,6 @@ extension LibraryStore {
         save()
     }
 
-    var localCatalogCards: [MediaItem] {
-        Dictionary(grouping: localLibraryItems.filter { $0.missingSince == nil && $0.metadata != nil }, by: \.catalogGroupID)
-            .values.compactMap { group in
-                group.sorted {
-                    if $0.isInProgress != $1.isInProgress { return $0.isInProgress }
-                    if $0.isInProgress { return ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
-                    return ($0.identity?.episodeSortOrder ?? 0) < ($1.identity?.episodeSortOrder ?? 0)
-                }.first
-            }.sorted { $0.addedAt > $1.addedAt }
-    }
+    var localCatalogCards: [MediaItem] { LocalCatalogIndex(files: localLibraryItems).cards }
 
 }

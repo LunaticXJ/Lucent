@@ -25,17 +25,6 @@ enum DolbyVisionSupport {
         return ["mp4", "m4v", "mov", "m3u8"].contains(container.lowercased())
     }
 
-    static func assetHasDolbyVision(_ asset: AVAsset) async -> Bool {
-        guard let tracks = try? await asset.loadTracks(withMediaType: .video) else { return false }
-        for track in tracks {
-            guard let descriptions = try? await track.load(.formatDescriptions) else { continue }
-            for description in descriptions {
-                if formatHasDolbyVision(description) { return true }
-            }
-        }
-        return false
-    }
-
     static func formatHasDolbyVision(_ description: CMFormatDescription) -> Bool {
         let subtype = CMFormatDescriptionGetMediaSubType(description)
         let fourCC = String(bytes: [UInt8((subtype >> 24) & 0xff), UInt8((subtype >> 16) & 0xff),

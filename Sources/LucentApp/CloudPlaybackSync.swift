@@ -14,14 +14,14 @@ struct CloudPlaybackState: Sendable {
     let collectionNames: [String]?
 }
 
-struct CloudLibraryConfiguration {
+struct CloudLibraryConfiguration: Sendable {
     let updatedAt: Date
     let collectionNames: [String]
     let smartPlaylists: [SmartPlaylist]
     let networkSources: NetworkSourceConfiguration?
 }
 
-struct NetworkSourceConfiguration: Codable, Equatable {
+struct NetworkSourceConfiguration: Codable, Equatable, Sendable {
     var smb: [SMBSource]
     var webDAV: [WebDAVSource]
     var jellyfin: [JellyfinSource]
@@ -36,37 +36,50 @@ enum CloudPlaybackSync {
     private static let recordType = "LucentPlaybackState"
     private static let configurationRecordType = "LucentLibraryConfiguration"
 
+    private static func withSyncDatabase<R: Sendable>(
+        _ body: @MainActor @Sendable (CKDatabase) async throws -> R
+    ) async throws -> R {
+        let configuration = CKOperation.Configuration()
+        configuration.allowsCellularAccess = NetworkUsagePolicy.allowsSync
+        return try await CKContainer.default().privateCloudDatabase.configuredWith(configuration: configuration) { database in
+            try await body(database)
+        }
+    }
+
     static func fetchConfiguration() async throws -> CloudLibraryConfiguration? {
-        let id = CKRecord.ID(recordName: "library")
-        let record: CKRecord
-        do { record = try await CKContainer.default().privateCloudDatabase.record(for: id) }
-        catch let error as CKError where error.code == .unknownItem { return nil }
-        guard let updatedAt = record["updatedAt"] as? Date,
-              let collectionNames = record["collectionNames"] as? [String] else { return nil }
-        let playlists = (record["smartPlaylists"] as? Data)
-            .flatMap { try? JSONDecoder().decode([SmartPlaylist].self, from: $0) } ?? []
-        let networkSources = (record["networkSources"] as? Data)
-            .flatMap { try? JSONDecoder().decode(NetworkSourceConfiguration.self, from: $0) }
-        return CloudLibraryConfiguration(updatedAt: updatedAt,
-                                         collectionNames: collectionNames,
-                                         smartPlaylists: playlists,
-                                         networkSources: networkSources)
+        return try await withSyncDatabase { database in
+            let id = CKRecord.ID(recordName: "library")
+            let record: CKRecord
+            do { record = try await database.record(for: id) }
+            catch let error as CKError where error.code == .unknownItem { return nil }
+            guard let updatedAt = record["updatedAt"] as? Date,
+                  let collectionNames = record["collectionNames"] as? [String] else { return nil }
+            let playlists = (record["smartPlaylists"] as? Data)
+                .flatMap { try? JSONDecoder().decode([SmartPlaylist].self, from: $0) } ?? []
+            let networkSources = (record["networkSources"] as? Data)
+                .flatMap { try? JSONDecoder().decode(NetworkSourceConfiguration.self, from: $0) }
+            return CloudLibraryConfiguration(updatedAt: updatedAt,
+                                             collectionNames: collectionNames,
+                                             smartPlaylists: playlists,
+                                             networkSources: networkSources)
+        }
     }
 
     static func saveConfiguration(_ configuration: CloudLibraryConfiguration) async throws {
-        let database = CKContainer.default().privateCloudDatabase
-        let id = CKRecord.ID(recordName: "library")
-        let record = (try? await database.record(for: id)) ??
-            CKRecord(recordType: configurationRecordType, recordID: id)
-        if let remoteDate = record["updatedAt"] as? Date,
-           remoteDate > configuration.updatedAt { return }
-        record["updatedAt"] = configuration.updatedAt
-        record["collectionNames"] = configuration.collectionNames as NSArray
-        record["smartPlaylists"] = try JSONEncoder().encode(configuration.smartPlaylists)
-        if let networkSources = configuration.networkSources {
-            record["networkSources"] = try JSONEncoder().encode(networkSources)
+        try await withSyncDatabase { database in
+            let id = CKRecord.ID(recordName: "library")
+            let record = (try? await database.record(for: id)) ??
+                CKRecord(recordType: configurationRecordType, recordID: id)
+            if let remoteDate = record["updatedAt"] as? Date,
+               remoteDate > configuration.updatedAt { return }
+            record["updatedAt"] = configuration.updatedAt
+            record["collectionNames"] = configuration.collectionNames as NSArray
+            record["smartPlaylists"] = try JSONEncoder().encode(configuration.smartPlaylists)
+            if let networkSources = configuration.networkSources {
+                record["networkSources"] = try JSONEncoder().encode(networkSources)
+            }
+            _ = try await database.save(record)
         }
-        _ = try await database.save(record)
     }
 
     static func key(for item: MediaItem, library: LibraryStore) -> String? {
@@ -103,29 +116,31 @@ enum CloudPlaybackSync {
     }
 
     static func fetchAll() async throws -> [String: CloudPlaybackState] {
-        let database = CKContainer.default().privateCloudDatabase
-        let query = CKQuery(recordType: recordType, predicate: NSPredicate(value: true))
-        var page = try await database.records(matching: query, resultsLimit: 200)
-        var states: [String: CloudPlaybackState] = [:]
-        while true {
-            for (_, result) in page.matchResults {
-                if case .success(let record) = result, let state = decode(record) {
-                    states[state.key] = state
+        return try await withSyncDatabase { database in
+            let query = CKQuery(recordType: recordType, predicate: NSPredicate(value: true))
+            var page = try await database.records(matching: query, resultsLimit: 200)
+            var states: [String: CloudPlaybackState] = [:]
+            while true {
+                for (_, result) in page.matchResults {
+                    if case .success(let record) = result, let state = decode(record) {
+                        states[state.key] = state
+                    }
                 }
+                guard let cursor = page.queryCursor else { break }
+                page = try await database.records(continuingMatchFrom: cursor, resultsLimit: 200)
             }
-            guard let cursor = page.queryCursor else { break }
-            page = try await database.records(continuingMatchFrom: cursor, resultsLimit: 200)
+            return states
         }
-        return states
     }
 
     static func save(_ state: CloudPlaybackState) async throws {
-        let database = CKContainer.default().privateCloudDatabase
-        let id = CKRecord.ID(recordName: state.key)
-        let record = (try? await database.record(for: id)) ?? CKRecord(recordType: recordType, recordID: id)
-        if let remoteDate = record["updatedAt"] as? Date, remoteDate > state.updatedAt { return }
-        try fill(record, state: state)
-        _ = try await database.save(record)
+        try await withSyncDatabase { database in
+            let id = CKRecord.ID(recordName: state.key)
+            let record = (try? await database.record(for: id)) ?? CKRecord(recordType: recordType, recordID: id)
+            if let remoteDate = record["updatedAt"] as? Date, remoteDate > state.updatedAt { return }
+            try fill(record, state: state)
+            _ = try await database.save(record)
+        }
     }
 
     static func saveMany(_ states: [CloudPlaybackState]) async throws {

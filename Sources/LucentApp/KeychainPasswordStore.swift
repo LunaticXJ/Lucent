@@ -133,6 +133,14 @@ enum KeychainPasswordStore {
         removeSecret(service: "com.lucent.app.cloud-client-secret", account: id.uuidString)
     }
 
+    static func playbackServiceSecret(_ key: String) throws -> String? {
+        try getSecret(service: "com.lucent.app.playback-services", account: key)
+    }
+
+    static func setPlaybackServiceSecret(_ value: String, key: String) throws {
+        try setSecret(value, service: "com.lucent.app.playback-services", account: key)
+    }
+
     static func setOpenSubtitlesAPIKey(_ value: String) throws {
         try setSecret(value, service: "com.lucent.app.subtitles", account: "opensubtitles-api-key")
     }

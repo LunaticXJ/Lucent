@@ -42,6 +42,11 @@ final class MPVPlaybackEngine {
         guard let handle = mpv_create() else { return nil }
         self.handle = handle
         mpv_set_option_string(handle, "config", "no")
+        let languages = LocalizationPreferences.current
+        mpv_set_option_string(handle, "slang", languages.subtitleTrackLanguages.joined(separator: ","))
+        if !languages.audioTrackLanguages.isEmpty {
+            mpv_set_option_string(handle, "alang", languages.audioTrackLanguages.joined(separator: ","))
+        }
         #if os(iOS) || os(tvOS)
         // On Apple's mobile AO this only selects non-mixing AVAudioSession
         // options (not desktop device hog mode). Match AVKit's playback policy
@@ -276,6 +281,12 @@ final class MPVPlaybackEngine {
             rows.append(row)
         }
         return try? JSONSerialization.data(withJSONObject:rows)
+    }
+    var chapters: [PlaybackChapter] {
+        (0..<max(0, min(1000, Int(intProperty("chapter-list/count") ?? 0)))).compactMap { index in
+            guard let time = doubleProperty("chapter-list/\(index)/time"), time.isFinite else { return nil }
+            return PlaybackChapter(index: index, title: stringProperty("chapter-list/\(index)/title") ?? "Chapter \(index + 1)", start: time)
+        }
     }
     var diagnosticState: String {
         "time=\(time) duration=\(duration) paused=\(isPaused) parked=\(isParked) seeking=\(isSeeking) buffering=\(isBuffering) volume=\(doubleProperty("volume") ?? -1) mute=\(flagProperty("mute") ?? -1) ao=\(stringProperty("current-ao") ?? "none") video=\(hasVideoOutput) error=\(playbackError ?? "none")"

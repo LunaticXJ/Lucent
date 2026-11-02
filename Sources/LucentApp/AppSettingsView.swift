@@ -1,25 +1,16 @@
-#if os(iOS)
 import SwiftUI
 
-enum MobileSettingsAction {
+enum AppSettingsAction {
     case profiles, trakt, enrichMetadata, purgeMissing
 }
 
-private struct LucentSettingsPageStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .scrollContentBackground(.hidden)
-            .background(Color(uiColor: .systemGroupedBackground))
-            .tint(.gray)
-            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.16, green: 0.72, blue: 0.39)))
-    }
-}
 
-struct MobileSettingsView: View {
+
+struct AppSettingsView: View {
     @EnvironmentObject private var library: LibraryStore
     @Binding var sortSelection: String
     @Binding var filterSelection: String
-    let onAction: (MobileSettingsAction) -> Void
+    let onAction: (AppSettingsAction) -> Void
     let onSelectProfile: (UUID) -> Void
     @AppStorage("lucent.library.autoScanInterval") private var autoScanInterval = 86_400.0
     @AppStorage("lucent.appearance.theme") private var appearance = "system"
@@ -31,6 +22,7 @@ struct MobileSettingsView: View {
     @AppStorage("lucent.subtitleFontScale") private var subtitleFontScale = 1.0
     @AppStorage("lucent.subtitleBackgroundOpacity") private var subtitleBackgroundOpacity = 0.6
     @AppStorage("lucent.player.controlsAutoHideDelay") private var controlsAutoHideDelay = 3.0
+    @AppStorage("lucent.player.seekPreview") private var seekPreviewEnabled = true
     @AppStorage("lucent.player.seekInterval") private var seekInterval = 10.0
     @AppStorage("lucent.player.showRemainingTime") private var showRemainingTime = false
     @AppStorage("lucent.player.videoScaleMode") private var videoScaleMode = VideoScaleMode.fit.rawValue
@@ -38,6 +30,8 @@ struct MobileSettingsView: View {
     @State private var metadataTokenConfigured = false
     @State private var metadataTokenStatus: String?
     @State private var matchingItem: MediaItem?
+    @AppStorage(NetworkUsagePolicy.syncKey) private var cellularSync = false
+    @AppStorage(NetworkUsagePolicy.downloadKey) private var cellularDownloads = false
 
     private var unmatchedItems: [MediaItem] {
         library.localLibraryItems.filter { $0.metadata == nil && $0.missingSince == nil }
@@ -48,52 +42,64 @@ struct MobileSettingsView: View {
         !library.scanningWebDAVSources.isEmpty || !library.scanningCloudSources.isEmpty
     }
 
-    private var appearanceTitle: String {
-        switch appearance {
-        case "dark": "深色"
-        case "light": "浅色"
-        default: "跟随系统"
-        }
-    }
-
     var body: some View {
         Form {
             Section("观看体验") {
+                NavigationLink { LocalizationSettingsView() } label: {
+                    settingsRow("语言与地区", icon: "globe")
+                }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 NavigationLink { appearancePage } label: {
                     settingsRow("外观与首页", icon: "circle.lefthalf.filled")
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 NavigationLink { playbackPage } label: {
                     settingsRow("播放", icon: "play.rectangle")
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 NavigationLink { subtitlePage } label: {
                     settingsRow("字幕", icon: "captions.bubble")
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                NavigationLink { PlaybackServicesView() } label: {
+                    settingsRow("字幕与弹幕服务", icon: "text.bubble")
+                }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             }
             Section("内容与存储") {
+                NavigationLink { cellularNetworkPage } label: {
+                    settingsRow("移动网络", icon: "antenna.radiowaves.left.and.right")
+                }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 NavigationLink { libraryPage } label: {
                     settingsRow("聚合媒体库", icon: "rectangle.stack")
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 NavigationLink { CacheSettingsView(embedded: true) } label: {
                     settingsRow("缓存与存储", icon: "internaldrive")
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 NavigationLink { metadataPage } label: {
                     settingsRow("在线元数据", icon: "photo.on.rectangle.angled")
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             }
             Section("账户与同步") {
                 NavigationLink { profilesPage } label: {
                     settingsRow("观看资料", icon: "person.crop.circle")
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 if library.activeProfile?.isChild != true {
                     NavigationLink { syncPage } label: {
                         settingsRow("同步与服务", icon: "arrow.triangle.2.circlepath")
                     }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 }
             }
         }
         .modifier(LucentSettingsPageStyle())
         .navigationTitle("设置")
-        .navigationBarTitleDisplayMode(.large)
+        .lucentNavigationTitleStyle()
         .onAppear {
             metadataTokenConfigured = !((try? KeychainPasswordStore.metadataToken()) ?? "").isEmpty
         }
@@ -103,24 +109,13 @@ struct MobileSettingsView: View {
     }
 
     private func settingsRow(_ title: String, icon: String) -> some View {
-        HStack(spacing: 13) {
-            Image(systemName: icon).font(.system(size: 19, weight: .medium))
-                .foregroundStyle(.primary)
-                .frame(width: 38, height: 38)
-                .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 11))
-                .accessibilityHidden(true)
-            Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(.primary)
-            Spacer(minLength: 6)
-
-        }
-        .padding(.vertical, 7)
-        .contentShape(Rectangle())
+        LucentSettingsRow(title: title, icon: icon)
     }
 
     private func settingsPage<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         Form(content: content)
             .modifier(LucentSettingsPageStyle())
-            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(LocalizedStringKey(title)).lucentNavigationTitleStyle()
     }
 
     private var appearancePage: some View {
@@ -135,7 +130,9 @@ struct MobileSettingsView: View {
             } header: { Text("外观") }
             Section("首页") {
                 Toggle("自动轮播海报", isOn: $heroAutoplay)
+                #if os(iOS)
                 Toggle("滚动时收起底栏", isOn: $collapseDock)
+                #endif
             }
         }
     }
@@ -143,9 +140,14 @@ struct MobileSettingsView: View {
     private var playbackPage: some View {
         settingsPage("播放") {
             Section {
+                Toggle("播放光盘转场", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "lucent.playback.discTransition") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "lucent.playback.discTransition") }))
+            }
+            Section {
                 Picker("默认播放内核", selection: $playbackEngine) {
                     ForEach(PlaybackEnginePreference.allCases, id: \.rawValue) { engine in
-                        Text(engine.title).tag(engine.rawValue)
+                        Text(LocalizedStringKey(engine.title)).tag(engine.rawValue)
                     }
                 }
                 .pickerStyle(.menu)
@@ -153,6 +155,13 @@ struct MobileSettingsView: View {
                 Text("自动选择优先使用原生内核。")
             }
             Section("播放控制") {
+                #if os(iOS)
+                NavigationLink("播放手势") { PlaybackGestureSettings() }
+                #else
+                NavigationLink("播放控制") { NativePlaybackInputSettings() }
+                #endif
+                NavigationLink("进度记忆") { PlaybackProgressSettings() }
+                Toggle("拖动进度预览", isOn: $seekPreviewEnabled)
                 Picker("自动隐藏控制栏", selection: $controlsAutoHideDelay) {
                     Text("3 秒").tag(3.0)
                     Text("5 秒").tag(5.0)
@@ -171,7 +180,7 @@ struct MobileSettingsView: View {
             Section {
                 Picker("画面缩放", selection: $videoScaleMode) {
                     ForEach(VideoScaleMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.title).tag(mode.rawValue)
+                        Text(LocalizedStringKey(mode.title)).tag(mode.rawValue)
                     }
                 }
                 .pickerStyle(.menu)
@@ -215,7 +224,7 @@ struct MobileSettingsView: View {
                         Spacer()
                         Text("\(Int((subtitleFontScale * 100).rounded()))%").foregroundStyle(.secondary).monospacedDigit()
                     }
-                    Slider(value: $subtitleFontScale, in: 0.75...1.5, step: 0.05)
+                    LucentValueSlider(value: $subtitleFontScale, range: 0.75...1.5, step: 0.05)
                         .accessibilityLabel("字幕字号")
                 }
                 .padding(.vertical, 6)
@@ -226,7 +235,7 @@ struct MobileSettingsView: View {
                         Text("\(Int((subtitleBackgroundOpacity * 100).rounded()))%")
                             .foregroundStyle(.secondary).monospacedDigit()
                     }
-                    Slider(value: $subtitleBackgroundOpacity, in: 0...0.85, step: 0.05)
+                    LucentValueSlider(value: $subtitleBackgroundOpacity, range: 0...0.85, step: 0.05)
                         .accessibilityLabel("字幕背景不透明度")
                 }
                 .padding(.vertical, 6)
@@ -244,7 +253,7 @@ struct MobileSettingsView: View {
                 LabeledContent("TMDB", value: metadataTokenConfigured ? "令牌已配置" : "尚未配置")
                 SecureField("API 密钥或读取令牌", text: $metadataTokenInput)
                     .textContentType(.password).privacySensitive()
-                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .autocorrectionDisabled().lucentTextInput()
                 Button("保存令牌") { saveMetadataToken() }
                     .foregroundStyle(.primary)
                     .disabled(metadataTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -305,7 +314,7 @@ struct MobileSettingsView: View {
                     LabeledContent("待匹配文件", value: "\(unmatchedItems.count)")
                     LabeledContent("已探测媒体", value: "\(library.localLibraryItems.filter { $0.technicalInfo != nil }.count)")
                     if let title = library.processingItemTitle { ProgressView("探测：\(title)").font(.caption) }
-                    if let status = library.catalogProcessingStatus { Text(status).font(.caption).foregroundStyle(.secondary) }
+                    if let status = library.catalogProcessingStatus { Text(LocalizedStringKey(status)).font(.caption).foregroundStyle(.secondary) }
                     Button("重试获取未完成的资料", systemImage: "arrow.triangle.2.circlepath") { library.retryLocalLibraryProcessing() }
                         .foregroundStyle(.primary)
                     if scanningSources { ProgressView("正在扫描文件源") }
@@ -362,6 +371,24 @@ struct MobileSettingsView: View {
         }
     }
 
+    private var cellularNetworkPage: some View {
+        settingsPage("移动网络") {
+            Section {
+                Toggle("允许移动网络同步", isOn: $cellularSync)
+                Toggle("允许移动网络下载", isOn: $cellularDownloads)
+            } footer: {
+                Text("关闭后，观看记录和收藏仅在 Wi-Fi 同步，影片下载仅使用 Wi-Fi。")
+            }
+            Section {
+                Label("移动网络播放前会询问", systemImage: "play.rectangle")
+            } footer: {
+                Text("从 Wi-Fi 切换到移动网络时也会询问。本地文件和已下载影片不受影响。")
+            }
+        }
+        .onChange(of: cellularSync) { _, _ in NetworkUsagePolicy.notifySettingsChanged() }
+        .onChange(of: cellularDownloads) { _, _ in NetworkUsagePolicy.notifySettingsChanged() }
+    }
+
     private var syncPage: some View {
         settingsPage("同步与服务") {
             Section("iCloud") {
@@ -370,7 +397,7 @@ struct MobileSettingsView: View {
                     .foregroundStyle(.primary)
                     .disabled(!library.iCloudSyncEnabled || library.syncing)
                 if let status = library.syncStatus {
-                    Text(status).font(.footnote).foregroundStyle(.secondary)
+                    Text(LocalizedStringKey(status)).font(.footnote).foregroundStyle(.secondary)
                 }
             }
             Section("Trakt") {
@@ -379,4 +406,3 @@ struct MobileSettingsView: View {
         }
     }
 }
-#endif

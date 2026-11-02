@@ -105,6 +105,62 @@ struct JellyfinItem: Decodable, Sendable {
     let providerIds: [String: String]?
     let preferredMetadataLanguage: String?
 
+    init(id: String,
+         name: String,
+         type: String,
+         isFolder: Bool? = nil,
+         mediaType: String? = nil,
+         seriesName: String? = nil,
+         seriesId: String? = nil,
+         genres: [String]? = nil,
+         people: [Person]? = nil,
+         parentIndexNumber: Int? = nil,
+         indexNumber: Int? = nil,
+         productionYear: Int? = nil,
+         premiereDate: String? = nil,
+         endDate: String? = nil,
+         communityRating: Double? = nil,
+         runTimeTicks: Int64? = nil,
+         userData: UserData? = nil,
+         overview: String? = nil,
+         imageTags: ImageTags? = nil,
+         path: String? = nil,
+         container: String? = nil,
+         mediaSources: [MediaSource]? = nil,
+         collectionType: String? = nil,
+         criticRating: Double? = nil,
+         officialRating: String? = nil,
+         providerIds: [String: String]? = nil,
+         preferredMetadataLanguage: String? = nil) {
+        self.id = id
+        self.name = name
+        self.type = type
+        self.isFolder = isFolder
+        self.mediaType = mediaType
+        self.seriesName = seriesName
+        self.seriesId = seriesId
+        self.genres = genres
+        self.people = people
+        self.parentIndexNumber = parentIndexNumber
+        self.indexNumber = indexNumber
+        self.productionYear = productionYear
+        self.premiereDate = premiereDate
+        self.endDate = endDate
+        self.communityRating = communityRating
+        self.runTimeTicks = runTimeTicks
+        self.userData = userData
+        self.overview = overview
+        self.imageTags = imageTags
+        self.path = path
+        self.container = container
+        self.mediaSources = mediaSources
+        self.collectionType = collectionType
+        self.criticRating = criticRating
+        self.officialRating = officialRating
+        self.providerIds = providerIds
+        self.preferredMetadataLanguage = preferredMetadataLanguage
+    }
+
     enum CodingKeys: String, CodingKey {
         case id = "Id", name = "Name", type = "Type"
         case isFolder = "IsFolder", mediaType = "MediaType"
@@ -168,10 +224,6 @@ enum JellyfinClient {
             case items = "Items"
             case totalRecordCount = "TotalRecordCount"
         }
-    }
-
-    static func currentUserID(baseAddress: String, token: String) async throws -> String {
-        try await currentUser(baseAddress: baseAddress, token: token).id
     }
 
     static func currentUser(baseAddress: String, token: String) async throws -> (id: String, name: String?) {
@@ -323,6 +375,7 @@ enum JellyfinClient {
                                       path: "UserItems/\(itemID)/UserData", token: token)
         var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "userId", value: source.userID)]
+        request.allowsCellularAccess = NetworkUsagePolicy.allowsSync
         request.url = components.url
         let current = try await fetch(request)
         var fields = (try JSONSerialization.jsonObject(with: current)) as? [String: Any] ?? [:]
@@ -344,6 +397,8 @@ enum JellyfinClient {
     }
 
     private static func fetch(_ request: URLRequest) async throws -> Data {
+        var request = request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse,
               (200..<300).contains(response.statusCode) else { throw JellyfinError.requestFailed }

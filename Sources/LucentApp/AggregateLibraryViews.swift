@@ -1,12 +1,4 @@
-#if os(iOS)
 import SwiftUI
-
-private struct LibraryGlass: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26, *) { content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22)) }
-        else { content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)) }
-    }
-}
 
 struct AggregateLibraryOverview: View {
     @EnvironmentObject private var library: LibraryStore
@@ -20,16 +12,6 @@ struct AggregateLibraryOverview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             dashboard
-            Button(action: manageStorage) {
-                HStack(spacing: 14) {
-                    Image(systemName: "externaldrive.connected.to.line.below").font(.title2)
-                    Text("存储").font(.headline)
-                    Spacer()
-                    Text(library.libraryStorages.count.formatted())
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-                }.padding(18).contentShape(Rectangle())
-            }.buttonStyle(.plain).modifier(LibraryGlass())
             HStack {
                 Text("文件源").font(.title3.bold())
                 Spacer()
@@ -39,7 +21,7 @@ struct AggregateLibraryOverview: View {
                 ContentUnavailableView {
                     Label("从目录建立媒体库", systemImage: "folder.badge.plus")
                 } description: {
-                    Text(library.libraryStorages.isEmpty ? "先连接存储，再选择要加入的目录。" : "从存储中选择目录，扫描后即可在首页浏览。")
+                    Text(LocalizedStringKey(library.libraryStorages.isEmpty ? "先连接存储，再选择要加入的目录。" : "从存储中选择目录，扫描后即可在首页浏览。"))
                 } actions: {
                     Button(library.libraryStorages.isEmpty ? "添加存储" : "选择目录", action: manageStorage).buttonStyle(.bordered)
                 }
@@ -52,7 +34,7 @@ struct AggregateLibraryOverview: View {
                         }
                     }
                 }
-                .background(Color(uiColor: .secondarySystemGroupedBackground),
+                .background(LucentUI.panel,
                             in: RoundedRectangle(cornerRadius: 22))
                 .clipShape(RoundedRectangle(cornerRadius: 22))
             }
@@ -78,25 +60,31 @@ struct AggregateLibraryOverview: View {
         let matched = library.localCatalogCards
         let series = matched.filter { $0.identity?.seriesName != nil }.count
         let movies = matched.filter { $0.identity?.seriesName == nil }.count
-        let scanning = library.fileSources.filter { library.isScanningFileSource($0.id) }.count
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack {
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
                 metric("电影", movies); metric("剧集", series); metric("视频文件", items.count)
             }
-            Divider()
-            HStack(spacing: 7) {
-                Spacer(minLength: 0)
-                if scanning > 0 { ProgressView().controlSize(.mini) }
-                Text(scanning > 0 ? "\(scanning) 个文件源扫描中" :
-                    (library.fileSources.compactMap(\.lastScannedAt).max().map { "更新于 " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "等待导入并扫描目录"))
-
-            }.font(.caption2).foregroundStyle(.secondary)
-        }.padding(18).modifier(LibraryGlass())
+            .padding(.horizontal, 16).padding(.vertical, 14)
+            Divider().padding(.horizontal, 16)
+            Button(action: manageStorage) {
+                HStack(spacing: 11) {
+                    Image(systemName: "externaldrive.connected.to.line.below")
+                        .font(.system(size: 19)).frame(width: 26)
+                    Text("存储").font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text(library.libraryStorages.count.formatted(.number.locale(LocalizationPreferences.current.displayLocale)))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 18).frame(minHeight: 50)
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+        }.modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius)))
     }
     private func metric(_ title: String, _ value: Int) -> some View {
         VStack(alignment: .center, spacing: 5) {
-            Text(value.formatted()).font(.title2.bold()).monospacedDigit()
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value.formatted(.number.locale(LocalizationPreferences.current.displayLocale))).font(.title2.bold()).monospacedDigit()
+            Text(LocalizedStringKey(title)).font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .center)
     }
     private func sourceRow(_ source: LibraryFileSource) -> some View {
@@ -158,10 +146,10 @@ struct StorageManagementView: View {
             group("网盘", kinds: [.cloud])
             group("局域网媒体", kinds: [.dlna])
             if library.libraryStorages.isEmpty {
-                ContentUnavailableView("尚未添加存储", systemImage: "externaldrive.badge.plus", description: Text("添加本地文件夹、网络共享或网盘后选择目录。"))
+                LucentStateView(title: "尚未添加存储", symbol: "externaldrive.badge.plus", message: "添加本地文件夹、网络共享或网盘后选择目录。")
             }
         }
-        .navigationTitle("存储").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("存储").lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
             ToolbarItem(placement: .primaryAction) { Button(action: add) { Image(systemName: "plus") }.accessibilityLabel("添加存储") }
@@ -200,7 +188,7 @@ struct StorageManagementView: View {
                     .contextMenu {
                         Button("浏览与导入", systemImage: "folder") { browsing = storage }
                         Button("重命名", systemImage: "pencil") { renaming = storage; name = storage.name }
-                        if storage.kind != .dlna { Button("编辑连接", systemImage: "slider.horizontal.3") { edit(storage.id) } }
+                        if storage.kind != .dlna && storage.kind != .local { Button("编辑连接", systemImage: "slider.horizontal.3") { edit(storage.id) } }
                         Button("移除存储", systemImage: "trash", role: .destructive) { removing = storage }
                     }
                 }
@@ -226,11 +214,9 @@ struct StorageDirectoryBrowser: View {
     var body: some View {
         VStack(spacing: 0) {
             breadcrumbs
-            if loading { ProgressView("正在读取目录").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if loading { LucentLoadingView(title: "正在读取目录").frame(maxWidth: .infinity, maxHeight: .infinity) }
             else if let message {
-                ContentUnavailableView {
-                    Label("无法读取目录", systemImage: "wifi.exclamationmark")
-                } description: { Text(message) } actions: { Button("重试") { Task { await load() } } }
+                LucentStateView(title: "无法读取目录", symbol: "wifi.exclamationmark", message: message, actionTitle: "重试") { Task { await load() } }
             } else {
                 List {
                     if selectionMode {
@@ -245,12 +231,12 @@ struct StorageDirectoryBrowser: View {
                             }.disabled(selectionMode)
                         }
                     }
-                }.listStyle(.insetGrouped)
+                }.lucentDirectoryListStyle()
             }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(LucentUI.page)
         .navigationTitle(trail.isEmpty ? (root.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "存储") : root.name) : current.name)
-        .navigationBarTitleDisplayMode(.inline)
+        .lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
             ToolbarItem(placement: .primaryAction) { Button(selectionMode ? "取消选择" : "选择目录") { selectionMode.toggle(); if !selectionMode { selected = [] } } }
@@ -264,7 +250,7 @@ struct StorageDirectoryBrowser: View {
                     }
                     Spacer()
                     Button("下一步") { showingReview = true }.buttonStyle(.borderedProminent).tint(.gray).disabled(selected.isEmpty)
-                }.padding(16).modifier(LibraryGlass()).padding(12)
+                }.padding(16).modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))).padding(12)
             }
         }
         .task(id: current.identifier) { await load() }
@@ -275,7 +261,7 @@ struct StorageDirectoryBrowser: View {
                 }
             }.environmentObject(library)
         }
-        .fullScreenCover(item: $playing, onDismiss: { LucentOrientationDelegate.setPlaybackPresented(false) }) { item in
+        .discPlaybackCover(item: $playing) { item in
             PlaybackView(item: item).environmentObject(library)
         }
     }
@@ -309,7 +295,7 @@ struct StorageDirectoryBrowser: View {
                 HStack(spacing: 12) {
                     Image(systemName: "folder").font(.title3)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(currentRow ? "选择当前目录" : entry.name).foregroundStyle(.primary)
+                        Text(LocalizedStringKey(currentRow ? "选择当前目录" : entry.name)).foregroundStyle(.primary)
                         if let existing { Text("已导入：\(existing.name)").font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
@@ -341,7 +327,7 @@ struct StorageDirectoryBrowser: View {
     }
     private func play(_ entry: StorageDirectory) {
         guard let item = library.scannedStorageItem(storageID: storageID, entry: entry) else { return }
-        LucentOrientationDelegate.setPlaybackPresented(true); playing = item
+        playing = item
     }
 }
 
@@ -353,6 +339,7 @@ private struct DirectoryImportReview: View {
     let finished: () -> Void
     @State private var names: [String: String] = [:]
     @State private var scanImmediately = true
+    @State private var importing = false
     @State private var message: String?
     var body: some View {
         Form {
@@ -365,18 +352,22 @@ private struct DirectoryImportReview: View {
                 }
             }
             Section { Toggle("导入后立即扫描", isOn: $scanImmediately) } footer: { Text("扫描在后台任务中进行，你可以继续浏览。仅扫描选中的目录及其子目录。") }
-            if let message { Section { Text(message).foregroundStyle(.red) } }
+            if let message { Section { Text(LocalizedStringKey(message)).foregroundStyle(.red) } }
         }
-        .navigationTitle("导入文件源").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("导入文件源").lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("返回") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
                 Button("导入 \(directories.count) 个") {
+                    importing = true
+                    Task { @MainActor in
+                    defer { importing = false }
                     do {
-                        try library.importDirectories(storageID: storageID, directories: directories.map { ($0, names[$0.identifier] ?? defaultName($0)) }, scanImmediately: scanImmediately)
+                        try await library.importDirectories(storageID: storageID, directories: directories.map { ($0, names[$0.identifier] ?? defaultName($0)) }, scanImmediately: scanImmediately)
                         finished()
                     } catch { message = error.localizedDescription }
-                }.disabled(directories.contains { (names[$0.identifier] ?? defaultName($0)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                    }
+                }.disabled(importing || directories.contains { (names[$0.identifier] ?? defaultName($0)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
             }
         }
     }
@@ -384,4 +375,3 @@ private struct DirectoryImportReview: View {
         directory.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "全部目录") : directory.name
     }
 }
-#endif

@@ -18,11 +18,6 @@ enum PlaylistResolver {
         }
     }
 
-    static func firstPlayableURL(in file: URL) async throws -> URL {
-        guard let url = try entries(in: file).first?.url else { throw Error.empty }
-        return url
-    }
-
     static func entries(in file: URL) throws -> [Entry] {
         let data = try Data(contentsOf: file, options: .mappedIfSafe)
         return try parse(data, source: file)

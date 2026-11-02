@@ -11,7 +11,7 @@ diag = read('PlaybackDiagnostics.swift')
 features = diag[diag.index('struct PlaybackMediaFeatures:'):diag.index('enum MediaInfoLabels {')]
 collection = read('LocalCatalogCollectionView.swift')
 collection = collection[collection.index('enum LocalCatalogCollection:'):collection.index('struct LocalCatalogArtwork:')]
-source = '\n'.join([collection, read('AggregateLibraryModels.swift'), read('MediaItem.swift'), jelly, features,
+source = '\n'.join([read('PlaybackProgressPolicy.swift').split('import SwiftUI')[0], read('LocalizationPreferences.swift'), read('MediaCard.swift'), read('LocalCatalogIndex.swift'), collection, read('AggregateLibraryModels.swift'), read('MediaItem.swift'), jelly, features,
     'enum MediaInfoLabels { static func known(_ value: String?) -> String? { value } }',
     read('LocalLibraryCatalog.swift'), read('MediaNameParser.swift'), read('TMDBService.swift').replace('URLSession.shared','FixtureSession.shared')])
 source += r'''
@@ -93,6 +93,13 @@ final class Fixture: URLProtocol {
   item.addedAt = Date(timeIntervalSince1970: 1000)
   tv.addedAt = Date(timeIntervalSince1970: 500); tv.watched = true
   tv2.addedAt = Date(timeIntervalSince1970: 2000); tv2.watched = false; tv2.favorite = true
+  let card = MediaCard(local: tv, asSeries: true)
+  precondition(card.type == "Series" && card.rating == tv.metadata?.rating)
+  precondition(card.legacyPresentation.providerIds?["Tmdb"] == String(tv.metadata!.providerID))
+  let serverCard = MediaCard(server: card.legacyPresentation)
+  precondition(serverCard.id == card.id && serverCard.title == card.title)
+  let index = LocalCatalogIndex(files: [item, tv, tv2])
+  precondition(index.cards.count == 2 && index.groups[tv.catalogGroupID]?.count == 2)
   let cards = [item, tv]
   let files = [item, tv, tv2]
   precondition(LocalCatalogCollection.all.items(cards: cards, files: files).first?.catalogGroupID == tv.catalogGroupID)

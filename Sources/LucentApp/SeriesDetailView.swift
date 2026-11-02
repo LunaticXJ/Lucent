@@ -1,31 +1,8 @@
-#if os(iOS)
 import SwiftUI
-import UIKit
-
-private struct EpisodeGlassShape: ViewModifier {
-    let capsule: Bool
-
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            if capsule { content.glassEffect(.regular, in: Capsule()) }
-            else { content.glassEffect(.regular, in: Circle()) }
-        } else {
-            if capsule { content.background(.regularMaterial, in: Capsule()) }
-            else { content.background(.regularMaterial, in: Circle()) }
-        }
-    }
-}
 
 struct DetailSkeletonBlock: View {
     var cornerRadius: CGFloat = 12
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(LinearGradient(colors: [.white.opacity(0.07), .white.opacity(0.14),
-                                         .white.opacity(0.07)], startPoint: .topLeading,
-                                 endPoint: .bottomTrailing))
-            .accessibilityHidden(true)
-    }
+    var body: some View { LucentSkeleton(radius: cornerRadius) }
 }
 
 struct SeriesArtwork: View {
@@ -36,21 +13,21 @@ struct SeriesArtwork: View {
     let fallback: URL?
     var preferredURL: URL? = nil
     var maximumWidth: Int = 600
-    @State private var preferredImage: UIImage?
+    @State private var preferredImage: LucentPlatformImage?
     @State private var preferredFailed = false
-    @State private var image: UIImage?
-    @State private var localImage: UIImage?
+    @State private var image: LucentPlatformImage?
+    @State private var localImage: LucentPlatformImage?
 
     var body: some View {
         Group {
             if let preferredImage {
-                Image(uiImage: preferredImage).resizable().scaledToFill()
+                Image(lucentImage: preferredImage).resizable().scaledToFill()
             } else if preferredURL != nil && !preferredFailed {
                 DetailSkeletonBlock(cornerRadius: 0)
             } else if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                Image(lucentImage: image).resizable().scaledToFill()
             } else if let localImage {
-                Image(uiImage: localImage).resizable().scaledToFill()
+                Image(lucentImage: localImage).resizable().scaledToFill()
             } else if let fallback {
                 AsyncImage(url: fallback) { image in image.resizable().scaledToFill() }
                     placeholder: { DetailSkeletonBlock(cornerRadius: 0) }
@@ -62,7 +39,10 @@ struct SeriesArtwork: View {
         .task(id: fallback) {
             localImage = nil
             guard let fallback, fallback.isFileURL else { return }
-            localImage = UIImage(contentsOfFile: fallback.path)
+            guard let data = await Task.detached(priority: .utility, operation: { try? Data(contentsOf: fallback) }).value,
+                  !Task.isCancelled else { return }
+            let decoded = await ArtworkImageDecoder.image(data: data, key: "detail-file|\(fallback.path)", maximumPixelSize: maximumWidth)
+            guard !Task.isCancelled else { return }; localImage = decoded
         }
         .task(id: preferredURL) {
             preferredImage = nil
@@ -76,10 +56,11 @@ struct SeriesArtwork: View {
                         }
                         return data
                     }),
-                  !Task.isCancelled, let decoded = UIImage(data: data) else {
+                  !Task.isCancelled, let decoded = await ArtworkImageDecoder.image(data: data, key: "tmdb|\(preferredURL.absoluteString)", maximumPixelSize: 1600) else {
                 if !Task.isCancelled { preferredFailed = true }
                 return
             }
+            guard !Task.isCancelled else { return }
             preferredImage = decoded
         }
         .task(id: "\(baseAddress ?? "")|\(itemID ?? "")|\(backdrop)|\(preferredURL?.absoluteString ?? "")|\(preferredFailed)") {
@@ -102,7 +83,8 @@ struct SeriesArtwork: View {
                     }
                     return data
                 }),
-               let decoded = UIImage(data: data) {
+               let decoded = await ArtworkImageDecoder.image(data: data, key: "server|\(baseAddress)|\(itemID)|\(path)|\(maximumWidth)", maximumPixelSize: backdrop ? 1400 : maximumWidth) {
+                guard !Task.isCancelled else { return }
                 image = decoded
             } else if backdrop {
                 request.url = base.appendingPathComponent("Items")
@@ -115,7 +97,8 @@ struct SeriesArtwork: View {
                         }
                         return data
                     }) {
-                    image = UIImage(data: data)
+                    let decoded = await ArtworkImageDecoder.image(data: data, key: "server|\(baseAddress)|\(itemID)|Primary|\(maximumWidth)", maximumPixelSize: maximumWidth)
+                    guard !Task.isCancelled else { return }; image = decoded
                 }
             }
         }
@@ -125,12 +108,12 @@ struct SeriesArtwork: View {
 struct DetailTitleArtwork: View {
     let url: URL?
     let title: String
-    @State private var image: UIImage?
+    @State private var image: LucentPlatformImage?
     @State private var failed = false
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFit()
+                Image(lucentImage: image).resizable().scaledToFit()
                     .frame(maxWidth: 310, maxHeight: 125)
                     .accessibilityLabel(title)
             } else if url != nil && !failed {
@@ -155,16 +138,18 @@ struct DetailTitleArtwork: View {
                         throw URLError(.badServerResponse)
                     }
                     return data
-                }), !Task.isCancelled, let decoded = UIImage(data: data) else {
+                }), !Task.isCancelled, let decoded = await ArtworkImageDecoder.image(data: data, key: "tmdb|\(url.absoluteString)", maximumPixelSize: 1000) else {
                 if !Task.isCancelled { failed = true }
                 return
             }
+            guard !Task.isCancelled else { return }
             image = decoded
         }
     }
 }
 
 struct SeriesDetailView: View {
+    @Environment(\.contentLocalizationID) private var contentLocalizationID
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     let item: MediaItem
@@ -261,12 +246,6 @@ struct SeriesDetailView: View {
     private var activeVideo: JellyfinItem.MediaSource.Stream? {
         activeStreams.first { $0.type == "Video" }
     }
-    private var activeAudio: [JellyfinItem.MediaSource.Stream] {
-        activeStreams.filter { $0.type == "Audio" }
-    }
-    private var activeSubtitles: [JellyfinItem.MediaSource.Stream] {
-        activeStreams.filter { $0.type == "Subtitle" }
-    }
     private var seriesName: String { page?.series.name ?? item.identity?.seriesName ?? item.title }
     private var isSeriesEntry: Bool {
         if case .episode(_, _, let number, _) = item.identity { return number == 0 }
@@ -330,7 +309,7 @@ struct SeriesDetailView: View {
             }
             localEpisodesByID = indexed
         }
-        .task(id: "\(item.id)|\(item.metadata?.providerID ?? 0)") {
+        .task(id: "\(item.id)|\(item.metadata?.providerID ?? 0)|\(contentLocalizationID)") {
             artwork = nil
             artworkResolved = false
             artworkRetriedID = nil
@@ -343,7 +322,7 @@ struct SeriesDetailView: View {
             guard artworkResolved, artwork?.posterURL == nil, let remote = page?.series else { return }
             Task { await loadArtwork(remote: remote) }
         }
-        .fullScreenCover(isPresented: $showAllEpisodes) { allEpisodesSheet }
+        .lucentFullScreen(isPresented: $showAllEpisodes) { allEpisodesSheet }
         .sheet(item: $synopsisSheet) { synopsis in
             synopsisSheetView(synopsis)
         }
@@ -352,8 +331,7 @@ struct SeriesDetailView: View {
 
     private var topControls: some View {
                 HStack {
-                    Button { dismiss() } label: { Image(systemName: "chevron.left")
-                        .frame(width: 46, height: 46).background(.black.opacity(0.46), in: Circle()) }
+                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: .videoOverlay) { dismiss() }
                     Spacer()
                     Menu {
                         Button(item.watched ? "标记为未观看" : "标记为已看完") {
@@ -370,11 +348,11 @@ struct SeriesDetailView: View {
                         }
                         .disabled(isSeriesEntry && activeEpisode == nil)
                     } label: { Image(systemName: "ellipsis")
-                        .frame(width: 46, height: 46).background(.black.opacity(0.46), in: Circle()) }
+                        .frame(width: 46, height: 46).modifier(LucentGlass(shape: Circle(), role: .videoOverlay)) }
                 }
         .font(.title3.weight(.semibold))
         .foregroundStyle(.white)
-        .buttonStyle(.plain)
+        .lucentContentButtonStyle()
         .padding(.horizontal, 26)
     }
 
@@ -402,7 +380,7 @@ struct SeriesDetailView: View {
                 }
                 HStack(spacing: 7) {
                     if let rating = activeEpisode?.communityRating ?? page?.series.communityRating ?? item.metadata?.rating {
-                        Image(systemName: "star.fill").foregroundStyle(.white)
+                        Image(systemName: "star.fill").foregroundStyle(LucentUI.ratingTint)
                         Text(rating.formatted(.number.precision(.fractionLength(1))))
                     }
                     if let genres = page?.series.genres, !genres.isEmpty {
@@ -415,23 +393,8 @@ struct SeriesDetailView: View {
                     Text(details)
                         .font(.caption).foregroundStyle(.white.opacity(0.82))
                 }
-                Button { play(activeEpisode) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "play.fill")
-                        VStack(spacing: 1) {
-                            Text(activeIsInProgress ? "继续播放" : "开始播放")
-                                .font(.headline)
-                            if activeIsInProgress {
-                                Text("上次播放到：\(clock(activeProgressSeconds))")
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: 330).frame(height: 54)
-                    .foregroundStyle(.black).background(.white, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(loading || (isSeriesEntry && activeEpisode == nil))
+                LucentPlayButton(resumeTime: activeIsInProgress ? clock(activeProgressSeconds) : nil,
+                    enabled: !loading && (!isSeriesEntry || activeEpisode != nil)) { play(activeEpisode) }
                 HStack(spacing: 42) {
                     Button { library.toggleFavorite(id: item.id) } label: {
                         Image(systemName: item.isFavorite ? "heart.fill" : "heart")
@@ -465,7 +428,7 @@ struct SeriesDetailView: View {
 
     private var activeDisplayDate: String? {
         if let raw = activeEpisode?.premiereDate, raw.count >= 10 {
-            return String(raw.prefix(10)).replacingOccurrences(of: "-", with: "/")
+            return LocalizationPreferences.current.releaseDate(raw) ?? String(raw.prefix(10))
         }
         return nil
     }
@@ -483,32 +446,12 @@ struct SeriesDetailView: View {
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .lucentContentButtonStyle()
         .accessibilityHint("点按查看完整简介")
     }
 
     private func synopsisSheetView(_ synopsis: SynopsisSheet) -> some View {
-        NavigationStack {
-            ScrollView {
-                Text(synopsis.text)
-                    .font(.body)
-                    .lineSpacing(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(24)
-            }
-            .navigationTitle(synopsis.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭", systemImage: "xmark") { synopsisSheet = nil }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("复制") { UIPasteboard.general.string = synopsis.text }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .preferredColorScheme(.dark)
+        LucentSynopsisSheet(title: synopsis.title, text: synopsis.text) { synopsisSheet = nil }
     }
 
     private var episodeSection: some View {
@@ -606,7 +549,7 @@ struct SeriesDetailView: View {
                         .font(.subheadline.weight(.semibold)).lineLimit(2)
                 }
             }
-            .buttonStyle(.plain)
+            .lucentContentButtonStyle()
             if let summary = episode.overview, !summary.isEmpty {
                 synopsisPreview(summary, title: "第 \(episode.indexNumber ?? 0) 集简介", lines: 3,
                                 font: .caption, opacity: 0.65)
@@ -670,7 +613,7 @@ struct SeriesDetailView: View {
                         Image(systemName: "chevron.left")
                             .font(.title3.weight(.medium))
                             .frame(width: 48, height: 48)
-                            .modifier(EpisodeGlassShape(capsule: false))
+                            .modifier(LucentGlass(shape: Circle()))
                     }
                     .accessibilityLabel("返回剧集详情")
                     Spacer(minLength: 0)
@@ -678,20 +621,20 @@ struct SeriesDetailView: View {
                         Button("完成") { editingEpisodes = false; selectedEpisodeIDs.removeAll() }
                             .font(.subheadline.weight(.semibold))
                             .frame(width: 76, height: 48)
-                            .modifier(EpisodeGlassShape(capsule: true))
+                            .modifier(LucentGlass(shape: Capsule()))
                     } else {
                         Button { editingEpisodes = true } label: {
                             Image(systemName: "ellipsis")
                                 .font(.title3.weight(.semibold))
                                 .frame(width: 48, height: 48)
-                                .modifier(EpisodeGlassShape(capsule: false))
+                                .modifier(LucentGlass(shape: Circle()))
                         }
                         .accessibilityLabel("编辑剧集")
                     }
                 }
             }
             .foregroundStyle(.white)
-            .buttonStyle(.plain)
+            .lucentContentButtonStyle()
             .padding(.horizontal, 26)
             .padding(.top, 8)
             .padding(.bottom, 8)
@@ -704,10 +647,10 @@ struct SeriesDetailView: View {
                         }
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16).frame(height: 42)
-                        .modifier(EpisodeGlassShape(capsule: true))
+                        .modifier(LucentGlass(shape: Capsule()))
                     }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showSeasonPicker, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                    .lucentContentButtonStyle()
+                    .lucentSeasonPicker(isPresented: $showSeasonPicker) {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(seasons, id: \.self) { number in
                                 Button {
@@ -724,12 +667,12 @@ struct SeriesDetailView: View {
                                     .padding(.horizontal, 15).frame(height: 44)
                                     .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .lucentContentButtonStyle()
                             }
                         }
                         .padding(8)
                         .frame(width: 190)
-                        .presentationCompactAdaptation(.popover)
+
                     }
                     Spacer()
                     Text("\(seasonEpisodes.count) 集")
@@ -750,7 +693,7 @@ struct SeriesDetailView: View {
                         } label: {
                             fullEpisodeCard(episode)
                         }
-                        .buttonStyle(.plain)
+                        .lucentContentButtonStyle()
                     }
                 }
                 .padding(.horizontal, 20)
@@ -774,13 +717,13 @@ struct SeriesDetailView: View {
             }
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, 18).frame(height: 48)
-            .modifier(EpisodeGlassShape(capsule: true))
+            .modifier(LucentGlass(shape: Capsule()))
             Spacer(minLength: 0)
             Text("已选择 \(selectedEpisodeIDs.count) 项")
                 .font(.subheadline)
                 .monospacedDigit()
                 .padding(.horizontal, 16).frame(height: 48)
-                .modifier(EpisodeGlassShape(capsule: true))
+                .modifier(LucentGlass(shape: Capsule()))
             Spacer(minLength: 0)
             Menu {
                 Button("添加到收藏夹", systemImage: "star.fill") { batchEpisodes(.favorite) }
@@ -792,12 +735,12 @@ struct SeriesDetailView: View {
                 Image(systemName: "ellipsis")
                     .font(.title3.weight(.semibold))
                     .frame(width: 48, height: 48)
-                    .modifier(EpisodeGlassShape(capsule: false))
+                    .modifier(LucentGlass(shape: Circle()))
             }
             .disabled(selectedEpisodeIDs.isEmpty)
         }
         .foregroundStyle(.white)
-        .buttonStyle(.plain)
+        .lucentContentButtonStyle()
         .padding(.horizontal, 26)
         .padding(.bottom, 12)
     }
@@ -813,7 +756,7 @@ struct SeriesDetailView: View {
                     if editingEpisodes {
                         Image(systemName: selectedEpisodeIDs.contains(episode.id) ? "checkmark.square.fill" : "square")
                             .font(.title3.weight(.medium))
-                            .foregroundStyle(selectedEpisodeIDs.contains(episode.id) ? .green : .white)
+                            .foregroundStyle(selectedEpisodeIDs.contains(episode.id) ? LucentUI.selectionTint : .white)
                             .padding(10)
                     }
                 }
@@ -826,14 +769,11 @@ struct SeriesDetailView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if let rating = episode.communityRating {
-                        Text(rating.formatted(.number.precision(.fractionLength(1))))
-                            .font(.caption.bold()).foregroundStyle(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(.black.opacity(0.65), in: UnevenRoundedRectangle(topLeadingRadius: 9))
+                        LucentRatingBadge(rating: rating).padding(5)
                     }
                 }
                 .overlay(RoundedRectangle(cornerRadius: 13)
-                    .strokeBorder(selectedEpisodeIDs.contains(episode.id) ? .green :
+                    .strokeBorder(selectedEpisodeIDs.contains(episode.id) ? LucentUI.selectionTint :
                                   episode.id == activeEpisode?.id ? .white : .white.opacity(0.12),
                                   lineWidth: selectedEpisodeIDs.contains(episode.id) ||
                                   episode.id == activeEpisode?.id ? 2 : 0.5))
@@ -844,13 +784,23 @@ struct SeriesDetailView: View {
     }
 
     private func episodeWatched(_ episode: JellyfinItem) -> Bool {
-        if let local = localItem(for: episode) { return local.watched }
-        return episode.userData?.played == true
+        if let local = localItem(for: episode),
+           (local.stateUpdatedAt ?? .distantPast) >= (episode.remoteStateDate ?? .distantPast) {
+            return local.watched || PlaybackProgressPolicy.current.isCompleted(position: local.position, duration: local.duration)
+        }
+        return episode.userData?.played == true || PlaybackProgressPolicy.current.isCompleted(
+            position: Double(episode.userData?.playbackPositionTicks ?? 0) / 10_000_000,
+            duration: episode.runTimeTicks.map { Double($0) / 10_000_000 })
     }
 
     private func episodeProgressSeconds(_ episode: JellyfinItem) -> Double {
         let serverPosition = Double(episode.userData?.playbackPositionTicks ?? 0) / 10_000_000
-        return max(localItem(for: episode)?.position ?? 0, serverPosition)
+        if let local = localItem(for: episode),
+           (local.stateUpdatedAt ?? .distantPast) >= (episode.remoteStateDate ?? .distantPast) {
+            return local.resumePosition
+        }
+        return PlaybackProgressPolicy.current.resumePosition(position: serverPosition,
+            duration: episode.runTimeTicks.map { Double($0) / 10_000_000 }, watched: episode.userData?.played == true)
     }
 
     private enum EpisodeBatchAction { case favorite, unfavorite, watched, unwatched, download }
@@ -972,7 +922,7 @@ struct SeriesDetailView: View {
         let result = try? await TMDBService.detailArtwork(remote: remote,
             metadata: item.metadata, title: seriesName, television: true,
             language: TMDBService.deviceLanguage, token: token,
-            displayWidthPixels: Int(UIScreen.main.bounds.width * UIScreen.main.scale))
+            displayWidthPixels: LucentDisplay.maximumArtworkPixels)
         guard !Task.isCancelled else { return }
         if let result, result.posterURL != nil || artwork == nil { artwork = result }
         artworkResolved = true
@@ -1082,7 +1032,7 @@ struct DetailMediaMetadataPanel: View {
         return VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Image(systemName: kind == "Video" ? "video" : kind == "Audio" ? "speaker.wave.2" : "captions.bubble")
-                Text(kind == "Video" ? "视频" : kind == "Audio" ? "音频" : "字幕")
+                Text(LocalizedStringKey(kind == "Video" ? "视频" : kind == "Audio" ? "音频" : "字幕"))
                 Spacer()
                 if stream.isDefault == true { Image(systemName: "checkmark") }
             }
@@ -1093,11 +1043,11 @@ struct DetailMediaMetadataPanel: View {
             if let width = stream.width, let height = stream.height {
                 metadataRow("分辨率", "\(width)×\(height)")
             }
-            if let rate = stream.averageFrameRate { metadataRow("帧率", rate.formatted()) }
+            if let rate = stream.averageFrameRate { metadataRow("帧率", rate.formatted(.number.locale(LocalizationPreferences.current.displayLocale))) }
             if let rate = stream.bitRate { metadataRow("比特率", "\(rate / 1000) kbps") }
             metadataRow("动态范围", stream.videoRangeType)
             metadataRow("配置", stream.profile)
-            if let level = stream.level { metadataRow("等级", level.formatted()) }
+            if let level = stream.level { metadataRow("等级", level.formatted(.number.locale(LocalizationPreferences.current.displayLocale))) }
             metadataRow("长宽比", stream.aspectRatio)
             if let channels = stream.channels { metadataRow("声道", "\(channels)") }
             metadataRow("布局", stream.channelLayout)
@@ -1119,12 +1069,11 @@ struct DetailMediaMetadataPanel: View {
     @ViewBuilder private func metadataRow(_ label: String, _ value: String?) -> some View {
         if let value, !value.isEmpty {
             HStack(alignment: .top, spacing: 9) {
-                Text(label).foregroundStyle(.white.opacity(0.9)).frame(width: 52, alignment: .leading)
-                Text(value).foregroundStyle(.white.opacity(0.62)).lineLimit(2)
+                Text(LocalizedStringKey(label)).foregroundStyle(.white.opacity(0.9)).frame(width: 72, alignment: .leading)
+                Text(label == "语言" ? LocalizationPreferences.current.displayLocale.localizedString(forLanguageCode: value) ?? value : (value == "是" || value == "否" ? value.lucentLocalized : value)).foregroundStyle(.white.opacity(0.62)).lineLimit(2)
                 Spacer(minLength: 0)
             }
             .font(.caption)
         }
     }
 }
-#endif

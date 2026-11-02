@@ -162,6 +162,37 @@ struct PlexSource: Codable, Identifiable, Equatable, Sendable {
     var name: String { displayName.flatMap { $0.isEmpty ? nil : $0 } ?? (URL(string: baseAddress)?.host ?? baseAddress) }
 }
 
+/// NAS media services expose an Emby-compatible API; retain their identity separately
+/// from the transport so credentials, catalog IDs and playback remain source-scoped.
+enum EmbyServerKind: String, Codable, CaseIterable, Sendable {
+    case emby, fnos, zspace, ugreen
+    var title: String {
+        switch self {
+        case .emby: "Emby"
+        case .fnos: "飞牛私有云"
+        case .zspace: "极空间影视"
+        case .ugreen: "绿联云影视"
+        }
+    }
+    var assetName: String {
+        switch self {
+        case .emby: "EmbyBrand"
+        case .fnos: "FnOSBrand"
+        case .zspace: "ZSpaceBrand"
+        case .ugreen: "UGREENBrand"
+        }
+    }
+    var defaultPort: String {
+        switch self {
+        case .emby: "8096"
+        case .fnos: "8005"
+        case .zspace: "8021"
+        case .ugreen: "9443"
+        }
+    }
+    var usesHTTPS: Bool { self == .ugreen }
+}
+
 struct EmbySource: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var baseAddress: String
@@ -170,6 +201,8 @@ struct EmbySource: Codable, Identifiable, Equatable, Sendable {
     var displayName: String?
     var username: String?
     var usesTokenLogin: Bool?
+    var serverKind: EmbyServerKind?
+    var kind: EmbyServerKind { serverKind ?? .emby }
 
     init(baseAddress: String, userID: String) {
         id = UUID()
@@ -248,7 +281,7 @@ struct MediaCollection: Codable, Identifiable, Equatable {
     }
 }
 
-struct SmartPlaylist: Codable, Identifiable, Equatable {
+struct SmartPlaylist: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var name: String
     var titleContains: String
@@ -301,6 +334,7 @@ struct MediaMetadata: Codable, Equatable, Sendable {
     var originalLanguage: String? = nil
     var backdropPath: String? = nil
     var cast: [CatalogPerson]? = nil
+    var localizationKey: String? = nil
 
     var posterURL: URL? {
         guard let posterPath, posterPath.hasPrefix("/") else { return nil }
@@ -361,6 +395,7 @@ struct MediaItem: Codable, Identifiable, Equatable, Sendable {
     var serverFileExtension: String?
     var skipIntroEnd: Double?
     var skipCreditsStart: Double?
+    var skipCreditsDuration: Double? = nil
     var extraItemIDs: [UUID]?
     var personalRating: Int?
     var technicalInfo: LocalMediaTechnicalInfo? = nil
@@ -399,7 +434,10 @@ struct MediaItem: Codable, Identifiable, Equatable, Sendable {
     }
 
     var isFavorite: Bool { favorite == true }
-    var isInProgress: Bool { position > 30 && !watched }
+    var resumePosition: Double {
+        PlaybackProgressPolicy.current.resumePosition(position: position, duration: duration, watched: watched)
+    }
+    var isInProgress: Bool { resumePosition > 0 }
     var progress: Double {
         guard let duration, duration > 0 else { return 0 }
         return min(max(position / duration, 0), 1)

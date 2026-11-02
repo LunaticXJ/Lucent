@@ -67,7 +67,9 @@ struct LocalizationSettingsView: View {
             } header: { Text("语言") } footer: { Text("自动使用界面或系统首选语言。字幕和音轨偏好在下次起播时使用；播放中手动选择优先。") }
             Section("地区与日期") {
                 NavigationLink {
-                    LocaleChoiceList(title: "地区", selection: $region, automatic: "system", options: Locale.Region.isoRegions.map { ($0.identifier, locale.localizedString(forRegionCode: $0.identifier) ?? $0.identifier) })
+                    Group {
+                        LocaleChoiceList(title: "地区", selection: $region, automatic: "system", options: Locale.Region.isoRegions.map { ($0.identifier, locale.localizedString(forRegionCode: $0.identifier) ?? $0.identifier) })
+                    }.lucentSecondaryPage()
                 } label: { LabeledContent("地区", value: region == "system" ? String(localized: "跟随系统", locale: locale) : locale.localizedString(forRegionCode: region) ?? region) }
                 Picker("日期格式", selection: $dateOrder) {
                     Text("跟随地区").tag("system")
@@ -81,7 +83,9 @@ struct LocalizationSettingsView: View {
                     Text("24 小时制").tag("24")
                 }
                 NavigationLink {
-                    LocaleChoiceList(title: "时区", selection: $zone, automatic: "system", options: TimeZone.knownTimeZoneIdentifiers.map { ($0, (TimeZone(identifier: $0)?.localizedName(for: .standard, locale: locale) ?? $0) + " · " + $0) })
+                    Group {
+                        LocaleChoiceList(title: "时区", selection: $zone, automatic: "system", options: TimeZone.knownTimeZoneIdentifiers.map { ($0, (TimeZone(identifier: $0)?.localizedName(for: .standard, locale: locale) ?? $0) + " · " + $0) })
+                    }.lucentSecondaryPage()
                 } label: { LabeledContent("时区", value: zone == "system" ? String(localized: "跟随系统", locale: locale) : zone) }
                 LabeledContent("日期预览", value: LocalizationPreferences.current.formatted(Date()))
             }

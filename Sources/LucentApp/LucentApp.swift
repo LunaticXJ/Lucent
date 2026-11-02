@@ -13,8 +13,8 @@ final class LucentOrientationDelegate: NSObject, UIApplicationDelegate {
         Self.playbackIsPresented ? .landscape : Self.browsingOrientations
     }
 
-    static func setPlaybackPresented(_ presented: Bool) {
-        guard playbackIsPresented != presented else { return }
+    static func setPlaybackPresented(_ presented: Bool, forceUpdate: Bool = false) {
+        guard playbackIsPresented != presented || forceUpdate else { return }
         playbackIsPresented = presented
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {

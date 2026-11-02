@@ -80,7 +80,8 @@ struct LibraryView: View {
     @AppStorage("lucent.sources.selectedKind") private var mobileSourceKind = 1
     @State private var homeRefreshID = UUID()
     @State private var showSourceChooser = false
-    @State private var storageOnlyChooser = false
+    private enum SourceChooserScope { case servers, library, storage }
+    @State private var sourceChooserScope: SourceChooserScope = .library
     @State private var pendingSourceAddition: SourceAddition?
     @State private var pendingSourceRemoval: SourceRemoval?
     @State private var serverChecks: [UUID: ServerCheck] = [:]
@@ -377,7 +378,6 @@ struct LibraryView: View {
             }
         }
         .tint(.primary)
-        .toolbar(mobileDetailPresented ? .hidden : .visible, for: .tabBar)
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.movie, .video, .audiovisualContent, .item]) { result in
             switch result {
             case .success(let url): library.addFile(url)
@@ -482,7 +482,7 @@ struct LibraryView: View {
             Group {
                 let catalog = effectiveHomeCatalog
                 if catalog == "library" {
-                    MobileHomeView(showSources: { mobileTab = .sources }, localLibrary: true,
+                    MobileHomeView(showSources: { mobileSourceKind = 0; mobileTab = .sources }, localLibrary: true,
                                    onCollectionChange: { mobileLibraryCollectionPresented = $0 },
                                    refreshID: homeRefreshID, detailPresented: $mobileDetailPresented)
                 } else if catalog.hasPrefix("emby:") {
@@ -499,13 +499,8 @@ struct LibraryView: View {
             }
             .environmentObject(library)
             .toolbar(.hidden, for: .navigationBar)
-        }
-            .onChange(of: effectiveHomeCatalog) { _, _ in
-                mobileLibraryCollectionPresented = false
-                mobileDetailPresented = false
-            }
             .overlay(alignment: .topLeading) {
-                if !mobileDetailPresented && !mobileLibraryCollectionPresented && mobileTab == .home {
+                if mobileTab == .home {
                     Menu {
                         Picker("首页内容", selection: Binding(get: { effectiveHomeCatalog },
                                                         set: { selectedHomeCatalog = $0 })) {
@@ -544,6 +539,11 @@ struct LibraryView: View {
                     .padding(.leading, 20)
                     .padding(.top, 8)
                 }
+            }
+        }
+            .onChange(of: effectiveHomeCatalog) { _, _ in
+                mobileLibraryCollectionPresented = false
+                mobileDetailPresented = false
             }
     }
 
@@ -619,18 +619,18 @@ struct LibraryView: View {
     }
 
     private var mobileAddSourceMenu: some View {
-        Button { storageOnlyChooser = false; showSourceChooser = true } label: {
+        Button { sourceChooserScope = mobileSourceKind == 1 ? .servers : .library; showSourceChooser = true } label: {
             Image(systemName: "plus").font(.system(size: 19, weight: .semibold))
                 .frame(width: 44, height: 44).contentShape(Circle())
         }
-        .accessibilityLabel("添加片源")
+        .accessibilityLabel(mobileSourceKind == 1 ? "添加影视服务器" : "添加片源")
     }
 
     private var sourceChooser: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    if !storageOnlyChooser {
+                    if sourceChooserScope == .servers {
                         additionSection("影视服务器", detail: "直接使用服务器中的海报、分类和观看记录") {
                             additionRow("Emby", detail: "账户密码或访问令牌", brand: "EmbyBrand", icon: "server.rack", choice: .emby)
                             additionRow("Jellyfin", detail: "连接自己的影音服务器", brand: "JellyfinBrand", icon: "server.rack", choice: .jellyfin)
@@ -639,23 +639,27 @@ struct LibraryView: View {
                             additionRow("极空间影视", detail: "连接极影视媒体库", brand: "ZSpaceBrand", icon: "server.rack", choice: .zspace)
                             additionRow("绿联云影视", detail: "连接绿联影视中心", brand: "UGREENBrand", icon: "server.rack", choice: .ugreen)
                         }
+                    }
+                    if sourceChooserScope == .library {
                         additionSection("文件源", detail: "从已连接的存储选择目录，独立命名并扫描入库") {
                             additionRow("从存储导入目录", detail: "支持跨目录多选与批量命名", icon: "folder.badge.plus", choice: .importDirectories)
                         }
                     }
-                    additionSection("添加存储", detail: "仅建立连接，导入目录后才扫描入库") {
-                        additionRow("本地文件夹", detail: "选择“文件”App 中的目录", icon: "folder", choice: .folder)
-                        additionRow("SMB 共享", detail: "NAS、电脑与局域网共享", icon: "externaldrive", choice: .smb)
-                        additionRow("WebDAV", detail: "连接 WebDAV 存储服务", icon: "network", choice: .webDAV)
-                        additionRow("网盘", detail: "115、123、百度及其他已支持的网盘", icon: "cloud", choice: .cloud)
-                    }
-                    additionSection("局域网设备", detail: "连接 DLNA 设备并浏览真实目录") {
-                        additionRow("DLNA", detail: "发现或手动连接媒体设备", icon: "dot.radiowaves.left.and.right", choice: .dlna)
+                    if sourceChooserScope != .servers {
+                        additionSection("添加存储", detail: "仅建立连接，导入目录后才扫描入库") {
+                            additionRow("本地文件夹", detail: "选择“文件”App 中的目录", icon: "folder", choice: .folder)
+                            additionRow("SMB 共享", detail: "NAS、电脑与局域网共享", icon: "externaldrive", choice: .smb)
+                            additionRow("WebDAV", detail: "连接 WebDAV 存储服务", icon: "network", choice: .webDAV)
+                            additionRow("网盘", detail: "115、123、百度及其他已支持的网盘", icon: "cloud", choice: .cloud)
+                        }
+                        additionSection("局域网设备", detail: "连接 DLNA 设备并浏览真实目录") {
+                            additionRow("DLNA", detail: "发现或手动连接媒体设备", icon: "dot.radiowaves.left.and.right", choice: .dlna)
+                        }
                     }
                 }.padding(LucentUI.pageInset)
             }
             .background(LucentUI.page)
-            .navigationTitle(storageOnlyChooser ? "添加存储" : "添加片源").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(LocalizedStringKey(sourceChooserScope == .servers ? "添加影视服务器" : sourceChooserScope == .storage ? "添加存储" : "添加片源")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showSourceChooser = false } } }
         }
         .tint(.gray)
@@ -715,7 +719,7 @@ struct LibraryView: View {
     private func finishStorageManagement() {
         if addStorageAfterDismiss {
             addStorageAfterDismiss = false
-            storageOnlyChooser = true
+            sourceChooserScope = .storage
             showSourceChooser = true
             return
         }
@@ -1344,8 +1348,10 @@ struct LibraryView: View {
             #endif
             #endif
             .navigationDestination(item: $selectedItemID) { id in
-                MediaDetailView(itemID: id)
-                    .environmentObject(library)
+                Group {
+                    MediaDetailView(itemID: id)
+                        .environmentObject(library)
+                }.lucentSecondaryPage()
             }
             .onChange(of: selectedItemID) { _, newValue in
                 mobileDetailPresented = newValue != nil
@@ -2932,8 +2938,10 @@ private struct MobileScannedSourceBrowserView: View {
                 ForEach(visibleEntries) { entry in
                     if entry.isDirectory {
                         NavigationLink {
-                            MobileScannedSourceBrowserView(sourceID: sourceID, sourceName: sourceName, directory: entry.path)
-                                .environmentObject(library)
+                            Group {
+                                MobileScannedSourceBrowserView(sourceID: sourceID, sourceName: sourceName, directory: entry.path)
+                                    .environmentObject(library)
+                            }.lucentSecondaryPage()
                         } label: {
                             Label(entry.name, systemImage: "folder.fill").foregroundStyle(.primary)
                         }

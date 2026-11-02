@@ -32,8 +32,10 @@ struct MobileFolderBrowserView: View {
             ForEach(visibleEntries) { entry in
                 if entry.isDirectory {
                     NavigationLink {
-                        MobileFolderBrowserView(sourceID: sourceID, relativePath: entry.relativePath)
-                            .environmentObject(library)
+                        Group {
+                            MobileFolderBrowserView(sourceID: sourceID, relativePath: entry.relativePath)
+                                .environmentObject(library)
+                        }.lucentSecondaryPage()
                     } label: {
                         Label(entry.name, systemImage: "folder.fill")
                     }

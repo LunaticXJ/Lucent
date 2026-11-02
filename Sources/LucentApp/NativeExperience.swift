@@ -108,7 +108,7 @@ struct NativeMediaCard: View {
         VStack(alignment: .leading, spacing: 9) {
             LucentRemoteArtwork(request: entry.artwork(in: library, landscape: landscape), cacheKey: "native|\(entry.id)|\(landscape)", maximumPixels: landscape ? 1280 : 750)
                 .aspectRatio(landscape ? 16.0 / 9 : 2.0 / 3, contentMode: .fit)
-                .overlay(alignment: .bottomTrailing) { if let rating = entry.rating { LucentRatingBadge(rating: rating).padding(8) } }
+                .overlay(alignment: .bottomTrailing) { if let rating = entry.rating { LucentRatingBadge(rating: rating).padding(.trailing, 4).padding(.bottom, landscape && entry.progress > 0 ? 18 : 4) } }
                 .overlay(alignment: .bottom) { if landscape && entry.progress > 0 { ProgressView(value: entry.progress).tint(.white).padding(10) } }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
             LucentPosterCaption(title: entry.title, subtitle: entry.year.map(String.init))

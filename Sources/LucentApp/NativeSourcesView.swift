@@ -79,12 +79,14 @@ struct NativeSourcesView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Section("影视服务器") {
-                        ForEach(NativeServerKind.allCases) { value in
-                            Button { editor = .init(id: UUID(), kind: value) } label: { Label(value.title, image: value.asset) }
+                    if kind == 1 {
+                        Section("影视服务器") {
+                            ForEach(NativeServerKind.allCases) { value in
+                                Button { editor = .init(id: UUID(), kind: value) } label: { Label(value.title, image: value.asset) }
+                            }
                         }
                     }
-                    if library.activeProfile?.isChild != true {
+                    if kind == 0 && library.activeProfile?.isChild != true {
                         Section("聚合媒体库") {
                             Button("添加存储", systemImage: "externaldrive.badge.plus") { addingStorage = true }
                             Button("从存储导入目录", systemImage: "folder.badge.plus") { storageManager = true }

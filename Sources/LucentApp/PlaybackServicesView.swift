@@ -20,7 +20,10 @@ enum PlaybackServiceConfiguration {
     }
 }
 
+enum PlaybackServiceScope { case subtitles, danmaku }
+
 struct PlaybackServicesView: View {
+    let scope: PlaybackServiceScope
     @State private var key = ""
     @State private var username = ""
     @State private var password = ""
@@ -32,38 +35,45 @@ struct PlaybackServicesView: View {
 
     var body: some View {
         Form {
-            Section {
-                SecureField("API Key", text: $key)
-                TextField("OpenSubtitles 用户名（可选）", text: $username)
-                SecureField("密码", text: $password)
-                Button(loggedIn ? "重新登录" : "登录账户") { login() }
-                    .disabled(key.isEmpty || username.isEmpty || password.isEmpty || busy)
-                if loggedIn {
-                    Button("退出账户", role: .destructive) {
-                        do { try KeychainPasswordStore.setPlaybackServiceSecret("", key: "opensubtitles-session"); loggedIn = false }
-                        catch { status = error.localizedDescription }
+            if scope == .subtitles {
+                Section {
+                    SecureField("API Key", text: $key)
+                    TextField("OpenSubtitles 用户名（可选）", text: $username)
+                    SecureField("密码", text: $password)
+                    Button(loggedIn ? "重新登录" : "登录账户") { login() }
+                        .disabled(key.isEmpty || username.isEmpty || password.isEmpty || busy)
+                    if loggedIn {
+                        Button("退出账户", role: .destructive) {
+                            do { try KeychainPasswordStore.setPlaybackServiceSecret("", key: "opensubtitles-session"); loggedIn = false }
+                            catch { status = error.localizedDescription }
+                        }
                     }
+                    Link("申请 OpenSubtitles API Key", destination: URL(string: "https://www.opensubtitles.com/consumers")!)
+                } header: { Text("OpenSubtitles") } footer: {
+                    Text("搜索需 API Key；登录可使用账户下载额度。登录状态约 24 小时后需更新。")
                 }
-                Link("申请 OpenSubtitles API Key", destination: URL(string: "https://www.opensubtitles.com/consumers")!)
-            } header: { Text("OpenSubtitles") } footer: {
-                Text("搜索需 API Key；登录可使用账户下载额度。登录状态约 24 小时后需更新。")
             }
-            Section {
-                TextField("App ID", text: $appID)
-                SecureField("App Secret", text: $secret)
-                Link("弹弹play 开发者中心", destination: URL(string: "https://dev.dandanplay.com/")!)
-            } header: { Text("弹弹play") } footer: {
-                Text("使用自行申请的应用凭据。在线搜索会发送影片名称，选择后下载对应集的弹幕。")
+            if scope == .danmaku {
+                Section {
+                    TextField("App ID", text: $appID)
+                    SecureField("App Secret", text: $secret)
+                    Link("弹弹play 开发者中心", destination: URL(string: "https://dev.dandanplay.com/")!)
+                } header: { Text("弹弹play") } footer: {
+                    Text("使用自行申请的应用凭据。在线搜索会发送影片名称，选择后下载对应集的弹幕。")
+                }
             }
             Section {
                 Button("保存配置") {
                     do {
-                        if key != (try KeychainPasswordStore.openSubtitlesAPIKey() ?? "") {
-                            try KeychainPasswordStore.setPlaybackServiceSecret("", key: "opensubtitles-session"); loggedIn = false
+                        if scope == .subtitles {
+                            if key != (try KeychainPasswordStore.openSubtitlesAPIKey() ?? "") {
+                                try KeychainPasswordStore.setPlaybackServiceSecret("", key: "opensubtitles-session"); loggedIn = false
+                            }
+                            try KeychainPasswordStore.setOpenSubtitlesAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
+                        } else {
+                            try KeychainPasswordStore.setPlaybackServiceSecret(appID.trimmingCharacters(in: .whitespacesAndNewlines), key: "dandan-app-id")
+                            try KeychainPasswordStore.setPlaybackServiceSecret(secret.trimmingCharacters(in: .whitespacesAndNewlines), key: "dandan-secret")
                         }
-                        try KeychainPasswordStore.setOpenSubtitlesAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
-                        try KeychainPasswordStore.setPlaybackServiceSecret(appID.trimmingCharacters(in: .whitespacesAndNewlines), key: "dandan-app-id")
-                        try KeychainPasswordStore.setPlaybackServiceSecret(secret.trimmingCharacters(in: .whitespacesAndNewlines), key: "dandan-secret")
                         status = "已保存"
                     } catch { status = error.localizedDescription }
                 }.disabled(busy)
@@ -71,14 +81,17 @@ struct PlaybackServicesView: View {
                 if let status { Text(LocalizedStringKey(status)).font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("字幕与弹幕服务").lucentNavigationTitleStyle()
+        .navigationTitle(LocalizedStringKey(scope == .subtitles ? "字幕服务配置" : "弹幕服务")).lucentNavigationTitleStyle()
         .lucentTextInput().autocorrectionDisabled()
-        .lucentScrollBackgroundHidden().background(LucentUI.page)
+        .modifier(LucentSettingsPageStyle())
         .task {
-            key = (try? KeychainPasswordStore.openSubtitlesAPIKey()) ?? ""
-            appID = (try? KeychainPasswordStore.playbackServiceSecret("dandan-app-id")) ?? ""
-            secret = (try? KeychainPasswordStore.playbackServiceSecret("dandan-secret")) ?? ""
-            loggedIn = PlaybackServiceConfiguration.subtitleSession() != nil
+            if scope == .subtitles {
+                key = (try? KeychainPasswordStore.openSubtitlesAPIKey()) ?? ""
+                loggedIn = PlaybackServiceConfiguration.subtitleSession() != nil
+            } else {
+                appID = (try? KeychainPasswordStore.playbackServiceSecret("dandan-app-id")) ?? ""
+                secret = (try? KeychainPasswordStore.playbackServiceSecret("dandan-secret")) ?? ""
+            }
         }
     }
     private func login() {
@@ -153,7 +166,7 @@ struct SubtitleSearchView: View {
                     if hasMore && !busy { Button("加载更多") { search(more: true) } }
                 } header: { if !results.isEmpty { Text("搜索结果") } }
                 Section {
-                    NavigationLink("字幕服务配置") { PlaybackServicesView() }
+                    NavigationLink("字幕服务配置") { PlaybackServicesView(scope: .subtitles).lucentSecondaryPage() }
                 }
             }
             .navigationTitle("添加字幕").lucentNavigationTitleStyle()

@@ -101,7 +101,9 @@ struct MobileServerCatalogView: View {
         .task(id: "\(catalog)|\(refreshID.uuidString)") { await load() }
         .refreshable { await load() }
         .navigationDestination(item: $selectedItemID) { id in
-            detailDestination(id)
+            Group {
+                detailDestination(id)
+            }.lucentSecondaryPage()
         }
         .onChange(of: selectedItemID) { _, value in detailPresented = value != nil }
     }

@@ -30,6 +30,7 @@ struct AppSettingsView: View {
     @State private var metadataTokenConfigured = false
     @State private var metadataTokenStatus: String?
     @State private var matchingItem: MediaItem?
+    @AppStorage(NetworkUsagePolicy.playbackKey) private var cellularPlayback = true
     @AppStorage(NetworkUsagePolicy.syncKey) private var cellularSync = false
     @AppStorage(NetworkUsagePolicy.downloadKey) private var cellularDownloads = false
 
@@ -45,55 +46,44 @@ struct AppSettingsView: View {
     var body: some View {
         Form {
             Section("观看体验") {
-                NavigationLink { LocalizationSettingsView() } label: {
+                NavigationLink { LocalizationSettingsView().lucentSecondaryPage() } label: {
                     settingsRow("语言与地区", icon: "globe")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                NavigationLink { appearancePage } label: {
+                NavigationLink { appearancePage.lucentSecondaryPage() } label: {
                     settingsRow("外观与首页", icon: "circle.lefthalf.filled")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                NavigationLink { playbackPage } label: {
+                NavigationLink { playbackPage.lucentSecondaryPage() } label: {
                     settingsRow("播放", icon: "play.rectangle")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                NavigationLink { subtitlePage } label: {
+                NavigationLink { subtitlePage.lucentSecondaryPage() } label: {
                     settingsRow("字幕", icon: "captions.bubble")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                NavigationLink { PlaybackServicesView() } label: {
-                    settingsRow("字幕与弹幕服务", icon: "text.bubble")
+                NavigationLink { PlaybackServicesView(scope: .danmaku).lucentSecondaryPage() } label: {
+                    settingsRow("弹幕", icon: "text.bubble")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             }
             Section("内容与存储") {
-                NavigationLink { cellularNetworkPage } label: {
+                NavigationLink { cellularNetworkPage.lucentSecondaryPage() } label: {
                     settingsRow("移动网络", icon: "antenna.radiowaves.left.and.right")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                NavigationLink { libraryPage } label: {
+                NavigationLink { libraryPage.lucentSecondaryPage() } label: {
                     settingsRow("聚合媒体库", icon: "rectangle.stack")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                NavigationLink { CacheSettingsView(embedded: true) } label: {
+                NavigationLink { CacheSettingsView(embedded: true).lucentSecondaryPage() } label: {
                     settingsRow("缓存与存储", icon: "internaldrive")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                NavigationLink { metadataPage } label: {
+                NavigationLink { metadataPage.lucentSecondaryPage() } label: {
                     settingsRow("在线元数据", icon: "photo.on.rectangle.angled")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             }
             Section("账户与同步") {
-                NavigationLink { profilesPage } label: {
+                NavigationLink { profilesPage.lucentSecondaryPage() } label: {
                     settingsRow("观看资料", icon: "person.crop.circle")
                 }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 if library.activeProfile?.isChild != true {
-                    NavigationLink { syncPage } label: {
+                    NavigationLink { syncPage.lucentSecondaryPage() } label: {
                         settingsRow("同步与服务", icon: "arrow.triangle.2.circlepath")
                     }
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 }
             }
         }
@@ -156,11 +146,11 @@ struct AppSettingsView: View {
             }
             Section("播放控制") {
                 #if os(iOS)
-                NavigationLink("播放手势") { PlaybackGestureSettings() }
+                NavigationLink("播放手势") { PlaybackGestureSettings().lucentSecondaryPage() }
                 #else
-                NavigationLink("播放控制") { NativePlaybackInputSettings() }
+                NavigationLink("播放控制") { NativePlaybackInputSettings().lucentSecondaryPage() }
                 #endif
-                NavigationLink("进度记忆") { PlaybackProgressSettings() }
+                NavigationLink("进度记忆") { PlaybackProgressSettings().lucentSecondaryPage() }
                 Toggle("拖动进度预览", isOn: $seekPreviewEnabled)
                 Picker("自动隐藏控制栏", selection: $controlsAutoHideDelay) {
                     Text("3 秒").tag(3.0)
@@ -243,6 +233,9 @@ struct AppSettingsView: View {
                     .foregroundStyle(.primary)
             } header: { Text("文本字幕") } footer: {
                 Text("特效字幕保留片源样式。")
+            }
+            Section("在线字幕") {
+                NavigationLink("字幕服务配置") { PlaybackServicesView(scope: .subtitles).lucentSecondaryPage() }
             }
         }
     }
@@ -380,11 +373,12 @@ struct AppSettingsView: View {
                 Text("关闭后，观看记录和收藏仅在 Wi-Fi 同步，影片下载仅使用 Wi-Fi。")
             }
             Section {
-                Label("移动网络播放前会询问", systemImage: "play.rectangle")
+                Toggle("允许移动网络播放", isOn: $cellularPlayback)
             } footer: {
-                Text("从 Wi-Fi 切换到移动网络时也会询问。本地文件和已下载影片不受影响。")
+                Text("开启后，移动网络播放不再询问；关闭后播放前会询问。本地文件和已下载影片不受影响。")
             }
         }
+        .onChange(of: cellularPlayback) { _, _ in NetworkUsagePolicy.notifySettingsChanged() }
         .onChange(of: cellularSync) { _, _ in NetworkUsagePolicy.notifySettingsChanged() }
         .onChange(of: cellularDownloads) { _, _ in NetworkUsagePolicy.notifySettingsChanged() }
     }

@@ -109,15 +109,12 @@ struct DetailTitleArtwork: View {
     let url: URL?
     let title: String
     @State private var image: LucentPlatformImage?
-    @State private var failed = false
     var body: some View {
         Group {
             if let image {
                 Image(lucentImage: image).resizable().scaledToFit()
                     .frame(maxWidth: 310, maxHeight: 125)
                     .accessibilityLabel(title)
-            } else if url != nil && !failed {
-                Color.clear.frame(width: 310, height: 125)
             } else {
                 Text(title)
                     .font(.system(size: 38, weight: .black, design: .rounded))
@@ -128,9 +125,8 @@ struct DetailTitleArtwork: View {
         }
         .shadow(color: .black.opacity(0.6), radius: 8)
         .task(id: url) {
-            image = nil
-            failed = false
-            guard let url else { failed = true; return }
+            image = url.flatMap { ArtworkImageDecoder.cachedImage(key: "tmdb|\($0.absoluteString)", maximumPixelSize: 1000) }
+            guard let url else { return }
             guard let data = try? await LocalMediaCache.shared.imageData(
                 key: "tmdb|\(url.absoluteString)", fetch: {
                     let (data, response) = try await URLSession.shared.data(from: url)
@@ -139,7 +135,6 @@ struct DetailTitleArtwork: View {
                     }
                     return data
                 }), !Task.isCancelled, let decoded = await ArtworkImageDecoder.image(data: data, key: "tmdb|\(url.absoluteString)", maximumPixelSize: 1000) else {
-                if !Task.isCancelled { failed = true }
                 return
             }
             guard !Task.isCancelled else { return }
@@ -769,7 +764,7 @@ struct SeriesDetailView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if let rating = episode.communityRating {
-                        LucentRatingBadge(rating: rating).padding(5)
+                        LucentRatingBadge(rating: rating).padding(3)
                     }
                 }
                 .overlay(RoundedRectangle(cornerRadius: 13)

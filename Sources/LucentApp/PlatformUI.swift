@@ -29,6 +29,15 @@ enum LucentClipboard {
 }
 
 extension View {
+    /// Navigation destinations own tab visibility; popping restores the root's default.
+    @ViewBuilder func lucentSecondaryPage() -> some View {
+        #if os(iOS)
+        toolbar(.hidden, for: .tabBar)
+        #else
+        self
+        #endif
+    }
+
     @ViewBuilder func lucentNavigationTitleStyle() -> some View {
         #if os(iOS)
         navigationBarTitleDisplayMode(.inline)

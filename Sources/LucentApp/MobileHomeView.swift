@@ -16,6 +16,80 @@ struct HomeMatchedSource: ViewModifier {
     }
 }
 
+private struct HomeCollectionZoom: ViewModifier {
+    let key: String?
+    let namespace: Namespace.ID
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *), let key {
+            content.navigationTransition(.zoom(sourceID: key, in: namespace))
+        } else { content }
+    }
+}
+
+/// A quiet, adaptive introduction rather than an error panel or an empty canvas.
+struct HomeLibraryEmptyState: View {
+    let action: () -> Void
+    var aggregateLibrary = false
+
+    var body: some View {
+        VStack(spacing: 28) {
+            ZStack {
+                ForEach([-1, 1, 0], id: \.self) { position in
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(LinearGradient(colors: [Color.primary.opacity(0.035), Color.primary.opacity(0.10)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .overlay {
+                            Image(systemName: position == 0 ? "play.fill" : position < 0 ? "film" : "tv")
+                                .font(.system(size: position == 0 ? 30 : 24, weight: .light))
+                                .foregroundStyle(.primary.opacity(position == 0 ? 0.8 : 0.35))
+                        }
+                        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.primary.opacity(0.08)))
+                        .frame(width: 92, height: 136)
+                        .rotationEffect(.degrees(Double(position) * 12))
+                        .offset(x: CGFloat(position) * 70, y: position == 0 ? -8 : 10)
+                        .shadow(color: .black.opacity(0.05), radius: 14, y: 10)
+                }
+            }
+            .frame(height: 180)
+            .accessibilityHidden(true)
+
+            VStack(spacing: 12) {
+                Text(aggregateLibrary ? "配置聚合媒体库" : "你的私人影院")
+                    .font(.largeTitle.bold())
+                Text(aggregateLibrary ? "添加文件源并扫描电影与剧集，开始建立你的媒体库。" : "连接影视服务器，或导入存储中的电影与剧集。")
+                    .font(.body).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    Image(systemName: "plus")
+                    Text(aggregateLibrary ? "配置聚合媒体库" : "添加片源")
+                    Spacer(minLength: 16)
+                    Image(systemName: "arrow.right")
+                }
+                .font(.headline)
+                .padding(.horizontal, 22).padding(.vertical, 17)
+                .foregroundStyle(Color(uiColor: .systemBackground))
+                .background(Color.primary, in: RoundedRectangle(cornerRadius: 18))
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: 320)
+
+            HStack(spacing: 20) {
+                Label("影视服务器", systemImage: "server.rack")
+                Label("存储", systemImage: "externaldrive")
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 520)
+        .padding(.horizontal, 28).padding(.vertical, 32)
+        .frame(maxWidth: .infinity)
+    }
+}
+
 @MainActor
 private enum HomePalette {
     static let background = Color(red: 0.055, green: 0.071, blue: 0.094)
@@ -38,11 +112,34 @@ private struct EmbyArtwork: View {
     var softenBottom = false
     var onImage: ((UIImage) -> Void)? = nil
     @State private var image: UIImage?
+    @State private var imageIdentity: String?
+    var loadsImage = true
+    private var identity: String { "\(source.id)|\(itemID)" }
+    private var pixelSize: Int { backdrop ? width : Int(Double(width) * 1.5) }
+    private var resolvedURL: URL? {
+        let local = HomeSnapshotCache.localItems[itemID]
+        let path = backdrop ? (local?.metadata?.backdropPath ?? local?.metadata?.posterPath) : local?.metadata?.posterPath
+        return preferredURL ?? path.flatMap { URL(string: "https://image.tmdb.org/t/p/w780\($0)") }
+    }
+    private var displayedImage: UIImage? {
+        if imageIdentity == identity, let image { return image }
+        if let url = resolvedURL, let cached = ArtworkImageDecoder.cachedImage(key: url.absoluteString, maximumPixelSize: pixelSize) { return cached }
+        for useBackdrop in backdrop ? [true, false] : [false] {
+            if let cached = ArtworkImageDecoder.cachedImage(key: "\(source.id)|\(itemID)|\(useBackdrop)", maximumPixelSize: pixelSize) { return cached }
+        }
+        return nil
+    }
+    private func install(_ loaded: UIImage) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { image = loaded; imageIdentity = identity }
+        onImage?(loaded)
+    }
 
     var body: some View {
         ZStack {
-            LucentArtworkPlaceholder(symbol: backdrop ? "film.stack" : "film", showsSymbol: image == nil)
-            if let image {
+            LucentArtworkPlaceholder(symbol: backdrop ? "film.stack" : "film", showsSymbol: displayedImage == nil)
+            if let image = displayedImage {
                 Image(uiImage: image).resizable().scaledToFill()
                     .overlay {
                         if softenBottom {
@@ -58,11 +155,9 @@ private struct EmbyArtwork: View {
             }
         }
         .clipped()
-        .task(id: "\(source.id)|\(itemID)|\(backdrop)|\(preferredURL?.absoluteString ?? "")") {
-            image = nil
-            let local = HomeSnapshotCache.localItems[itemID]
-            let localPath = backdrop ? (local?.metadata?.backdropPath ?? local?.metadata?.posterPath) : local?.metadata?.posterPath
-            let resolvedURL = preferredURL ?? localPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w780\($0)") }
+        .task(id: "\(source.id)|\(itemID)|\(backdrop)|\(preferredURL?.absoluteString ?? "")|\(loadsImage)") {
+            guard loadsImage else { return }
+            if let cached = displayedImage { install(cached) }
             if let preferredURL = resolvedURL,
                let data = try? await LocalMediaCache.shared.imageData(
                    key: "tmdb|\(preferredURL.absoluteString)", fetch: {
@@ -73,8 +168,7 @@ private struct EmbyArtwork: View {
                    }),
                let loaded = await ArtworkImageDecoder.image(data: data, key: preferredURL.absoluteString, maximumPixelSize: backdrop ? width : Int(Double(width) * 1.5)) {
                 guard !Task.isCancelled else { return }
-                image = loaded
-                onImage?(loaded)
+                install(loaded)
                 return
             }
             guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
@@ -87,8 +181,7 @@ private struct EmbyArtwork: View {
                     }),
                       let loaded = await ArtworkImageDecoder.image(data: data, key: "\(source.id)|\(itemID)|\(useBackdrop)", maximumPixelSize: backdrop ? width : Int(Double(width) * 1.5)) else { continue }
                 guard !Task.isCancelled else { return }
-                image = loaded
-                onImage?(loaded)
+                install(loaded)
                 break
             }
         }
@@ -297,6 +390,7 @@ struct MobileHomeView: View {
     @State private var selectedTransitionKey: String?
     @State private var browserRoute: HomeBrowserRoute?
     @State private var localCollection: LocalCatalogCollection?
+    @State private var collectionTransitionKey: String?
     @State private var showAllContinuing = false
     @Environment(\.contentLocalizationID) private var contentLocalizationID
     @State private var heroArtworks: [String: TMDBService.DetailArtwork] = [:]
@@ -315,6 +409,7 @@ struct MobileHomeView: View {
     @State private var heroIsVisible = false
     @State private var selectedTheme: HeroColors?
     @State private var heroDragX: CGFloat = 0
+    @State private var heroSettleTask: Task<Void, Never>?
     @State private var heroDragTarget: Int?
     @State private var dockGestureHandled = false
     private var darkMode: Bool { appTheme.isDark(system: systemColorScheme) }
@@ -340,10 +435,23 @@ struct MobileHomeView: View {
         return library.embySources.first { $0.id == preferredSourceID } ?? library.embySources.first
     }
 
+    private var hasHomeContent: Bool {
+        !latest.isEmpty || !continuing.isEmpty || !views.isEmpty || !shelves.isEmpty
+    }
+
     var body: some View {
         GeometryReader { viewport in
         ScrollView {
-            if hasLoadedHome {
+            if !hasHomeContent && source != nil && (!hasLoadedHome || isLoading) {
+                ProgressView("正在加载首页")
+                    .frame(maxWidth: .infinity, minHeight: max(440, viewport.size.height * 0.75))
+                    .padding(.top, 66)
+            } else if !hasHomeContent && errorMessage == nil {
+                HomeLibraryEmptyState(action: showSources, aggregateLibrary: localLibrary)
+                    .frame(minHeight: max(480, viewport.size.height - 140))
+                    .padding(.top, HomePalette.isPad ? 76 : 66)
+                    .padding(.bottom, 44)
+            } else if hasLoadedHome {
             VStack(alignment: .leading, spacing: 0) {
                 if !latest.isEmpty {
                     StretchyHeroHeader(height: HomePalette.isPad ? 650 : max(460, viewport.size.height * 0.76)) { height, pull in
@@ -395,8 +503,24 @@ struct MobileHomeView: View {
         .background(themeColor)
         .ignoresSafeArea(edges: .top)
         .coordinateSpace(name: "lucentHeroScroll")
+        .onChange(of: "\(source?.id.uuidString ?? "")|\(latest.map(\.id).joined(separator: "|"))") { _, _ in
+            heroSettleTask?.cancel()
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                outgoingHeroIndex = nil
+                heroDragTarget = nil
+                heroDragX = 0
+                heroTransitioning = false
+            }
+        }
         .onAppear { heroIsVisible = true }
         .onDisappear {
+            heroSettleTask?.cancel()
+            outgoingHeroIndex = nil
+            heroDragTarget = nil
+            heroDragX = 0
+            heroTransitioning = false
             saveHeroPosition()
             heroIsVisible = false
         }
@@ -457,11 +581,16 @@ struct MobileHomeView: View {
             Task { @MainActor in await Task.yield(); await loadLocalHome() }
         }
         .navigationDestination(item: $localCollection) { collection in
-            LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
+            Group {
+                LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
+                    .modifier(HomeCollectionZoom(key: collectionTransitionKey, namespace: detailTransition))
+            }.lucentSecondaryPage()
         }
         .onChange(of: localCollection) { _, value in onCollectionChange(value != nil) }
         .navigationDestination(item: $selectedItemID) { id in
-            detailDestination(id)
+            Group {
+                detailDestination(id)
+            }.lucentSecondaryPage()
         }
         .onChange(of: selectedItemID) { _, newValue in
             detailPresented = newValue != nil
@@ -470,8 +599,11 @@ struct MobileHomeView: View {
             if let source { HomeContinuingList(source:source).environmentObject(library) }
         }
         .navigationDestination(item: $browserRoute) { route in
-            EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title, embedded: true)
-                .environmentObject(library)
+            Group {
+                EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title, embedded: true)
+                    .environmentObject(library)
+                    .modifier(HomeCollectionZoom(key: collectionTransitionKey, namespace: detailTransition))
+            }.lucentSecondaryPage()
         }
         .onChange(of: browserRoute?.id) { _, value in onCollectionChange(value != nil) }
     }
@@ -480,32 +612,8 @@ struct MobileHomeView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 if latest.indices.contains(heroIndex), let source {
-                    if let heroDragTarget, latest.indices.contains(heroDragTarget) {
-                        heroArtwork(latest[heroDragTarget], source: source, size: geometry.size, pull: pull)
-                        heroContent(latest[heroDragTarget], size: geometry.size)
-                            .opacity(min(1, abs(heroDragX) / max(geometry.size.width, 1) * 2))
-                            .allowsHitTesting(false)
-                        heroArtwork(latest[heroIndex], source: source, size: geometry.size, pull: pull)
-                            .mask(alignment: heroDragX < 0 ? .leading : .trailing) {
-                                Rectangle().frame(width: max(0, geometry.size.width - abs(heroDragX)))
-                            }
-                            .allowsHitTesting(false)
-                        heroContent(latest[heroIndex], size: geometry.size)
-                            .offset(x: heroDragX)
-                            .allowsHitTesting(false)
-                    } else {
-                        heroArtwork(latest[heroIndex], source: source, size: geometry.size, pull: pull)
-                        heroContent(latest[heroIndex], size: geometry.size)
-                    }
-                    if heroDragTarget == nil, let outgoingHeroIndex, latest.indices.contains(outgoingHeroIndex) {
-                        heroArtwork(latest[outgoingHeroIndex], source: source, size: geometry.size, pull: pull)
-                            .mask(alignment: heroForward ? .leading : .trailing) {
-                                Rectangle().frame(width: geometry.size.width * (1 - heroReveal))
-                            }
-                            .allowsHitTesting(false)
-                        heroContent(latest[outgoingHeroIndex], size: geometry.size)
-                            .offset(x: (heroForward ? -1 : 1) * geometry.size.width * heroReveal)
-                            .allowsHitTesting(false)
+                    ForEach(Array(latest.enumerated()), id: \.element.id) { index, item in
+                        heroLayer(item, index: index, source: source, size: geometry.size, pull: pull)
                     }
                 }
                 HeroGestureSurface(onDrag: { dx in
@@ -525,8 +633,10 @@ struct MobileHomeView: View {
                     withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
                         heroDragX = shouldAdvance ? (heroDragX < 0 ? -geometry.size.width : geometry.size.width) : 0
                     }
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(380))
+                    heroSettleTask?.cancel()
+                    heroSettleTask = Task { @MainActor in
+                        do { try await Task.sleep(for: .milliseconds(380)) } catch { return }
+                        guard latest.indices.contains(target) else { return }
                         if shouldAdvance {
                             withTransaction(Transaction(animation: nil)) {
                                 heroIndex = target
@@ -548,6 +658,7 @@ struct MobileHomeView: View {
                         }
                     })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .zIndex(5)
                 HStack {
                     Color.clear.frame(width: 1, height: 40)
                     Spacer()
@@ -589,6 +700,7 @@ struct MobileHomeView: View {
                     }
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 14)
+                    .zIndex(10)
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
@@ -597,8 +709,32 @@ struct MobileHomeView: View {
         .frame(height: height)
     }
 
+    // Keep each slide's identity stable across drag, settling and automatic advances.
+    private func heroLayer(_ item: MediaCard, index: Int, source: EmbySource,
+                           size: CGSize, pull: CGFloat) -> some View {
+        let current = index == heroIndex
+        let incoming = index == heroDragTarget
+        let outgoing = heroDragTarget == nil && index == outgoingHeroIndex
+        let dragging = current && heroDragTarget != nil
+        let visible = current || incoming || outgoing
+        let coverage = outgoing ? 1 - heroReveal : (dragging ? 1 - abs(heroDragX) / max(size.width, 1) : 1)
+        let nearby = index == (heroIndex + 1) % max(latest.count, 1) || index == (heroIndex + latest.count - 1) % max(latest.count, 1)
+        return ZStack {
+            heroArtwork(item, source: source, size: size, pull: pull, loadsImage: visible || nearby)
+                .mask(alignment: outgoing ? (heroForward ? .leading : .trailing) : (heroDragX < 0 ? .leading : .trailing)) {
+                    Rectangle().frame(width: size.width * max(0, coverage))
+                }
+            heroContent(item, size: size)
+                .opacity(incoming ? min(1, abs(heroDragX) / max(size.width, 1) * 2) : 1)
+                .offset(x: outgoing ? (heroForward ? -1 : 1) * size.width * heroReveal : (dragging ? heroDragX : 0))
+        }
+        .opacity(visible ? 1 : 0)
+        .zIndex(outgoing || dragging ? 2 : (visible ? 1 : 0))
+        .allowsHitTesting(false)
+    }
+
     private func heroArtwork(_ item: MediaCard, source: EmbySource, size: CGSize,
-                             pull: CGFloat) -> some View {
+                             pull: CGFloat, loadsImage: Bool = true) -> some View {
         ZStack(alignment: .bottom) {
             EmbyArtwork(source: source, itemID: item.id,
                         backdrop: heroArtworks[item.id]?.posterURL == nil, width: 1200,
@@ -610,7 +746,7 @@ struct MobileHomeView: View {
                             if latest.indices.contains(heroIndex), latest[heroIndex].id == item.id {
                                 transitionHeroTheme(to: item.id)
                             }
-                        })
+                        }, loadsImage: loadsImage)
                 .frame(width: size.width, height: size.height)
                 .scaleEffect(1 + min(pull / max(size.height - pull, 1), 0.4), anchor: .top)
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -629,14 +765,10 @@ struct MobileHomeView: View {
     private func heroContent(_ item: MediaCard, size: CGSize) -> some View {
         let displayItem = heroDetails[item.id] ?? item
         return VStack(spacing: 11) {
-                if let artwork = heroArtworks[item.id] {
-                    DetailTitleArtwork(url: artwork.logoURL,
-                                       title: artwork.localizedTitle ?? item.name)
-                        .frame(maxWidth: HomePalette.isPad ? 450 : size.width * 0.82,
-                               minHeight: 100, maxHeight: 125)
-                } else {
-                    Color.clear.frame(height: 125)
-                }
+                DetailTitleArtwork(url: heroArtworks[item.id]?.logoURL,
+                                   title: heroArtworks[item.id]?.localizedTitle ?? item.name)
+                    .frame(maxWidth: HomePalette.isPad ? 450 : size.width * 0.82,
+                           minHeight: 100, maxHeight: 125)
                 HStack(spacing: 7) {
                     if let rating = displayItem.communityRating {
                         Image(systemName: "star.fill").foregroundStyle(LucentUI.ratingTint)
@@ -677,8 +809,9 @@ struct MobileHomeView: View {
         withAnimation(.easeOut(duration: 0.46)) {
             heroReveal = 1
         }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(470))
+        heroSettleTask?.cancel()
+        heroSettleTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(470)) } catch { return }
             outgoingHeroIndex = nil
             heroTransitioning = false
         }
@@ -731,7 +864,9 @@ struct MobileHomeView: View {
             displayWidthPixels: Int(UIScreen.main.bounds.width * UIScreen.main.scale))
         guard !Task.isCancelled else { return }
         guard requestedLanguage == LocalizationPreferences.current.contentID else { return }
-        heroArtworks[item.id] = result ?? TMDBService.DetailArtwork(posterURL: nil, logoURL: nil)
+        // A transient request failure must remain retryable on the next selection.
+        guard let result else { return }
+        heroArtworks[item.id] = result
         if let source { HomeSnapshotCache.artworks[source.id] = heroArtworks }
     }
 
@@ -775,9 +910,10 @@ struct MobileHomeView: View {
     private var continueSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Button {
+                collectionTransitionKey = nil
                 if localLibrary { localCollection = .continueWatching }
                 else { showAllContinuing = true }
-            } label: { heading("继续观看", count: continuingTotal) }.buttonStyle(.plain)
+            } label: { heading("继续观看", count: nil) }.buttonStyle(.plain)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     if let source {
@@ -792,7 +928,7 @@ struct MobileHomeView: View {
                                         if let rating = item.communityRating, rating > 0 {
                                             LucentRatingBadge(rating: rating)
                                                 .frame(maxWidth: .infinity, alignment: .trailing)
-                                                .padding(.trailing, 8).padding(.bottom, 22)
+                                                .padding(.trailing, 4).padding(.bottom, 18)
                                         }
                                         ProgressView(value: progress(item))
                                             .tint(.white)
@@ -824,14 +960,16 @@ struct MobileHomeView: View {
     private var mediaSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Button {
+                collectionTransitionKey = nil
                 if localLibrary { localCollection = .mediaLibraries }
                 else if let source { browserRoute = HomeBrowserRoute(source:source,parentID:nil,title:"我的媒体") }
-            } label: { heading("我的媒体", count: views.count) }.buttonStyle(.plain)
+            } label: { heading("我的媒体", count: nil) }.buttonStyle(.plain)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
                     if let source {
                         ForEach(views, id: \.id) { view in
                             Button {
+                                collectionTransitionKey = "media:\(view.id)"
                                 if localLibrary { localCollection = LocalCatalogCollection(rawValue: view.id) }
                                 else { browserRoute = HomeBrowserRoute(source: source, parentID: view.id, title: view.name) }
                             } label: {
@@ -868,6 +1006,7 @@ struct MobileHomeView: View {
                                 .frame(width: HomePalette.categoryWidth,
                                        height: HomePalette.isPad ? 145 : 120)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .modifier(HomeMatchedSource(key: "media:\(view.id)", namespace: detailTransition))
                             }
                             .buttonStyle(.plain)
                         }
@@ -881,6 +1020,7 @@ struct MobileHomeView: View {
     private func posterSection(_ shelf: HomeShelf) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Button {
+                collectionTransitionKey = nil
                 if let source {
                     if localLibrary { localCollection = LocalCatalogCollection(rawValue: shelf.view.id) }
                     else { browserRoute = HomeBrowserRoute(source: source, parentID: shelf.view.id, title: shelf.view.name) }
@@ -906,7 +1046,7 @@ struct MobileHomeView: View {
                                                     backdrop: false, width: 350)
                                         if let rating = item.communityRating ?? heroDetails[item.id]?.communityRating, rating > 0 {
                                             LucentRatingBadge(rating: rating)
-                                                .padding(8)
+                                                .padding(4)
                                         }
                                     }
                                     .frame(width: HomePalette.posterWidth,
@@ -952,6 +1092,7 @@ struct MobileHomeView: View {
         }
         guard let source else { return }
         if item.type != "Series" && item.isFolder == true {
+            collectionTransitionKey = nil
             browserRoute = HomeBrowserRoute(source: source, parentID: item.id, title: item.name)
             return
         }
@@ -1031,7 +1172,7 @@ struct MobileHomeView: View {
         selectedTheme = latest.indices.contains(heroIndex) ? heroThemes[latest[heroIndex].id] : nil
         HomeSnapshotCache.entries[context] = .init(refreshID:refreshID,loadedAt:preserve ? old!.loadedAt : Date(),views:views,latest:latest,continuing:continuing,continuingTotal:continuingTotal,shelves:shelves)
         hasLoadedHome = true
-        errorMessage = files.isEmpty ? "请在片源页面添加存储并导入文件夹。" : nil
+        errorMessage = nil
     }
 
     private func loadHome() async {
@@ -1169,7 +1310,11 @@ private struct HomeContinuingList: View {
             }
             .navigationTitle("继续观看").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement:.cancellationAction) { Button("完成") { dismiss() } } }
-            .navigationDestination(item:$selectedID) { id in MediaDetailView(itemID:id).environmentObject(library) }
+            .navigationDestination(item:$selectedID) { id in
+                Group {
+                    MediaDetailView(itemID:id).environmentObject(library)
+                }.lucentSecondaryPage()
+            }
             .task {
                 defer { loading = false }
                 do {
@@ -1287,7 +1432,9 @@ struct MobileSearchView: View {
             .task(id: term) { await search() }
             .task(id: recommendationBatch) { await loadRecommendations() }
             .navigationDestination(item: $selectedItemID) { id in
-                MediaDetailView(itemID: id).environmentObject(library)
+                Group {
+                    MediaDetailView(itemID: id).environmentObject(library)
+                }.lucentSecondaryPage()
             }
             .onChange(of: selectedItemID) { _, value in
                 detailPresented = value != nil

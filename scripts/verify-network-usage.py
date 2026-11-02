@@ -32,7 +32,7 @@ struct MediaItem {
    precondition(MediaItem(location:source).requiresRemotePlayback(hasDownload:false))
    precondition(!MediaItem(location:source).requiresRemotePlayback(hasDownload:true))
   }
-  print("PASS: route/permission matrix, per-session cellular consent, offline/unknown handling, local file and downloaded playback exemptions")
+  print("PASS: route/permission matrix, cellular approval, offline/unknown handling, local file and downloaded playback exemptions")
  }
 }
 '''

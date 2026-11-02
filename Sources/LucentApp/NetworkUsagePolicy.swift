@@ -5,6 +5,7 @@ import Network
 final class NetworkUsagePolicy: @unchecked Sendable {
     static let shared = NetworkUsagePolicy()
     static let changed = Notification.Name("LucentNetworkUsageChanged")
+    static let playbackKey = "lucent.network.cellularPlayback"
     static let syncKey = "lucent.network.cellularSync"
     static let downloadKey = "lucent.network.cellularDownloads"
     enum Route: Sendable, Equatable { case unknown, offline, wifi, cellular, wired }

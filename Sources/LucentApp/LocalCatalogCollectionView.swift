@@ -118,7 +118,7 @@ struct LocalCatalogPosterCard: View {
         VStack(alignment: .leading, spacing: 7) {
             LocalCatalogArtwork(item: item)
                 .overlay(alignment: .bottomTrailing) {
-                    if let rating = item.metadata?.rating { LucentRatingBadge(rating: rating).padding(5) }
+                    if let rating = item.metadata?.rating { LucentRatingBadge(rating: rating).padding(3) }
                 }
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
@@ -226,17 +226,21 @@ struct LocalCatalogCollectionView: View {
             }
         }
         .navigationDestination(for: LocalCatalogCollection.self) { destination in
-            LocalCatalogCollectionView(collection:destination,detailPresented:$detailPresented).environmentObject(library)
+            Group {
+                LocalCatalogCollectionView(collection:destination,detailPresented:$detailPresented).environmentObject(library)
+            }.lucentSecondaryPage()
         }
         .navigationDestination(item: $selectedItemID) { id in
-            #if os(iOS)
-            if #available(iOS 18, *), let transitionKey {
+            Group {
+                #if os(iOS)
+                if #available(iOS 18, *), let transitionKey {
+                    MediaDetailView(itemID: id).environmentObject(library)
+                        .navigationTransition(.zoom(sourceID: transitionKey, in: detailTransition))
+                } else { MediaDetailView(itemID: id).environmentObject(library) }
+                #else
                 MediaDetailView(itemID: id).environmentObject(library)
-                    .navigationTransition(.zoom(sourceID: transitionKey, in: detailTransition))
-            } else { MediaDetailView(itemID: id).environmentObject(library) }
-            #else
-            MediaDetailView(itemID: id).environmentObject(library)
-            #endif
+                #endif
+            }.lucentSecondaryPage()
         }
         .onChange(of: selectedItemID) { _, value in detailPresented = value != nil }
         .sheet(item: $matchingItem) { item in MetadataMatchView(item: item).environmentObject(library) }

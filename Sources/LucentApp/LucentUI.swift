@@ -155,14 +155,13 @@ struct LucentSettingsRow: View {
     let title: String
     let icon: String
     var body: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 14) {
             Image(systemName: icon).font(.system(size: 17, weight: .medium)).foregroundStyle(.primary)
-                .frame(width: 30, height: 30)
-                .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 9))
+                .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
-            Text(LocalizedStringKey(title)).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+            Text(LocalizedStringKey(title)).font(.body).foregroundStyle(.primary)
             Spacer(minLength: 6)
-        }.frame(minHeight: LucentUI.controlSize).contentShape(Rectangle())
+        }.padding(.vertical, 4).contentShape(Rectangle())
     }
 }
 

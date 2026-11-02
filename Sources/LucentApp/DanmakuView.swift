@@ -196,7 +196,7 @@ struct DanmakuSettingsView: View {
                             }
                         }.disabled(busy)
                     }
-                    NavigationLink("服务配置") { PlaybackServicesView() }
+                    NavigationLink("服务配置") { PlaybackServicesView(scope: .danmaku).lucentSecondaryPage() }
                 }
                 Section("显示") {
                     slider("不透明度", value: $opacity, range: 0.2...1, formatted: "\(Int(opacity * 100))%")

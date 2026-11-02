@@ -27,13 +27,8 @@ struct MobileLocalLibraryHomeView: View {
                 VStack(alignment: .leading, spacing: 30) {
                     header
                     if files.isEmpty {
-                        ContentUnavailableView {
-                            Label("你的私人影院", systemImage: "film.stack")
-                        } description: {
-                            Text("将电影和剧集添加到媒体库，开始你的观影之旅。")
-                        } actions: {
-                            Button("添加内容", action: manageSources).buttonStyle(.bordered)
-                        }.padding(.top, 30)
+                        HomeLibraryEmptyState(action: manageSources, aggregateLibrary: true)
+                            .padding(.top, 24)
                     } else {
                         if showContinue {
                             continueWatching(LocalCatalogCollection.continueWatching.items(cards: cards, files: files),
@@ -63,13 +58,17 @@ struct MobileLocalLibraryHomeView: View {
             .background(Color(uiColor: .systemBackground))
         }
         .navigationDestination(item: $selectedItemID) { id in
-            if #available(iOS 18, *), let transitionKey {
-                MediaDetailView(itemID: id).environmentObject(library)
-                    .navigationTransition(.zoom(sourceID: transitionKey, in: detailTransition))
-            } else { MediaDetailView(itemID: id).environmentObject(library) }
+            Group {
+                if #available(iOS 18, *), let transitionKey {
+                    MediaDetailView(itemID: id).environmentObject(library)
+                        .navigationTransition(.zoom(sourceID: transitionKey, in: detailTransition))
+                } else { MediaDetailView(itemID: id).environmentObject(library) }
+            }.lucentSecondaryPage()
         }
         .navigationDestination(item: $selectedCollection) { collection in
-            LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
+            Group {
+                LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
+            }.lucentSecondaryPage()
         }
         .onChange(of: selectedItemID) { _, _ in updateNavigationState() }
         .onChange(of: selectedCollection) { _, value in

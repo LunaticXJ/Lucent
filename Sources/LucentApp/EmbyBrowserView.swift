@@ -120,7 +120,9 @@ private struct EmbyBrowserPageView: View {
         .background(EmbyBrowserPalette.page)
         .task { await initialize() }
         .navigationDestination(item: $selectedItemID) { id in
-            MediaDetailView(itemID: id).environmentObject(library)
+            Group {
+                MediaDetailView(itemID: id).environmentObject(library)
+            }.lucentSecondaryPage()
         }
     }
 
@@ -204,10 +206,12 @@ private struct EmbyBrowserPageView: View {
                         ForEach(entries, id: \.id) { entry in
                             if section == .folders && facet == nil {
                                 NavigationLink {
-                                    EmbyBrowserPageView(source: source, parentID: entry.id,
-                                                        title: entry.name,
-                                                        catalogLibraryID: libraryID,
-                                                        catalogType: activeCatalog)
+                                    Group {
+                                        EmbyBrowserPageView(source: source, parentID: entry.id,
+                                                            title: entry.name,
+                                                            catalogLibraryID: libraryID,
+                                                            catalogType: activeCatalog)
+                                    }.lucentSecondaryPage()
                                 } label: {
                                     SeriesPosterTile(source: source, entry: entry, folder: true)
                                 }
@@ -228,13 +232,15 @@ private struct EmbyBrowserPageView: View {
                     LazyVStack(spacing: 9) {
                         ForEach(entries, id: \.id) { entry in
                             NavigationLink {
-                                EmbyBrowserPageView(source: source,
-                                                    parentID: section == .folders ? entry.id : libraryID,
-                                                    title: entry.name,
-                                                    catalogLibraryID: libraryID,
-                                                    catalogType: activeCatalog,
-                                                    facet: section == .genres ? .genre(entry.id) :
-                                                        section == .studios ? .studio(entry.id) : nil)
+                                Group {
+                                    EmbyBrowserPageView(source: source,
+                                                        parentID: section == .folders ? entry.id : libraryID,
+                                                        title: entry.name,
+                                                        catalogLibraryID: libraryID,
+                                                        catalogType: activeCatalog,
+                                                        facet: section == .genres ? .genre(entry.id) :
+                                                            section == .studios ? .studio(entry.id) : nil)
+                                }.lucentSecondaryPage()
                             } label: {
                                 HStack(spacing: 14) {
                                     Image(systemName: section == .folders ? "folder.fill" :
@@ -276,7 +282,9 @@ private struct EmbyBrowserPageView: View {
                     }
                 } else {
                     NavigationLink {
-                        EmbyBrowserPageView(source: source, parentID: entry.id, title: entry.name)
+                        Group {
+                            EmbyBrowserPageView(source: source, parentID: entry.id, title: entry.name)
+                        }.lucentSecondaryPage()
                     } label: {
                         Label(entry.name, systemImage: "folder")
                     }
@@ -444,7 +452,7 @@ private struct SeriesPosterTile: View {
                     if !folder, let rating = entry.communityRating, rating > 0 {
                         LucentRatingBadge(rating: rating)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                            .padding(5)
+                            .padding(3)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))

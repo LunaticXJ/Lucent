@@ -9,6 +9,9 @@ enum ArtworkImageDecoder {
         cache.countLimit = 100
         return cache
     }()
+    static func cachedImage(key: String, maximumPixelSize: Int) -> LucentPlatformImage? {
+        cache.object(forKey: "\(key)|\(maximumPixelSize)" as NSString)
+    }
     static func image(data: Data, key: String, maximumPixelSize: Int) async -> LucentPlatformImage? {
         let cacheKey = "\(key)|\(maximumPixelSize)" as NSString
         if let image = cache.object(forKey: cacheKey) { return image }

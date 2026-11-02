@@ -16886,6 +16886,204 @@
           }
         }
       }
+    },
+    "连接影视服务器，或导入存储中的电影与剧集。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接影视服务器，或导入存储中的电影与剧集。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect a media server or import movies and shows from your storage."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連接影視伺服器，或匯入儲存空間中的電影與劇集。"
+          }
+        }
+      }
+    },
+    "正在加载首页": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载首页"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading your home"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在載入首頁"
+          }
+        }
+      }
+    },
+    "添加影视服务器": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加影视服务器"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Media Server"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增影視伺服器"
+          }
+        }
+      }
+    },
+    "弹幕服务": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "弹幕服务"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Danmaku Service"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "彈幕服務"
+          }
+        }
+      }
+    },
+    "配置聚合媒体库": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure Media Library"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置聚合媒体库"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置聚合媒體庫"
+          }
+        }
+      }
+    },
+    "添加文件源并扫描电影与剧集，开始建立你的媒体库。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add file sources and scan movies and shows to build your library."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加文件源并扫描电影与剧集，开始建立你的媒体库。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增檔案來源並掃描電影與影集，開始建立你的媒體庫。"
+          }
+        }
+      }
+    },
+    "允许移动网络播放": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Cellular Playback"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许移动网络播放"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許行動網路播放"
+          }
+        }
+      }
+    },
+    "在线播放可能消耗较多移动网络流量。允许后将记住选择，可在设置中关闭。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Streaming may use significant cellular data. Your choice will be remembered and can be turned off in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在线播放可能消耗较多移动网络流量。允许后将记住选择，可在设置中关闭。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "線上播放可能消耗較多行動網路流量。允許後將記住選擇，可在設定中關閉。"
+          }
+        }
+      }
+    },
+    "开启后，移动网络播放不再询问；关闭后播放前会询问。本地文件和已下载影片不受影响。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When enabled, cellular playback starts without asking. When disabled, playback asks for permission. Local files and downloaded videos are unaffected."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后，移动网络播放不再询问；关闭后播放前会询问。本地文件和已下载影片不受影响。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟後，行動網路播放不再詢問；關閉後播放前會詢問。本機檔案和已下載影片不受影響。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

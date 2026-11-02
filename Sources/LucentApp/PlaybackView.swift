@@ -114,7 +114,7 @@ struct PlaybackView: View {
     @State private var showSubtitleSearch = false
     @Environment(\.scenePhase) private var scenePhase
     #if os(iOS)
-    @State private var cellularApproved = false
+    @AppStorage(NetworkUsagePolicy.playbackKey) private var cellularApproved = true
     @State private var showCellularConfirmation = false
     @State private var playbackStarted = false
     @State private var networkSuspended = false
@@ -214,7 +214,7 @@ struct PlaybackView: View {
                 } else { session.start(library: library); playbackStarted = true }
             }
         } message: {
-            Text("在线播放可能消耗较多移动网络流量。本次确认仅对当前影片有效。")
+            Text("在线播放可能消耗较多移动网络流量。允许后将记住选择，可在设置中关闭。")
         }
         .onReceive(NotificationCenter.default.publisher(for: NetworkUsagePolicy.changed).receive(on: RunLoop.main)) { _ in
             handlePlaybackNetworkChange()
@@ -523,7 +523,6 @@ struct PlaybackView: View {
     }
     private func handlePlaybackNetworkChange() {
         let route = NetworkUsagePolicy.shared.route
-        if route == .wifi || route == .wired { cellularApproved = false }
         guard playbackStarted, !showCellularConfirmation, !networkSuspended,
               NetworkUsagePolicy.playbackNeedsConfirmation(on: route, remote: playbackUsesNetwork, approved: cellularApproved) else { return }
         resumePlayingAfterNetworkConsent = session.suspendForCellularConfirmation()

@@ -51,9 +51,7 @@ struct MobileSegmentedTabs<Value: Hashable>: View {
             }
         }
         .pickerStyle(.segmented)
-        .controlSize(.large)
-        .font(.system(size: 16, weight: .semibold))
-        .frame(height: 56)
+        .controlSize(.regular)
     }
 }
 

@@ -401,7 +401,7 @@ struct SeriesDetailView: View {
                         Text("·  " + genres.prefix(3).joined(separator: "、")).lineLimit(1)
                     }
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 if !details.isEmpty {
                     Text(details)
@@ -448,7 +448,7 @@ struct SeriesDetailView: View {
     }
 
     private func synopsisPreview(_ text: String, title: String, lines: Int,
-                                 font: Font = .subheadline, opacity: Double = 0.84) -> some View {
+                                 font: Font = .footnote, opacity: Double = 0.84) -> some View {
         Button {
             synopsisSheet = .init(title: title, text: text)
         } label: {
@@ -560,7 +560,7 @@ struct SeriesDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: 14)
                             .stroke(episode.id == activeEpisode?.id ? .white : .clear, lineWidth: 2))
                     Text("E\(String(format: "%02d", episode.indexNumber ?? 0)) · \(episode.name)")
-                        .font(.subheadline.weight(.semibold)).lineLimit(2)
+                        .font(.footnote.weight(.semibold)).lineLimit(2)
                 }
             }
             .lucentContentButtonStyle()
@@ -792,7 +792,7 @@ struct SeriesDetailView: View {
                                   lineWidth: selectedEpisodeIDs.contains(episode.id) ||
                                   episode.id == activeEpisode?.id ? 2 : 0.5))
             Text("\(episode.indexNumber ?? 0). \(episode.name)")
-                .font(.subheadline.weight(.semibold)).lineLimit(2)
+                .font(.footnote.weight(.semibold)).lineLimit(2)
                 .foregroundStyle(.white)
         }
     }

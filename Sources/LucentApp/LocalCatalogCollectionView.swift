@@ -114,6 +114,7 @@ struct LocalCatalogArtwork: View {
 
 struct LocalCatalogPosterCard: View {
     let item: MediaItem
+    var showsPlaybackTime = false
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             LocalCatalogArtwork(item: item)
@@ -123,6 +124,9 @@ struct LocalCatalogPosterCard: View {
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
             LucentPosterCaption(title: item.catalogDisplayTitle, subtitle: item.metadata?.year.map(String.init) ?? " ")
+            if showsPlaybackTime {
+                LucentPlaybackTimeCaption(position: item.position, duration: item.duration ?? item.technicalInfo?.duration)
+            }
         }
         .contentShape(Rectangle())
     }
@@ -222,7 +226,7 @@ struct LocalCatalogCollectionView: View {
                         Button {
                             transitionKey = "grid:\(item.id)"; selectedItemID = item.id
                         } label: {
-                            LocalCatalogPosterCard(item: item)
+                            LocalCatalogPosterCard(item: item, showsPlaybackTime: collection == .continueWatching)
                                 .modifier(HomeMatchedSource(key: "grid:\(item.id)", namespace: detailTransition))
                         }.buttonStyle(.plain)
                         .contextMenu {

@@ -211,7 +211,7 @@ private struct EmbyBrowserPageView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .controlSize(.large)
+                .controlSize(.regular)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 12)
             }
@@ -222,7 +222,7 @@ private struct EmbyBrowserPageView: View {
     private var genericPage: some View { browserContent }
 
     private var usesPosterGrid: Bool {
-        if !isCatalogPage { return entries.contains(where: isPlayable) }
+        if !isCatalogPage { return true }
         return section == .programs || section == .movies || facet != nil ||
             (section == .folders && activeCatalog != .series)
     }
@@ -353,6 +353,8 @@ private struct EmbyBrowserPageView: View {
                 userID: source.userID, itemID: parentID, token: token, fields: "DateCreated") {
             guard !Task.isCancelled else { return }
             detectedCatalog = .from(detail.collectionType)
+            if detectedCatalog == nil, detail.type == "CollectionFolder",
+               detail.collectionType?.isEmpty != false { detectedCatalog = .mixed }
         }
         if let activeCatalog { EmbyBrowseMemory.collectionTypes[libraryCacheKey] = activeCatalog.rawValue }
         guard !Task.isCancelled else { return }

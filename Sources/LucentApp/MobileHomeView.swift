@@ -684,36 +684,25 @@ struct MobileHomeView: View {
                 .padding(.top, HomePalette.isPad ? 72 : 60)
                 if latest.count > 1 {
                     HStack(spacing: 0) {
-                        ZStack(alignment: .leading) {
-                            HStack(spacing: 0) {
-                                ForEach(latest.indices, id: \.self) { index in
-                                    Button {
-                                        heroPauseUntil = Date().addingTimeInterval(8)
-                                        advanceHero(to: index)
-                                    } label: {
-                                        Circle()
-                                            .fill(Color.gray.opacity(index == indicatorIndex ? 0 : 0.65))
-                                            .frame(width: 4, height: 4)
-                                            .frame(width: 22, height: 30)
-                                            .contentShape(Rectangle())
-                                    }
-                                    .accessibilityLabel("第 \(index + 1) 张：\(latest[index].name)")
-                                }
+                        ForEach(latest.indices, id: \.self) { index in
+                            let distance = abs(index - indicatorIndex)
+                            let diameter: CGFloat = distance == 0 ? 8 : distance == 1 ? 6 : 4
+                            Button {
+                                heroPauseUntil = Date().addingTimeInterval(8)
+                                advanceHero(to: index)
+                            } label: {
+                                Circle()
+                                    .fill(index == indicatorIndex ? (darkMode ? Color.white : Color.black) : Color.gray.opacity(0.65))
+                                    .frame(width: diameter, height: diameter)
+                                    .frame(width: 22, height: 30)
+                                    .contentShape(Rectangle())
                             }
-                            Capsule()
-                                .fill(Color.gray.opacity(0.35))
-                                .frame(width: 18, height: 4)
-                                .overlay(alignment: .leading) {
-                                    Capsule()
-                                        .fill(darkMode ? Color.white : Color.black)
-                                        .frame(width: max(2, 18 * heroProgress), height: 4)
-                                }
-                                .offset(x: CGFloat(indicatorIndex) * 22 + 2)
-                                .animation(.spring(response: 0.42, dampingFraction: 0.86), value: indicatorIndex)
-                                .allowsHitTesting(false)
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("第 \(index + 1) 张：\(latest[index].name)")
+                            .accessibilityAddTraits(index == indicatorIndex ? .isSelected : [])
                         }
-                        .frame(width: CGFloat(latest.count) * 22)
                     }
+                    .animation(.easeInOut(duration: 0.25), value: indicatorIndex)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 14)
                     .zIndex(10)
@@ -802,14 +791,14 @@ struct MobileHomeView: View {
                         Text("·  " + genres.prefix(2).joined(separator: "、")).lineLimit(1)
                     }
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(darkMode ? Color.white : Color.black)
                 if let overview = displayItem.overview, !overview.isEmpty {
-                    Text(overview).font(.subheadline)
+                    Text(overview).font(.footnote)
                         .foregroundStyle(darkMode ? Color.white.opacity(0.86) : Color.gray)
                         .lineLimit(3)
-                        .frame(height: 63, alignment: .top)
-                } else { Color.clear.frame(height: 63) }
+                        .frame(height: 54, alignment: .top)
+                } else { Color.clear.frame(height: 54) }
         }
         .multilineTextAlignment(.center)
         .padding(.horizontal, 24)
@@ -982,12 +971,14 @@ struct MobileHomeView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 16))
                                     .modifier(HomeMatchedSource(key: "continue:\(item.id)",
                                                                 namespace: detailTransition))
-                                    Text(item.name).font(.subheadline.weight(.semibold))
+                                    Text(item.name).font(.footnote.weight(.semibold))
                                         .foregroundStyle(HomePalette.ink).lineLimit(1)
                                     if let label = item.identity.episodeLabel {
                                         Text(label).font(.caption).foregroundStyle(HomePalette.muted)
                                             .lineLimit(1)
                                     }
+                                    LucentPlaybackTimeCaption(position: Double(item.userData?.playbackPositionTicks ?? 0) / 10_000_000,
+                                        duration: item.runTimeTicks.map { Double($0) / 10_000_000 })
                                 }
                                 .frame(width: HomePalette.continueWidth, alignment: .leading)
                             }
@@ -1341,8 +1332,10 @@ private struct HomeContinuingList: View {
                             VStack(alignment:.leading,spacing:8) {
                                 EmbyArtwork(source:source,itemID:item.id,backdrop:true,width:600)
                                     .frame(height:110).clipShape(RoundedRectangle(cornerRadius:14))
-                                Text(item.seriesName ?? item.name).font(.subheadline).lineLimit(1)
+                                Text(item.seriesName ?? item.name).font(.footnote).lineLimit(1)
                                 if let label = item.identity.episodeLabel { Text(label).font(.caption).foregroundStyle(.secondary) }
+                                LucentPlaybackTimeCaption(position: Double(item.userData?.playbackPositionTicks ?? 0) / 10_000_000,
+                                    duration: item.runTimeTicks.map { Double($0) / 10_000_000 })
                             }
                         }.buttonStyle(.plain)
                     }
@@ -1644,7 +1637,7 @@ struct MobileSearchView: View {
                 .lineLimit(2, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let subtitle {
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(subtitle).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)

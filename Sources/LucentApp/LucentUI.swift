@@ -88,7 +88,7 @@ struct LucentRatingBadge: View {
     var body: some View {
         if rating.isFinite && rating > 0 {
             Text(rating.formatted(.number.precision(.fractionLength(1))))
-                .font(.caption.weight(.semibold)).monospacedDigit()
+                .font(.caption2.weight(.semibold)).monospacedDigit()
                 .foregroundStyle(.white).padding(.horizontal, 5).padding(.vertical, 3)
                 .background(.black.opacity(0.66), in: RoundedRectangle(cornerRadius: 5))
                 .accessibilityLabel(Text("评分 \(rating.formatted(.number.precision(.fractionLength(1))))"))
@@ -344,10 +344,10 @@ struct LucentPosterCaption: View {
     var reservesSpace = true
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+            Text(title).font(.footnote.weight(.medium)).foregroundStyle(.primary)
                 .lineLimit(lines, reservesSpace: reservesSpace).frame(maxWidth: .infinity, alignment: .leading)
             if let subtitle {
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }
     }
@@ -386,7 +386,6 @@ private struct LucentCollectionChrome<Trailing: View>: ViewModifier {
                 .padding(.bottom, 12)
             content
         }
-        .background(LucentUI.page)
         .navigationTitle("")
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -401,5 +400,25 @@ extension View {
     func lucentCollectionChrome<Trailing: View>(title: String, back: @escaping () -> Void,
         @ViewBuilder trailing: () -> Trailing) -> some View {
         modifier(LucentCollectionChrome(title: title, back: back, trailing: trailing()))
+    }
+}
+
+/// Elapsed / total for both local and server-backed continue-watching cards.
+struct LucentPlaybackTimeCaption: View {
+    let position: Double
+    let duration: Double?
+    private var total: Double? { duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } }
+    private var elapsed: String { clock(min(max(0, position.isFinite ? position : 0), total ?? .greatestFiniteMagnitude)) }
+    var body: some View {
+        Group {
+            if let total { Text("\(elapsed) / \(clock(total))") }
+            else { Text("已播放 \(elapsed)") }
+        }
+        .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+    }
+    private func clock(_ value: Double) -> String {
+        let seconds = Int(min(max(0, value), Double(Int.max / 2)))
+        if seconds >= 3600 { return "\(seconds / 3600):" + String(format: "%02d:%02d", seconds / 60 % 60, seconds % 60) }
+        return "\(seconds / 60):" + String(format: "%02d", seconds % 60)
     }
 }

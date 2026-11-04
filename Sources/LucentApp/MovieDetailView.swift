@@ -62,7 +62,7 @@ struct MovieDetailView: View {
                            !summary.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(summary)
-                                    .font(.subheadline)
+                                    .font(.footnote)
                                     .foregroundStyle(.white.opacity(0.88))
                                     .lineSpacing(4)
                                     .lineLimit(4)
@@ -196,7 +196,7 @@ struct MovieDetailView: View {
                         Text("·  " + genres.prefix(2).joined(separator: "、")).lineLimit(1)
                     }
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 Text(technicalSummary)
                     .font(.caption)

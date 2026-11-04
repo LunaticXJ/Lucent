@@ -175,8 +175,9 @@ struct MobileLocalLibraryHomeView: View {
                                             }
                                             .clipShape(RoundedRectangle(cornerRadius: 13))
                                             .modifier(HomeMatchedSource(key: key, namespace: detailTransition))
-                                        Text(item.catalogDisplayTitle).font(.system(size: 15, weight: .medium)).lineLimit(1)
-                                        Text(resumeLabel(item)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        Text(item.catalogDisplayTitle).font(.footnote.weight(.medium)).lineLimit(1)
+                                        if let label = item.identity?.episodeLabel { Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                                        LucentPlaybackTimeCaption(position: item.position, duration: item.duration ?? item.technicalInfo?.duration)
                                     }.frame(width: width, alignment: .leading)
                                 }.buttonStyle(.plain)
                             }
@@ -198,10 +199,6 @@ struct MobileLocalLibraryHomeView: View {
                 }.foregroundStyle(.secondary).padding(.vertical, 8)
             }.buttonStyle(.plain)
         }.padding(.horizontal, 22)
-    }
-    private func resumeLabel(_ item: MediaItem) -> String {
-        let position = "已播放 \(Int(item.position / 60)) 分钟"
-        return [item.identity?.episodeLabel, position].compactMap { $0 }.joined(separator: " · ")
     }
     private func open(_ item: MediaItem, key: String) { transitionKey = key; selectedItemID = item.id }
     private func updateNavigationState() { detailPresented = selectedItemID != nil }

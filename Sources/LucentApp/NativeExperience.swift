@@ -64,10 +64,19 @@ struct NativeMediaEntry: Identifiable, Sendable {
     var overview: String { remote?.overview ?? local?.metadata?.summary ?? "" }
     var rating: Double? { remote?.communityRating ?? local?.metadata?.rating }
     var year: Int? { remote?.productionYear ?? plex?.year ?? local?.metadata?.year }
+    var position: Double {
+        if let local { return local.position }
+        if let plex { return (plex.viewOffset ?? 0) / 1000 }
+        return Double(remote?.userData?.playbackPositionTicks ?? 0) / 10_000_000
+    }
+    var duration: Double? {
+        if let local { return local.duration ?? local.technicalInfo?.duration }
+        if let plex { return plex.duration.map { $0 / 1000 } }
+        return remote?.runTimeTicks.map { Double($0) / 10_000_000 }
+    }
     var progress: Double {
-        if let local { return local.progress }
-        guard let total = remote?.runTimeTicks, total > 0 else { return 0 }
-        return min(1, max(0, Double(remote?.userData?.playbackPositionTicks ?? 0) / Double(total)))
+        guard let duration, duration > 0 else { return 0 }
+        return min(1, max(0, position / duration))
     }
     @MainActor func open(in library: LibraryStore) -> MediaItem? {
         if let local { return local }
@@ -112,6 +121,7 @@ struct NativeMediaCard: View {
                 .overlay(alignment: .bottom) { if landscape && entry.progress > 0 { ProgressView(value: entry.progress).tint(.white).padding(10) } }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
             LucentPosterCaption(title: entry.title, subtitle: entry.year.map(String.init))
+            if landscape { LucentPlaybackTimeCaption(position: entry.position, duration: entry.duration) }
         }.contentShape(Rectangle())
     }
 }
@@ -329,8 +339,8 @@ struct NativeHomeView: View {
             LinearGradient(colors: [.clear, .black.opacity(0.88)], startPoint: .top, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 16) {
                 DetailTitleArtwork(url: heroArtwork?.logoURL, title: heroArtwork?.localizedTitle ?? entry.title).frame(maxWidth: 420, alignment: .leading)
-                if let rating = entry.rating { Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill").foregroundStyle(.yellow) }
-                Text(entry.overview).lineLimit(3).frame(maxWidth: 720, alignment: .leading)
+                if let rating = entry.rating { Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill").font(.caption).foregroundStyle(.yellow) }
+                Text(entry.overview).font(.footnote).lineLimit(3).frame(maxWidth: 720, alignment: .leading)
                 HStack {
                     Button("查看详情", systemImage: "play.fill") { selected = entry.destination(in: library) }.buttonStyle(.borderedProminent)
                     Spacer()

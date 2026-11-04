@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: '6.0'
-    CURRENT_PROJECT_VERSION: '6062'
+    CURRENT_PROJECT_VERSION: '6065'
 packages:
   SwiftSMB:
     url: https://github.com/RuiNelson/SwiftSMB.git

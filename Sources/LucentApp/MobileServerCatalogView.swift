@@ -110,10 +110,10 @@ struct MobileServerCatalogView: View {
 
     @ViewBuilder private func detailDestination(_ id: UUID) -> some View {
         if #available(iOS 18.0, *), let selectedTransitionKey {
-            MediaDetailView(itemID: id).environmentObject(library)
+            MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
                 .navigationTransition(.zoom(sourceID: selectedTransitionKey, in: detailTransition))
         } else {
-            MediaDetailView(itemID: id).environmentObject(library)
+            MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
         }
     }
 

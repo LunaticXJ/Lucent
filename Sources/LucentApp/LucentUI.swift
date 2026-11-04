@@ -207,6 +207,7 @@ struct LucentToolbarButton: View {
             Image(systemName: symbol).font(.system(size: 19, weight: .medium))
                 .frame(width: LucentUI.controlSize, height: LucentUI.controlSize)
                 .modifier(LucentGlass(shape: Circle(), role: role, interactive: true))
+                .contentShape(Circle())
         }.buttonStyle(.plain).accessibilityLabel(LocalizedStringKey(label))
     }
 }
@@ -356,5 +357,49 @@ extension View {
     /// Semantic shorthand for video controls and drawers, with one glass implementation.
     func lucentVideoGlass(radius: CGFloat = 100) -> some View {
         modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: radius, style: .continuous), role: .videoOverlay))
+    }
+}
+
+/// Keep collection controls in the destination content so zoom transitions move them too.
+private struct LucentCollectionChrome<Trailing: View>: ViewModifier {
+    let title: String
+    let back: () -> Void
+    let trailing: Trailing
+    @ViewBuilder func body(content: Content) -> some View {
+        #if os(iOS)
+        VStack(spacing: 0) {
+            Text(LocalizedStringKey(title))
+                .font(.system(size: 18, weight: .semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 60)
+                .frame(height: LucentUI.controlSize)
+                .overlay {
+                    HStack {
+                        LucentToolbarButton(symbol: "chevron.left", label: "返回", action: back)
+                        Spacer(minLength: 16)
+                        trailing
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+            content
+        }
+        .background(LucentUI.page)
+        .navigationTitle("")
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        #else
+        content.navigationTitle(LocalizedStringKey(title))
+            .toolbar { ToolbarItem(placement: .primaryAction) { trailing } }
+        #endif
+    }
+}
+
+extension View {
+    func lucentCollectionChrome<Trailing: View>(title: String, back: @escaping () -> Void,
+        @ViewBuilder trailing: () -> Trailing) -> some View {
+        modifier(LucentCollectionChrome(title: title, back: back, trailing: trailing()))
     }
 }

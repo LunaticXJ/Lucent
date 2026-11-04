@@ -40,6 +40,7 @@ private extension MediaItem {
 
 struct MediaDetailView: View {
     @EnvironmentObject private var library: LibraryStore
+    @Environment(\.dismiss) private var dismiss
     @State private var playingItem: MediaItem?
     @State private var editingItem: MediaItem?
     @State private var showMetadata = false
@@ -64,8 +65,13 @@ struct MediaDetailView: View {
     @State private var selectedPlexMediaIndex = 0
     @State private var advancedDetailItem: MediaItem?
     let itemID: UUID
+    var onBack: (() -> Void)? = nil
 
     private var item: MediaItem? { library.visibleItems.first { $0.id == itemID } }
+
+    private func goBack() {
+        if let onBack { onBack() } else { dismiss() }
+    }
 
     var body: some View {
             Group {
@@ -80,7 +86,7 @@ struct MediaDetailView: View {
                             forceRemoteVersion = false
                             selectedTranscodeBitrate = nil
                             presentPlayback(selected)
-                        }, onMore: { selected in advancedDetailItem = selected })
+                        }, onMore: { selected in advancedDetailItem = selected }, onBack: goBack)
 
                     } else {
                         MovieDetailView(item: item, onPlay: { selected in
@@ -92,11 +98,11 @@ struct MediaDetailView: View {
                             forceRemoteVersion = false
                             selectedTranscodeBitrate = nil
                             presentPlayback(selected)
-                        }, onMore: { advancedDetailItem = item })
+                        }, onMore: { advancedDetailItem = item }, onBack: goBack)
 
                     }
                 } else {
-                    LucentStateView(title: "影片已移除", symbol: "film")
+                    LucentStateView(title: "影片已移除", symbol: "film", actionTitle: "返回", action: goBack)
                 }
             }
             .navigationTitle("")

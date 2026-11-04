@@ -108,10 +108,12 @@ struct SeriesArtwork: View {
 struct DetailTitleArtwork: View {
     let url: URL?
     let title: String
+    var fallbackRequest: URLRequest? = nil
     @State private var image: LucentPlatformImage?
+    @State private var serverImage: LucentPlatformImage?
     var body: some View {
         Group {
-            if let image {
+            if let image = image ?? serverImage {
                 Image(lucentImage: image).resizable().scaledToFit()
                     .frame(maxWidth: 310, maxHeight: 125)
                     .accessibilityLabel(title)
@@ -127,19 +129,29 @@ struct DetailTitleArtwork: View {
         .task(id: url) {
             image = url.flatMap { ArtworkImageDecoder.cachedImage(key: "tmdb|\($0.absoluteString)", maximumPixelSize: 1000) }
             guard let url else { return }
-            guard let data = try? await LocalMediaCache.shared.imageData(
-                key: "tmdb|\(url.absoluteString)", fetch: {
-                    let (data, response) = try await URLSession.shared.data(from: url)
-                    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                        throw URLError(.badServerResponse)
-                    }
-                    return data
-                }), !Task.isCancelled, let decoded = await ArtworkImageDecoder.image(data: data, key: "tmdb|\(url.absoluteString)", maximumPixelSize: 1000) else {
-                return
-            }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+            let loaded = await Self.load(request, key: "tmdb|\(url.absoluteString)")
             guard !Task.isCancelled else { return }
-            image = decoded
+            image = loaded
         }
+        .task(id: fallbackRequest?.url) {
+            serverImage = nil
+            guard let request = fallbackRequest, let url = request.url else { return }
+            let key = "logo|\(url.absoluteString)"
+            if let cached = ArtworkImageDecoder.cachedImage(key: key, maximumPixelSize: 1000) { serverImage = cached; return }
+            let loaded = await Self.load(request, key: key)
+            guard !Task.isCancelled else { return }
+            serverImage = loaded
+        }
+    }
+    private static func load(_ request: URLRequest, key: String) async -> LucentPlatformImage? {
+        guard let data = try? await LocalMediaCache.shared.imageData(key: key, fetch: {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200, data.count < 5_000_000 else { throw URLError(.badServerResponse) }
+            return data
+        }), !Task.isCancelled else { return nil }
+        return await ArtworkImageDecoder.image(data: data, key: key, maximumPixelSize: 1000)
     }
 }
 
@@ -150,6 +162,7 @@ struct SeriesDetailView: View {
     let item: MediaItem
     let onPlay: (MediaItem) -> Void
     let onMore: (MediaItem) -> Void
+    var onBack: (() -> Void)? = nil
 
     @State private var page: ServerEpisodeClient.SeriesPage?
     @State private var season = 1
@@ -326,7 +339,7 @@ struct SeriesDetailView: View {
 
     private var topControls: some View {
                 HStack {
-                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: .videoOverlay) { dismiss() }
+                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: .videoOverlay) { if let onBack { onBack() } else { dismiss() } }
                     Spacer()
                     Menu {
                         Button(item.watched ? "标记为未观看" : "标记为已看完") {
@@ -351,6 +364,11 @@ struct SeriesDetailView: View {
         .padding(.horizontal, 26)
     }
 
+    private var titleLogoRequest: URLRequest? {
+        guard let server, let id = page?.series.id ?? remoteID else { return nil }
+        return ServerDetailClient.logoRequest(baseAddress: server.base, token: server.token, itemID: id)
+    }
+
     private func hero(height: CGFloat, width: CGFloat, pull: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             if artworkResolved {
@@ -369,7 +387,8 @@ struct SeriesDetailView: View {
             VStack(spacing: 13) {
                 if artworkResolved {
                     DetailTitleArtwork(url: artwork?.logoURL,
-                                       title: artwork?.localizedTitle ?? seriesName)
+                                       title: artwork?.localizedTitle ?? seriesName,
+                                       fallbackRequest: titleLogoRequest)
                 } else {
                     Color.clear.frame(height: 125)
                 }

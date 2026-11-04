@@ -60,14 +60,15 @@ struct MobileLocalLibraryHomeView: View {
         .navigationDestination(item: $selectedItemID) { id in
             Group {
                 if #available(iOS 18, *), let transitionKey {
-                    MediaDetailView(itemID: id).environmentObject(library)
+                    MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
                         .navigationTransition(.zoom(sourceID: transitionKey, in: detailTransition))
-                } else { MediaDetailView(itemID: id).environmentObject(library) }
+                } else { MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library) }
             }.lucentSecondaryPage()
         }
         .navigationDestination(item: $selectedCollection) { collection in
             Group {
-                LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
+                LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented,
+                                           onBack: { withAnimation { selectedCollection = nil } }).environmentObject(library)
             }.lucentSecondaryPage()
         }
         .onChange(of: selectedItemID) { _, _ in updateNavigationState() }

@@ -621,8 +621,12 @@ struct LibraryView: View {
     private var mobileAddSourceMenu: some View {
         Button { sourceChooserScope = mobileSourceKind == 1 ? .servers : .library; showSourceChooser = true } label: {
             Image(systemName: "plus").font(.system(size: 19, weight: .semibold))
-                .frame(width: 44, height: 44).contentShape(Circle())
+                .frame(width: 44, height: 44)
+                .modifier(LucentGlass(shape: Circle()))
+                .clipShape(Circle())
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(mobileSourceKind == 1 ? "添加影视服务器" : "添加片源")
     }
 
@@ -1261,7 +1265,12 @@ struct LibraryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 if library.activeProfile?.isChild != true {
-                    ToolbarItem(placement: .topBarTrailing) { mobileAddSourceMenu }
+                    if #available(iOS 26.0, *) {
+                        ToolbarItem(placement: .topBarTrailing) { mobileAddSourceMenu }
+                            .sharedBackgroundVisibility(.hidden)
+                    } else {
+                        ToolbarItem(placement: .topBarTrailing) { mobileAddSourceMenu }
+                    }
                 }
             }
 
@@ -1349,7 +1358,7 @@ struct LibraryView: View {
             #endif
             .navigationDestination(item: $selectedItemID) { id in
                 Group {
-                    MediaDetailView(itemID: id)
+                    MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } })
                         .environmentObject(library)
                 }.lucentSecondaryPage()
             }

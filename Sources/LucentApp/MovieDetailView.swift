@@ -7,6 +7,7 @@ struct MovieDetailView: View {
     let item: MediaItem
     let onPlay: (MediaItem) -> Void
     let onMore: () -> Void
+    var onBack: (() -> Void)? = nil
 
     @State private var detail: JellyfinItem?
     @State private var overviewExpanded = false
@@ -138,7 +139,7 @@ struct MovieDetailView: View {
 
     private var topControls: some View {
                 HStack {
-                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: .videoOverlay) { dismiss() }
+                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: .videoOverlay) { if let onBack { onBack() } else { dismiss() } }
                     Spacer()
                     Menu {
                         Button(item.watched ? "标记为未观看" : "标记为已看完") {
@@ -180,7 +181,8 @@ struct MovieDetailView: View {
             VStack(spacing: 12) {
                 if artworkResolved {
                     DetailTitleArtwork(url: artwork?.logoURL,
-                                       title: artwork?.localizedTitle ?? detail?.name ?? item.title)
+                                       title: artwork?.localizedTitle ?? detail?.name ?? item.title,
+                                       fallbackRequest: server.flatMap { ServerDetailClient.logoRequest(baseAddress: $0.base, token: $0.token, itemID: $0.itemID) })
                 } else {
                     Color.clear.frame(height: 125)
                 }

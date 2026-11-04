@@ -7,9 +7,9 @@ struct StretchyHeroHeader<Content: View>: View {
 
     var body: some View {
         GeometryReader { proxy in
-            // Global window coordinates keep the artwork's top fixed at the physical screen edge.
+            // Scroll-local coordinates ignore navigation zoom transforms during return.
             #if os(iOS)
-            let pull = max(0, proxy.frame(in: .global).minY)
+            let pull = max(0, proxy.frame(in: .scrollView(axis: .vertical)).minY)
             #else
             let pull: CGFloat = 0
             #endif

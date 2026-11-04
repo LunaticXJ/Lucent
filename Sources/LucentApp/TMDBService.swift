@@ -103,7 +103,7 @@ enum TMDBService {
             URLQueryItem(name: "append_to_response", value: "images"),
             URLQueryItem(name: "language", value: locale),
             URLQueryItem(name: "region", value: LocalizationPreferences.current.regionCode),
-            URLQueryItem(name: "include_image_language", value: "\(locale),\(lang),null")
+            URLQueryItem(name: "include_image_language", value: "\(locale),\(lang),en,null")
         ]
         let authorization = authorize(&components, credential: token)
         var request = URLRequest(url: components.url!)
@@ -122,7 +122,9 @@ enum TMDBService {
         }
         func url(_ image: ArtworkImage?, size: String) -> URL? {
             guard let path = image?.file_path, path.hasPrefix("/") else { return nil }
-            return URL(string: "https://image.tmdb.org/t/p/\(size)\(path)")
+            // The image CDN provides raster versions of SVG logos for native decoders.
+            let rasterPath = path.hasSuffix(".svg") ? String(path.dropLast(4)) + ".png" : path
+            return URL(string: "https://image.tmdb.org/t/p/\(size)\(rasterPath)")
         }
         // Never crop a backdrop into a poster or substitute another language's title.
         // TMDB marks text-free posters with a null language. A localized
@@ -132,7 +134,7 @@ enum TMDBService {
         // TMDB labels Chinese logos `zh`, with optional region metadata.
         // Follow FlickIsle's region preference and use English only when no
         // matching-language logo exists.
-        let usableLogos = images.logos.filter { !$0.file_path.hasSuffix(".svg") }
+        let usableLogos = images.logos
         let nativeLogos = usableLogos.filter { $0.iso_639_1?.caseInsensitiveCompare(lang) == .orderedSame }
         let logo: ArtworkImage?
         if lang == "zh", !nativeLogos.isEmpty {

@@ -129,9 +129,12 @@ struct LocalCatalogPosterCard: View {
 }
 
 struct LocalCatalogCollectionView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: LibraryStore
     let collection: LocalCatalogCollection
     @Binding var detailPresented: Bool
+    var onBack: (() -> Void)? = nil
+    @State private var selectedCollection: LocalCatalogCollection?
     @State private var sort = "newest"
     @State private var genre = "全部题材"
     @State private var watched = "all"
@@ -158,15 +161,40 @@ struct LocalCatalogCollectionView: View {
         default: return filtered
         }
     }
+    private var filterMenu: some View {
+        Menu {
+            Picker("排序", selection: $sort) {
+                Text("最近添加").tag("newest"); Text("名称").tag("title")
+                Text("年份").tag("year"); Text("评分").tag("rating")
+            }
+            Picker("观看状态", selection: $watched) {
+                Text("全部").tag("all"); Text("未观看").tag("unwatched"); Text("已观看").tag("watched")
+            }
+            if !genres.isEmpty {
+                Picker("题材", selection: $genre) {
+                    Text("全部题材").tag("全部题材")
+                    ForEach(genres, id: \.self) { Text($0).tag($0) }
+                }
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 19, weight: .medium))
+                .frame(width: LucentUI.controlSize, height: LucentUI.controlSize)
+                .modifier(LucentGlass(shape: Circle()))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("排序与筛选")
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
-                let columns = max(3, Int((geometry.size.width - 28) / 150))
+                let columns = max(3, Int((geometry.size.width - 40) / 160))
                 if collection == .mediaLibraries {
                     LazyVGrid(columns: [GridItem(.flexible()),GridItem(.flexible())], spacing:16) {
                         ForEach(LocalCatalogCollection.homeCategories.filter { !$0.items(cards: library.localCatalogCards, files: library.localLibraryItems.filter { $0.missingSince == nil }).isEmpty }) { category in
                             let values = category.items(cards:library.localCatalogCards, files:library.localLibraryItems)
-                            NavigationLink(value:category) {
+                            Button { withAnimation { selectedCollection = category } } label: {
                                 ZStack(alignment:.bottomLeading) {
                                     if let first = values.first { LocalCatalogArtwork(item:first,landscape:true) }
                                     else { LucentUI.panel }
@@ -177,7 +205,16 @@ struct LocalCatalogCollectionView: View {
                             }.buttonStyle(.plain)
                         }
                     }.padding(20)
-                    NavigationLink("全部影片",value:LocalCatalogCollection.all).padding(.bottom,24)
+                    Button { withAnimation { selectedCollection = .all } } label: {
+                        HStack {
+                            Text("全部影片").font(.body.weight(.medium))
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(18)
+                        .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: LucentUI.cardRadius))
+                    }.buttonStyle(.plain).padding(.horizontal, 20).padding(.bottom, 24)
                 } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns),
                           alignment: .leading, spacing: 22) {
@@ -201,44 +238,22 @@ struct LocalCatalogCollectionView: View {
                 }
             }.background(LucentUI.page)
         }
-        .navigationTitle(collection.title).lucentNavigationTitleStyle()
-        #if os(iOS)
-        .toolbar(.visible, for: .navigationBar)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Picker("排序", selection: $sort) {
-                        Text("最近添加").tag("newest"); Text("名称").tag("title")
-                        Text("年份").tag("year"); Text("评分").tag("rating")
-                    }
-                    Picker("观看状态", selection: $watched) {
-                        Text("全部").tag("all"); Text("未观看").tag("unwatched"); Text("已观看").tag("watched")
-                    }
-                    if !genres.isEmpty {
-                        Picker("题材", selection: $genre) {
-                            Text("全部题材").tag("全部题材")
-                            ForEach(genres, id: \.self) { Text($0).tag($0) }
-                        }
-                    }
-                } label: { Image(systemName: "line.3.horizontal.decrease") }
-                .accessibilityLabel("排序与筛选")
-            }
-        }
-        .navigationDestination(for: LocalCatalogCollection.self) { destination in
+        .lucentCollectionChrome(title: collection.title, back: { if let onBack { onBack() } else { dismiss() } }) { filterMenu }
+        .navigationDestination(item: $selectedCollection) { destination in
             Group {
-                LocalCatalogCollectionView(collection:destination,detailPresented:$detailPresented).environmentObject(library)
+                LocalCatalogCollectionView(collection: destination, detailPresented: $detailPresented,
+                                           onBack: { withAnimation { selectedCollection = nil } }).environmentObject(library)
             }.lucentSecondaryPage()
         }
         .navigationDestination(item: $selectedItemID) { id in
             Group {
                 #if os(iOS)
                 if #available(iOS 18, *), let transitionKey {
-                    MediaDetailView(itemID: id).environmentObject(library)
+                    MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
                         .navigationTransition(.zoom(sourceID: transitionKey, in: detailTransition))
-                } else { MediaDetailView(itemID: id).environmentObject(library) }
+                } else { MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library) }
                 #else
-                MediaDetailView(itemID: id).environmentObject(library)
+                MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
                 #endif
             }.lucentSecondaryPage()
         }

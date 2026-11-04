@@ -89,7 +89,9 @@ struct AppSettingsView: View {
         }
         .modifier(LucentSettingsPageStyle())
         .navigationTitle("设置")
-        .lucentNavigationTitleStyle()
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
         .onAppear {
             metadataTokenConfigured = !((try? KeychainPasswordStore.metadataToken()) ?? "").isEmpty
         }

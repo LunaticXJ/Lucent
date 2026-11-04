@@ -240,6 +240,7 @@ private struct HomeBrowserRoute: Identifiable, Hashable {
     let source: EmbySource
     let parentID: String?
     let title: String?
+    var collectionType: String? = nil
     var id: String { "\(source.id)|\(parentID ?? "root")" }
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -393,6 +394,7 @@ struct MobileHomeView: View {
     @State private var collectionTransitionKey: String?
     @State private var showAllContinuing = false
     @Environment(\.contentLocalizationID) private var contentLocalizationID
+    @State private var heroLogoConnection: (sourceID: UUID, token: String)?
     @State private var heroArtworks: [String: TMDBService.DetailArtwork] = [:]
     @State private var heroDetails: [String: MediaCard] = [:]
     @State private var heroThemes: [String: HeroColors] = [:]
@@ -441,6 +443,11 @@ struct MobileHomeView: View {
 
     var body: some View {
         GeometryReader { viewport in
+        // Tab-bar restoration changes the content viewport during a zoom return.
+        // The window stays stable, so the matched hero keeps its original height.
+        let windowSize = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }?.windows.first { $0.isKeyWindow }?.bounds.size
+        let windowHeight = windowSize.map { UIDevice.current.userInterfaceIdiom == .phone ? max($0.width, $0.height) : $0.height } ?? viewport.size.height
         ScrollView {
             if !hasHomeContent && source != nil && (!hasLoadedHome || isLoading) {
                 ProgressView("正在加载首页")
@@ -454,7 +461,7 @@ struct MobileHomeView: View {
             } else if hasLoadedHome {
             VStack(alignment: .leading, spacing: 0) {
                 if !latest.isEmpty {
-                    StretchyHeroHeader(height: HomePalette.isPad ? 650 : max(460, viewport.size.height * 0.76)) { height, pull in
+                    StretchyHeroHeader(height: HomePalette.isPad ? 650 : max(460, windowHeight * 0.76)) { height, pull in
                         if latest.indices.contains(heroIndex) {
                             transitionSource(hero(height: height, pull: pull),
                                              key: "hero:\(latest[heroIndex].id)")
@@ -524,6 +531,12 @@ struct MobileHomeView: View {
             saveHeroPosition()
             heroIsVisible = false
         }
+        .task(id: source?.id) {
+            heroLogoConnection = nil
+            guard !localLibrary, let source,
+                  let token = try? KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty else { return }
+            heroLogoConnection = (source.id, token)
+        }
         .task(id: "\(source?.id.uuidString ?? "")|\(refreshID.uuidString)") { await loadHome() }
         .onChange(of: minimumResumePercent) { _, _ in Task { await loadHome() } }
         .onChange(of: completedPercent) { _, _ in Task { await loadHome() } }
@@ -543,6 +556,7 @@ struct MobileHomeView: View {
         }
         .task(id: "\(heroIndex)|\(heroAutoplay)|\(heroIsVisible)|\(latest.map(\.id).joined(separator: ","))") {
             guard heroIsVisible, latest.count > 1 else { return }
+            guard await waitForHomeNavigationToSettle() else { return }
             await loadHeroArtwork(at: heroIndex)
             await loadHeroArtwork(at: (heroIndex + 1) % latest.count)
             guard heroAutoplay else { return }
@@ -582,7 +596,8 @@ struct MobileHomeView: View {
         }
         .navigationDestination(item: $localCollection) { collection in
             Group {
-                LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented).environmentObject(library)
+                LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented,
+                                           onBack: { withAnimation { localCollection = nil } }).environmentObject(library)
                     .modifier(HomeCollectionZoom(key: collectionTransitionKey, namespace: detailTransition))
             }.lucentSecondaryPage()
         }
@@ -600,7 +615,8 @@ struct MobileHomeView: View {
         }
         .navigationDestination(item: $browserRoute) { route in
             Group {
-                EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title, embedded: true)
+                EmbyBrowserView(source: route.source, parentID: route.parentID, title: route.title, embedded: true, collectionTypeHint: route.collectionType,
+                                onBack: { withAnimation { browserRoute = nil } })
                     .environmentObject(library)
                     .modifier(HomeCollectionZoom(key: collectionTransitionKey, namespace: detailTransition))
             }.lucentSecondaryPage()
@@ -762,11 +778,18 @@ struct MobileHomeView: View {
         .frame(width: size.width, height: size.height)
     }
 
+    private func heroLogoRequest(_ item: MediaCard) -> URLRequest? {
+        guard !localLibrary, let source, let connection = heroLogoConnection,
+              connection.sourceID == source.id else { return nil }
+        return ServerDetailClient.logoRequest(baseAddress: source.baseAddress, token: connection.token, itemID: item.id)
+    }
+
     private func heroContent(_ item: MediaCard, size: CGSize) -> some View {
         let displayItem = heroDetails[item.id] ?? item
         return VStack(spacing: 11) {
                 DetailTitleArtwork(url: heroArtworks[item.id]?.logoURL,
-                                   title: heroArtworks[item.id]?.localizedTitle ?? item.name)
+                                   title: heroArtworks[item.id]?.localizedTitle ?? item.name,
+                                   fallbackRequest: heroLogoRequest(item))
                     .frame(maxWidth: HomePalette.isPad ? 450 : size.width * 0.82,
                            minHeight: 100, maxHeight: 125)
                 HStack(spacing: 7) {
@@ -793,6 +816,27 @@ struct MobileHomeView: View {
         .padding(.bottom, 72)
         .frame(width: size.width, height: size.height, alignment: .bottom)
         .accessibilityElement(children: .combine)
+    }
+
+    private func waitForHomeNavigationToSettle() async -> Bool {
+        // A nearly-finished autoplay cycle must not change the matched source
+        // while UIKit is still zooming back to it.
+        while !Task.isCancelled {
+            if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+               let root = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController {
+                var controllers = [root]
+                var transitioning = false
+                while let controller = controllers.popLast() {
+                    if controller.transitionCoordinator != nil { transitioning = true; break }
+                    controllers.append(contentsOf: controller.children)
+                    if let presented = controller.presentedViewController { controllers.append(presented) }
+                }
+                if !transitioning { return true }
+            }
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return false }
+        }
+        return false
     }
 
     private func advanceHero(to target: Int) {
@@ -854,7 +898,6 @@ struct MobileHomeView: View {
             HomeSnapshotCache.details[source.id] = heroDetails
         }
         guard let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else {
-            heroArtworks[item.id] = TMDBService.DetailArtwork(posterURL: nil, logoURL: nil)
             return
         }
         let requestedLanguage = LocalizationPreferences.current.contentID
@@ -971,7 +1014,7 @@ struct MobileHomeView: View {
                             Button {
                                 collectionTransitionKey = "media:\(view.id)"
                                 if localLibrary { localCollection = LocalCatalogCollection(rawValue: view.id) }
-                                else { browserRoute = HomeBrowserRoute(source: source, parentID: view.id, title: view.name) }
+                                else { browserRoute = HomeBrowserRoute(source: source, parentID: view.id, title: view.name, collectionType: view.legacyPresentation.collectionType) }
                             } label: {
                                 ZStack(alignment: .bottomLeading) {
                                     if let first = shelves.first(where: { $0.id == view.id })?.items.first {
@@ -1023,7 +1066,7 @@ struct MobileHomeView: View {
                 collectionTransitionKey = nil
                 if let source {
                     if localLibrary { localCollection = LocalCatalogCollection(rawValue: shelf.view.id) }
-                    else { browserRoute = HomeBrowserRoute(source: source, parentID: shelf.view.id, title: shelf.view.name) }
+                    else { browserRoute = HomeBrowserRoute(source: source, parentID: shelf.view.id, title: shelf.view.name, collectionType: shelf.view.legacyPresentation.collectionType) }
                 }
             } label: {
                 heading(shelf.view.name, count: nil)
@@ -1106,11 +1149,11 @@ struct MobileHomeView: View {
 
     @ViewBuilder private func detailDestination(_ id: UUID) -> some View {
         if #available(iOS 18.0, *), let selectedTransitionKey {
-            MediaDetailView(itemID: id)
+            MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } })
                 .environmentObject(library)
                 .navigationTransition(.zoom(sourceID: selectedTransitionKey, in: detailTransition))
         } else {
-            MediaDetailView(itemID: id).environmentObject(library)
+            MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
         }
     }
 
@@ -1312,7 +1355,7 @@ private struct HomeContinuingList: View {
             .toolbar { ToolbarItem(placement:.cancellationAction) { Button("完成") { dismiss() } } }
             .navigationDestination(item:$selectedID) { id in
                 Group {
-                    MediaDetailView(itemID:id).environmentObject(library)
+                    MediaDetailView(itemID: id, onBack: { withAnimation { selectedID = nil } }).environmentObject(library)
                 }.lucentSecondaryPage()
             }
             .task {
@@ -1433,7 +1476,7 @@ struct MobileSearchView: View {
             .task(id: recommendationBatch) { await loadRecommendations() }
             .navigationDestination(item: $selectedItemID) { id in
                 Group {
-                    MediaDetailView(itemID: id).environmentObject(library)
+                    MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
                 }.lucentSecondaryPage()
             }
             .onChange(of: selectedItemID) { _, value in

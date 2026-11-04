@@ -72,7 +72,7 @@ enum EmbyClient {
             [.name, .added, .release, .imdb, .critics, .playCount, .random]
         }
     }
-    enum BrowseFacet { case genre(String), studio(String) }
+    enum BrowseFacet: Hashable, Sendable { case genre(String), studio(String) }
     struct BrowsePage: Sendable {
         let items: [JellyfinItem]
         let totalCount: Int
@@ -210,7 +210,8 @@ enum EmbyClient {
     static func browse(source: EmbySource, token: String, parentID: String?,
                        startIndex: Int = 0, limit: Int = 100,
                        itemType: String? = nil, sort: BrowseSort = .name,
-                       ascending: Bool = true, facet: BrowseFacet? = nil) async throws -> BrowsePage {
+                       ascending: Bool = true, facet: BrowseFacet? = nil,
+                       includeMediaDetails: Bool = true) async throws -> BrowsePage {
         let path = parentID == nil ? "Users/\(source.userID)/Views" : "Users/\(source.userID)/Items"
         var request = try makeRequest(baseAddress: source.baseAddress, path: path, token: token)
         if let parentID {
@@ -220,7 +221,7 @@ enum EmbyClient {
                 URLQueryItem(name: "Recursive", value: "false"),
                 URLQueryItem(name: "StartIndex", value: String(startIndex)),
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview,MediaSources,MediaStreams,DateCreated,Genres,Studios"),
+                URLQueryItem(name: "Fields", value: includeMediaDetails ? "Overview,MediaSources,MediaStreams,DateCreated,Genres,Studios" : "DateCreated"),
                 URLQueryItem(name: "EnableUserData", value: "true"),
                 URLQueryItem(name: "SortBy", value: sort.rawValue),
                 URLQueryItem(name: "SortOrder", value: ascending ? "Ascending" : "Descending")
@@ -571,13 +572,25 @@ enum EmbyClient {
 }
 
 enum ServerDetailClient {
+    static func logoRequest(baseAddress: String, token: String, itemID: String) -> URLRequest? {
+        guard let base = URL(string: baseAddress) else { return nil }
+        var components = URLComponents(url: base.appendingPathComponent("Items")
+            .appendingPathComponent(itemID).appendingPathComponent("Images/Logo"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "maxWidth", value: "780")]
+        guard let url = components?.url else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+        request.timeoutInterval = 10
+        return request
+    }
+
     static func item(baseAddress: String, userID: String, itemID: String,
-                     token: String) async throws -> JellyfinItem {
+                     token: String, fields: String = "People,Genres,Overview,MediaSources,ProviderIds") async throws -> JellyfinItem {
         guard let base = URL(string: baseAddress) else { throw EmbyError.invalidResponse }
         var components = URLComponents(url: base.appendingPathComponent("Users")
             .appendingPathComponent(userID).appendingPathComponent("Items")
             .appendingPathComponent(itemID), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "Fields", value: "People,Genres,Overview,MediaSources,ProviderIds"),
+        components.queryItems = [URLQueryItem(name: "Fields", value: fields),
                                  URLQueryItem(name: "EnableUserData", value: "true")]
         var request = URLRequest(url: components.url!)
         request.setValue(token, forHTTPHeaderField: "X-Emby-Token")

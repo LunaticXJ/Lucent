@@ -88,8 +88,7 @@ final class PlaybackSession: ObservableObject {
     var aetherSurfaceReady = false
     @Published private(set) var mpvVideoReady = false
     @Published private(set) var mpvTransitionOpacity = 1.0
-    @Published private(set) var enginePreference = PlaybackEnginePreference(
-        rawValue: UserDefaults.standard.string(forKey: "lucent.playbackEngine") ?? "") ?? .automatic
+    @Published private(set) var enginePreference: PlaybackEnginePreference = .automatic
     @Published private(set) var engineSwitchTarget: PlaybackEnginePreference?
     @Published private(set) var engineSwitchNotice: String?
     private var engineSwitchNoticeTask: Task<Void, Never>?
@@ -837,7 +836,7 @@ final class PlaybackSession: ObservableObject {
                 self?.audioGroup = audio
                 self?.subtitleGroup = subtitles
                 self?.audioOptions = audio?.options.map(\.displayName) ?? []
-                self?.subtitleOptions = subtitles?.options.map(\.displayName) ?? []
+                self?.subtitleOptions = subtitles?.options.map { SubtitleLanguageDisplay.title($0.displayName, language: $0.extendedLanguageTag ?? $0.locale?.identifier) } ?? []
                 if let self, self.subtitleStreamIndex == nil, !self.hasSidecarSubtitle, subtitles != nil {
                     let preferences = AVPlayerMediaSelectionCriteria(preferredLanguages: LocalizationPreferences.current.subtitleTrackLanguages,
                         preferredMediaCharacteristics: nil)
@@ -1142,8 +1141,6 @@ final class PlaybackSession: ObservableObject {
     func runPlaybackAudit() async {
         guard !auditStarted else { return }
         auditStarted = true
-        let saved = UserDefaults.standard.string(forKey: "lucent.playbackEngine")
-        defer { UserDefaults.standard.set(saved, forKey: "lucent.playbackEngine") }
         func wait(_ label: String, timeout: Int, until predicate: () -> Bool) async throws {
             for _ in 0..<timeout {
                 try Task.checkCancellation()
@@ -1319,7 +1316,7 @@ final class PlaybackSession: ObservableObject {
             if segments.isEmpty { segments = PlaybackSegmentClient.fromChapters(chapters, duration: duration) }
         }
         audioOptions = engine.audioTracks.map(\.name)
-        subtitleOptions = engine.subtitleTracks.map(\.name)
+        subtitleOptions = engine.subtitleTracks.map { SubtitleLanguageDisplay.title($0.name, language: $0.language) }
         selectedAudioIndex = engine.audioTracks.firstIndex { $0.id == engine.activeAudioTrackIndex }
         selectedSubtitleIndex = engine.subtitleTracks.firstIndex { $0.id == engine.activeSubtitleTrackIndex }
         applyAutomaticSkip(at: currentTime)
@@ -1399,7 +1396,6 @@ final class PlaybackSession: ObservableObject {
         guard let native = aetherEngine, let mpv = mpvEngine else {
             message = "无法初始化目标播放内核，已保留当前播放。"
             enginePreference = useMPV ? .mpv : .automatic
-            UserDefaults.standard.set(enginePreference.rawValue, forKey: "lucent.playbackEngine")
             return
         }
         engineSwitchNoticeTask?.cancel()
@@ -1691,7 +1687,6 @@ final class PlaybackSession: ObservableObject {
                     mpv.setPaused(!self.playbackRequested)
                     self.enginePreference = .mpv
                 }
-                UserDefaults.standard.set(self.enginePreference.rawValue, forKey: "lucent.playbackEngine")
                 self.handoverTrace("rollback: \(error.localizedDescription)")
                 if !(error is CancellationError) {
                     self.message = "内核切换失败，已恢复原内核：\(error.localizedDescription)"
@@ -1767,7 +1762,6 @@ final class PlaybackSession: ObservableObject {
                 mpvEngine.setVolume(100)
                 useMPV = false
                 enginePreference = .automatic
-                UserDefaults.standard.set(PlaybackEnginePreference.automatic.rawValue, forKey: "lucent.playbackEngine")
                 mpvTransitionOpacity = 1
                 pendingMPVSubtitleStreamIndex = nil
                 message = "切换 MPV 失败，原播放已保留：\(playbackError)"
@@ -1830,7 +1824,7 @@ final class PlaybackSession: ObservableObject {
                 serverSubtitleChoices[embeddedIndex] = delivery
             } else {
                 serverSubtitleChoices[availableSubtitles.count] = delivery
-                availableSubtitles.append(delivery.displayTitle ?? delivery.language ?? "字幕 \(streamIndex)")
+                availableSubtitles.append(SubtitleLanguageDisplay.title(delivery.displayTitle ?? "字幕 \(streamIndex)", language: delivery.language))
             }
         }
         if audioOptions != availableAudio { audioOptions = availableAudio }
@@ -1964,7 +1958,6 @@ final class PlaybackSession: ObservableObject {
         message = nil
         enginePreference = preference
         forcedMPVForCurrentPlayback = false
-        UserDefaults.standard.set(preference.rawValue, forKey: "lucent.playbackEngine")
         if recoveringFromFailure {
             // A failed source cannot participate in a warm clock-aligned
             // handover. Reopen the source; do not let its old error abort the

@@ -1,18 +1,20 @@
 import Foundation
 
 /// Server-independent presentation data. Playback keeps the original source identity.
-struct MediaCard: Sendable {
+struct MediaCard: Codable, Sendable {
     private let original: JellyfinItem?
     let isFolder: Bool?
-    let providerIDs: [String: String]?
+    private(set) var providerIDs: [String: String]?
     let id: String
     let title: String
     let kind: String
-    let summary: String?
-    let rating: Double?
-    let year: Int?
-    let genres: [String]?
-    let releaseDate: String?
+    private(set) var summary: String?
+    private(set) var rating: Double?
+    private(set) var year: Int?
+    let seriesStatus: String?
+    let seriesEndDate: String?
+    private(set) var genres: [String]?
+    private(set) var releaseDate: String?
     let seriesName: String?
     let season: Int?
     let episode: Int?
@@ -33,7 +35,8 @@ struct MediaCard: Sendable {
         kind = asSeries ? "Series" : (item.identity?.seriesName == nil ? "Movie" : "Episode")
         summary = asSeries ? item.metadata?.summary : (item.catalogEpisode?.overview ?? item.metadata?.summary)
         rating = asSeries ? item.metadata?.rating : (item.catalogEpisode?.rating ?? item.metadata?.rating)
-        year = item.metadata?.year; genres = item.metadata?.genres
+        seriesStatus = item.metadata?.seriesStatus; seriesEndDate = item.metadata?.seriesEndDate
+        year = item.catalogDisplayYear; genres = item.metadata?.genres
         releaseDate = item.catalogEpisode?.airDate ?? item.metadata?.releaseDate
         if case .episode(let series, let seasonValue, let episodeValue, _) = item.identity {
             seriesName = item.metadata?.localizedTitle ?? series; season = seasonValue; episode = episodeValue
@@ -46,7 +49,8 @@ struct MediaCard: Sendable {
         original = item; isFolder = item.isFolder
         providerIDs = item.providerIds
         id = item.id; title = item.name; kind = item.type; summary = item.overview
-        rating = item.communityRating; year = item.productionYear; genres = item.genres
+        rating = item.communityRating; year = item.displayYear; genres = item.genres
+        seriesStatus = item.status; seriesEndDate = item.endDate
         releaseDate = item.premiereDate; seriesName = item.seriesName
         season = item.parentIndexNumber; episode = item.indexNumber; durationTicks = item.runTimeTicks
         positionTicks = item.userData?.playbackPositionTicks ?? 0
@@ -54,9 +58,21 @@ struct MediaCard: Sendable {
     }
     init(id: String, title: String, kind: String, isFolder: Bool) {
         self.id = id; self.title = title; self.kind = kind; self.isFolder = isFolder
+        seriesStatus = nil; seriesEndDate = nil
         original = nil; providerIDs = nil; summary = nil; rating = nil; year = nil
         genres = nil; releaseDate = nil; seriesName = nil; season = nil; episode = nil
         durationTicks = nil; played = false; favorite = false; positionTicks = 0
+    }
+    /// Sparse batch responses must not discard metadata already supplied by a list response.
+    func preservingMetadata(from fallback: MediaCard) -> MediaCard {
+        var merged = self
+        merged.providerIDs = providerIDs?.isEmpty == false ? providerIDs : fallback.providerIDs
+        merged.summary = summary?.isEmpty == false ? summary : fallback.summary
+        merged.rating = rating ?? fallback.rating
+        merged.year = year ?? fallback.year
+        merged.genres = genres?.isEmpty == false ? genres : fallback.genres
+        merged.releaseDate = releaseDate?.isEmpty == false ? releaseDate : fallback.releaseDate
+        return merged
     }
     // Display aliases keep the existing layout readable while its data is transport-independent.
     var name: String { title }
@@ -64,6 +80,7 @@ struct MediaCard: Sendable {
     var overview: String? { summary }
     var communityRating: Double? { rating }
     var productionYear: Int? { year }
+    var yearText: String? { CatalogYearLabel.text(start: year, isSeries: kind == "Series", status: seriesStatus, endDate: seriesEndDate) }
     var premiereDate: String? { releaseDate }
     var runTimeTicks: Int64? { durationTicks }
     var identity: MediaIdentity {
@@ -77,8 +94,16 @@ struct MediaCard: Sendable {
         if let original { return original }
         return JellyfinItem(id: id, name: title, type: kind, isFolder: isFolder, seriesName: seriesName, genres: genres,
             parentIndexNumber: season, indexNumber: episode, productionYear: year,
-            premiereDate: releaseDate, communityRating: rating, runTimeTicks: durationTicks,
+            premiereDate: releaseDate, status: seriesStatus, endDate: seriesEndDate, communityRating: rating, runTimeTicks: durationTicks,
             userData: .init(played: played, isFavorite: favorite, playbackPositionTicks: positionTicks,
                             lastPlayedDate: nil, unplayedItemCount: nil), overview: summary, providerIds: providerIDs)
+    }
+}
+
+/// Content cards display only the first release year.
+enum CatalogYearLabel {
+    static func text(start: Int?, isSeries: Bool, status: String?, endDate: String?, present: String = "现在") -> String? {
+        guard let start, start > 0 else { return nil }
+        return String(start)
     }
 }

@@ -1,6 +1,12 @@
 import SwiftUI
 
 struct MovieDetailView: View {
+    #if os(tvOS)
+    @Namespace private var detailFocusScope
+    #endif
+    @Environment(\.discPlaybackControlsHidden) private var discControlsHidden
+
+    @Environment(\.displayScale) private var posterDisplayScale
     @Environment(\.contentLocalizationID) private var contentLocalizationID
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
@@ -17,7 +23,10 @@ struct MovieDetailView: View {
     @State private var artworkRetriedID: Int?
     @State private var serverConnection: (base: String, user: String, token: String, itemID: String)?
 
-    private let background = Color(red: 0.27, green: 0.22, blue: 0.20)
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var posterLightColor = Color(red: 0.94, green: 0.95, blue: 0.96)
+    private var background: Color { colorScheme == .dark ? Color(red: 0.27, green: 0.22, blue: 0.20) : posterLightColor }
+    private var detailInk: Color { colorScheme == .dark ? .white : .black }
 
     private var server: (base: String, user: String, token: String, itemID: String)? {
         serverConnection
@@ -60,20 +69,18 @@ struct MovieDetailView: View {
                     VStack(alignment: .leading, spacing: 26) {
                         if let summary = detail?.overview ?? item.metadata?.summary ?? item.serverSummary,
                            !summary.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
+                            Button { overviewExpanded = true } label: {
                                 Text(summary)
                                     .font(.footnote)
-                                    .foregroundStyle(.white.opacity(0.88))
+                                    .foregroundStyle(detailInk.opacity(0.88))
                                     .lineSpacing(4)
-                                    .lineLimit(4)
-                                if summary.count > 110 {
-                                    Button("展开简介") {
-                                        overviewExpanded = true
-                                    }
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                }
+                                    .lineLimit(3)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
                             }
+                            .lucentContentButtonStyle()
+                            .accessibilityHint("点按查看完整简介")
                         } else if detail == nil && loadError == nil {
                             VStack(alignment: .leading, spacing: 8) {
                                 DetailSkeletonBlock().frame(height: 14)
@@ -84,7 +91,7 @@ struct MovieDetailView: View {
                             DetailSkeletonBlock().frame(width: 110, height: 18)
                             HStack(spacing: 13) {
                                 ForEach(0..<3, id: \.self) { _ in
-                                    DetailSkeletonBlock().frame(width: 88, height: 112)
+                                    DetailSkeletonBlock().frame(width: LucentUI.detailSize(88), height: LucentUI.detailSize(112))
                                 }
                             }
                         } else {
@@ -92,25 +99,40 @@ struct MovieDetailView: View {
                             mediaSection
                         }
                         if let loadError {
-                            Text(loadError).font(.caption).foregroundStyle(.white.opacity(0.65))
+                            Text(loadError).font(.caption).foregroundStyle(detailInk.opacity(0.65))
                         }
                     }
                     .padding(.horizontal, 22)
                     .padding(.top, 14)
                     .padding(.bottom, 54)
-                    .frame(maxWidth: 780)
+                    .frame(maxWidth: LucentUI.detailContentWidth)
                     .frame(maxWidth: .infinity)
+                    .background(background)
                 }
                 .frame(width: geometry.size.width, alignment: .leading)
             }
             .background(background)
             .ignoresSafeArea(edges: .top)
+            .lucentHideTopScrollEdge()
             .coordinateSpace(name: "lucentHeroScroll")
         }
+        #if os(iOS)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { if !discControlsHidden { navigationActions } } }
+        #elseif os(tvOS)
+        .focusScope(detailFocusScope)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if !discControlsHidden { navigationActions }
+            }
+        }
+        #else
         .overlay(alignment: .top) {
             topControls
                 .padding(.top, 8)
         }
+        #endif
         .onReceive(library.$items) { values in
             if server == nil, let current = values.first(where: { $0.id == item.id }) { detail = current.localDetailItem() }
         }
@@ -134,57 +156,70 @@ struct MovieDetailView: View {
         .sheet(isPresented: $overviewExpanded) {
             LucentSynopsisSheet(title: "简介", text: detail?.overview ?? item.metadata?.summary ?? item.serverSummary ?? "") { overviewExpanded = false }
         }
-        .preferredColorScheme(.dark)
     }
 
-    private var topControls: some View {
-                HStack {
-                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: .videoOverlay) { if let onBack { onBack() } else { dismiss() } }
-                    Spacer()
-                    Menu {
-                        Button(item.watched ? "标记为未观看" : "标记为已看完") {
+    private var navigationActions: some View {
+        Menu {
+                        Button(item.watched ? "标记为未观看" : "标记为已看完", systemImage: item.watched ? "eye.slash" : "checkmark.circle") {
                             if item.watched { library.markUnwatched(id: item.id) }
                             else { library.markWatched(id: item.id) }
                         }
-                        Button(item.isFavorite ? "取消收藏" : "收藏") {
+                        Button(item.isFavorite ? "取消收藏" : "收藏", systemImage: item.isFavorite ? "heart.slash" : "heart") {
                             library.toggleFavorite(id: item.id)
                         }
                         Button("更多播放选项与资料", systemImage: "slider.horizontal.3") {
                             onMore()
                         }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 46, height: 46)
-                            .modifier(LucentGlass(shape: Circle(), role: .videoOverlay))
-                    }
+
+        } label: { Image(systemName: "ellipsis") }
+        .accessibilityLabel("更多")
+    }
+
+    private var topControls: some View {
+                HStack {
+                    LucentToolbarButton(symbol: "chevron.left", label: "返回", role: colorScheme == .light ? .standard : .videoOverlay) { if let onBack { onBack() } else { dismiss() } }
+                    Spacer()
+                    navigationActions
                 }
         .font(.title3.weight(.semibold))
-        .foregroundStyle(.white)
         .lucentContentButtonStyle()
         .padding(.horizontal, 26)
     }
 
     private func hero(width: CGFloat, height: CGFloat, pull: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
+            Group {
             if artworkResolved {
                 SeriesArtwork(baseAddress: server?.base, token: server?.token,
-                              itemID: server?.itemID, backdrop: false,
-                              fallback: library.posterURL(for: item) ?? item.metadata?.posterURL,
-                              preferredURL: artwork?.posterURL, maximumWidth: 1400)
+                              itemID: server?.itemID, backdrop: artwork?.posterURL == nil,
+                              fallback: item.metadata?.backdropPath.flatMap { URL(string: "https://image.tmdb.org/t/p/original\($0)") },
+                              preferredURL: artwork?.posterURL,
+                              maximumWidth: min(4096, Int((max(width, (height - pull) * 16 / 9) * posterDisplayScale).rounded(.up))), fallbackToBackdrop: true,
+                              targetPixelSize: CGSize(width: (width * posterDisplayScale).rounded(), height: ((height - pull) * posterDisplayScale).rounded()),
+                              onImage: { posterLightColor = DetailPosterPalette.lightColor(from: $0) })
+            } else { DetailSkeletonBlock(cornerRadius: 0) }
+            }
                     .frame(width: width, height: height)
                     .scaleEffect(1 + min(pull / max(height - pull, 1), 0.4), anchor: .top)
                     .clipped()
-            } else { DetailSkeletonBlock(cornerRadius: 0).frame(width: width, height: height) }
+                    #if os(iOS)
+                    .visualEffect { effect, geometry in
+                        effect.offset(y: max(0, -geometry.frame(in: .scrollView(axis: .vertical)).minY))
+                    }
+                    #endif
             LinearGradient(colors: [.black.opacity(0.28), .clear,
                                     background.opacity(0.15), background.opacity(0.72), background],
                            startPoint: .top, endPoint: .bottom)
             VStack(spacing: 12) {
+                Group {
                 if artworkResolved {
                     DetailTitleArtwork(url: artwork?.logoURL,
                                        title: artwork?.localizedTitle ?? detail?.name ?? item.title,
-                                       fallbackRequest: server.flatMap { ServerDetailClient.logoRequest(baseAddress: $0.base, token: $0.token, itemID: $0.itemID) })
+                                       fallbackRequest: server.flatMap { ServerDetailClient.logoRequest(baseAddress: $0.base, token: $0.token, itemID: $0.itemID) },
+                                       maximumWidth: LucentUI.detailTitleWidth, maximumHeight: LucentUI.detailTitleHeight, foreground: detailInk)
                 } else {
-                    Color.clear.frame(height: 125)
+                    Color.clear.frame(height: 100)
+                }
                 }
                 HStack(spacing: 7) {
                     if let rating = detail?.communityRating ?? item.metadata?.rating {
@@ -197,11 +232,14 @@ struct MovieDetailView: View {
                     }
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(detailInk)
                 Text(technicalSummary)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(detailInk.opacity(0.8))
                 LucentPlayButton(resumeTime: isInProgress ? clock(progressSeconds) : nil) { play() }
+                #if os(tvOS)
+                .prefersDefaultFocus(true, in: detailFocusScope)
+                #endif
                 HStack(spacing: 42) {
                     Button { library.toggleFavorite(id: item.id) } label: {
                         Image(systemName: item.isFavorite ? "heart.fill" : "heart")
@@ -212,14 +250,15 @@ struct MovieDetailView: View {
                     } label: { Image(systemName: "flag") }
                 }
                 .font(.title3)
-                .foregroundStyle(.white.opacity(0.9))
+                .lucentContentButtonStyle()
                 .padding(.top, 7)
             }
-            .frame(maxWidth: 660)
+            .frame(maxWidth: LucentUI.detailHeroContentWidth)
             .padding(.horizontal, 28)
-            .padding(.bottom, 20)
+            .padding(.bottom, 0)
         }
         .frame(width: width, height: height)
+        .clipped()
     }
 
     private var displayDate: String? {
@@ -233,7 +272,7 @@ struct MovieDetailView: View {
     private var technicalSummary: String {
         let minutes = Int((detail?.runTimeTicks.map { Double($0) / 10_000_000 } ?? item.duration ?? 0) / 60)
         let duration = minutes > 0 ? "\(minutes / 60)小时\(minutes % 60)分钟" : nil
-        let size = source?.size.map { String(format: "%.2f GB", Double($0) / 1_000_000_000) }
+        let size = source?.size.flatMap { $0 > 0 ? String(format: "%.2f GB", Double($0) / 1_000_000_000) : nil }
         let resolution: String? = {
             guard let width = video?.width else { return nil }
             if width >= 3840 { return "4K" }
@@ -248,7 +287,7 @@ struct MovieDetailView: View {
     private var castSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let people = detail?.people, !people.isEmpty {
-                Text("演职人员").font(.title3.bold()).foregroundStyle(.white)
+                Text("演职人员").font(.title3.bold()).foregroundStyle(detailInk)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 13) {
                         ForEach(Array(people.prefix(20)), id: \.stableID) { person in
@@ -263,17 +302,18 @@ struct MovieDetailView: View {
                                             .fill(.white.opacity(0.12))
                                             .overlay(Text(String(person.name.prefix(1)))
                                                 .font(.title2.weight(.medium))
-                                                .foregroundStyle(.white.opacity(0.8)))
+                                                .foregroundStyle(detailInk.opacity(0.8)))
                                     }
                                 }
-                                .frame(width: 88, height: 112)
+                                .frame(width: LucentUI.detailSize(88), height: LucentUI.detailSize(112))
                                 .clipShape(RoundedRectangle(cornerRadius: 13))
-                                Text(person.name).font(.caption.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                                Text(person.name).font(.caption.weight(.semibold)).foregroundStyle(detailInk).lineLimit(1)
                                 if let role = person.role {
-                                    Text(role).font(.caption2).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                                    Text(role).font(.caption2).foregroundStyle(detailInk.opacity(0.65)).lineLimit(1)
                                 }
                             }
-                            .frame(width: 88, alignment: .leading)
+                            .frame(width: LucentUI.detailSize(88), alignment: .leading)
+                            .lucentReadableFocus()
                         }
                     }
                 }
@@ -284,7 +324,7 @@ struct MovieDetailView: View {
     private var mediaSection: some View {
         DetailMediaMetadataPanel(streams: streams, source: source, path: detail?.path,
                                  providerIDs: detail?.providerIds, tmdbID: item.metadata?.providerID,
-                                 isSeries: false)
+                                 isSeries: false, foreground: detailInk)
     }
 
     private func clock(_ seconds: Double) -> String {

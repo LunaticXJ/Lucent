@@ -33,18 +33,19 @@ struct TMDBSearchResult: Decodable, Identifiable, Sendable {
 enum TMDBService {
     static var deviceLanguage: String { LocalizationPreferences.current.contentLanguage }
     private static func authorize(_ components: inout URLComponents, credential: String) -> String? {
-        let credential = credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        var credential = credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        if credential.lowercased().hasPrefix("bearer ") { credential = String(credential.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines) }
         if credential.count == 32 && credential.allSatisfy({ $0.isHexDigit }) {
             components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "api_key", value: credential)]
             return nil
         }
         if credential.hasPrefix("api_key:") {
-            components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "api_key", value: String(credential.dropFirst(8)))]
+            components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "api_key", value: String(credential.dropFirst(8)).trimmingCharacters(in: .whitespacesAndNewlines))]
             return nil
         }
         return "Bearer \(credential)"
     }
-    struct DetailArtwork: Sendable {
+    struct DetailArtwork: Codable, Sendable {
         var posterURL: URL?
         var logoURL: URL?
         var localizedTitle: String? = nil
@@ -172,6 +173,8 @@ enum TMDBService {
         let vote_average: Double?
         let release_date: String?
         let first_air_date: String?
+        let status: String?
+        let last_air_date: String?
         let genres: [Genre]?
         let origin_country: [String]?
         struct Country: Decodable { let iso_3166_1: String }
@@ -192,7 +195,8 @@ enum TMDBService {
             originCountries: value.origin_country ?? value.production_countries?.map(\.iso_3166_1) ?? [],
             originalLanguage: value.original_language, backdropPath: value.backdrop_path,
             cast: value.credits?.cast.prefix(30).map { .init(id: $0.id, name: $0.name, character: $0.character, profilePath: $0.profile_path) },
-            localizationKey: localizationKey)
+            localizationKey: localizationKey, seriesStatus: television ? value.status : nil,
+            seriesEndDate: television && ["Ended", "Canceled", "Cancelled"].contains(value.status ?? "") ? value.last_air_date : nil)
     }
 
     static func catalogEpisode(id: Int, season: Int, number: Int, token: String) async throws -> CatalogEpisode {
@@ -317,7 +321,8 @@ private enum TMDBError: LocalizedError {
     case requestFailed, http(Int)
     var errorDescription: String? {
         switch self {
-        case .http(401), .http(403): "TMDB 认证失败，请检查令牌。"
+        case .http(401): "TMDB 认证失败（HTTP 401），请检查 API 密钥或读取令牌。"
+        case .http(403): "TMDB 拒绝访问（HTTP 403），请检查账户权限或网络访问限制。"
         case .http(429): "TMDB 请求过于频繁，请稍后重试。"
         case .http(let code): "TMDB 请求失败（HTTP \(code)）。"
         case .requestFailed: "无法获取 TMDB 资料，请检查令牌和网络连接。"

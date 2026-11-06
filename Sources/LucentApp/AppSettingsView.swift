@@ -14,9 +14,7 @@ struct AppSettingsView: View {
     let onSelectProfile: (UUID) -> Void
     @AppStorage("lucent.library.autoScanInterval") private var autoScanInterval = 86_400.0
     @AppStorage("lucent.appearance.theme") private var appearance = "system"
-    @AppStorage("lucent.home.autoplay") private var heroAutoplay = true
     @AppStorage("lucent.home.collapseDock") private var collapseDock = true
-    @AppStorage("lucent.playbackEngine") private var playbackEngine = PlaybackEnginePreference.automatic.rawValue
     @AppStorage("lucent.playback.atmosLayout") private var atmosLayout = "5.1.2"
     @AppStorage("lucent.autoSkipSegments") private var autoSkipSegments = true
     @AppStorage("lucent.subtitleFontScale") private var subtitleFontScale = 1.0
@@ -45,13 +43,15 @@ struct AppSettingsView: View {
 
     var body: some View {
         Form {
-            Section("观看体验") {
+            Section("通用") {
                 NavigationLink { LocalizationSettingsView().lucentSecondaryPage() } label: {
                     settingsRow("语言与地区", icon: "globe")
                 }
                 NavigationLink { appearancePage.lucentSecondaryPage() } label: {
                     settingsRow("外观与首页", icon: "circle.lefthalf.filled")
                 }
+            }
+            Section("观看体验") {
                 NavigationLink { playbackPage.lucentSecondaryPage() } label: {
                     settingsRow("播放", icon: "play.rectangle")
                 }
@@ -59,13 +59,15 @@ struct AppSettingsView: View {
                     settingsRow("字幕", icon: "captions.bubble")
                 }
                 NavigationLink { PlaybackServicesView(scope: .danmaku).lucentSecondaryPage() } label: {
-                    settingsRow("弹幕", icon: "text.bubble")
+                    settingsRow("弹幕", icon: "bubble.left.and.bubble.right")
                 }
             }
             Section("内容与存储") {
+                #if os(iOS)
                 NavigationLink { cellularNetworkPage.lucentSecondaryPage() } label: {
                     settingsRow("移动网络", icon: "antenna.radiowaves.left.and.right")
                 }
+                #endif
                 NavigationLink { libraryPage.lucentSecondaryPage() } label: {
                     settingsRow("聚合媒体库", icon: "rectangle.stack")
                 }
@@ -89,6 +91,7 @@ struct AppSettingsView: View {
         }
         .modifier(LucentSettingsPageStyle())
         .navigationTitle("设置")
+        .lucentTabRoot()
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
@@ -120,12 +123,11 @@ struct AppSettingsView: View {
                 }
                 .pickerStyle(.menu)
             } header: { Text("外观") }
+            #if os(iOS)
             Section("首页") {
-                Toggle("自动轮播海报", isOn: $heroAutoplay)
-                #if os(iOS)
                 Toggle("滚动时收起底栏", isOn: $collapseDock)
-                #endif
             }
+            #endif
         }
     }
 
@@ -135,16 +137,6 @@ struct AppSettingsView: View {
                 Toggle("播放光盘转场", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: "lucent.playback.discTransition") as? Bool ?? true },
                     set: { UserDefaults.standard.set($0, forKey: "lucent.playback.discTransition") }))
-            }
-            Section {
-                Picker("默认播放内核", selection: $playbackEngine) {
-                    ForEach(PlaybackEnginePreference.allCases, id: \.rawValue) { engine in
-                        Text(LocalizedStringKey(engine.title)).tag(engine.rawValue)
-                    }
-                }
-                .pickerStyle(.menu)
-            } header: { Text("播放内核") } footer: {
-                Text("自动选择优先使用原生内核。")
             }
             Section("播放控制") {
                 #if os(iOS)
@@ -388,13 +380,17 @@ struct AppSettingsView: View {
     private var syncPage: some View {
         settingsPage("同步与服务") {
             Section("iCloud") {
-                Toggle("同步播放状态和收藏", isOn: $library.iCloudSyncEnabled)
+                Toggle("iCloud 数据同步", isOn: $library.iCloudSyncEnabled)
                 Button("立即同步") { Task { await library.syncNow() } }
                     .foregroundStyle(.primary)
                     .disabled(!library.iCloudSyncEnabled || library.syncing)
                 if let status = library.syncStatus {
                     Text(LocalizedStringKey(status)).font(.footnote).foregroundStyle(.secondary)
                 }
+            }
+            Section {
+                Text("开启后同步收藏、聚合媒体库观看记录、片源与用户配置。影音服务器观看进度仍与服务器同步。")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Trakt") {
                 Button("Trakt 设置") { onAction(.trakt) }.foregroundStyle(.primary)

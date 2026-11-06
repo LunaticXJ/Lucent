@@ -12,6 +12,8 @@ struct CloudPlaybackState: Sendable {
     let title: String
     let metadata: MediaMetadata?
     let collectionNames: [String]?
+    var favoriteUpdatedAt: Date? = nil
+    var playbackUpdatedAt: Date? = nil
 }
 
 struct CloudLibraryConfiguration: Sendable {
@@ -19,6 +21,7 @@ struct CloudLibraryConfiguration: Sendable {
     let collectionNames: [String]
     let smartPlaylists: [SmartPlaylist]
     let networkSources: NetworkSourceConfiguration?
+    var preferences: [String: Data]? = nil
 }
 
 struct NetworkSourceConfiguration: Codable, Equatable, Sendable {
@@ -39,6 +42,7 @@ enum CloudPlaybackSync {
     private static func withSyncDatabase<R: Sendable>(
         _ body: @MainActor @Sendable (CKDatabase) async throws -> R
     ) async throws -> R {
+        guard UserDefaults.standard.bool(forKey: "lucent.iCloudSyncEnabled"), !Task.isCancelled else { throw CancellationError() }
         let configuration = CKOperation.Configuration()
         configuration.allowsCellularAccess = NetworkUsagePolicy.allowsSync
         return try await CKContainer.default().privateCloudDatabase.configuredWith(configuration: configuration) { database in
@@ -61,7 +65,8 @@ enum CloudPlaybackSync {
             return CloudLibraryConfiguration(updatedAt: updatedAt,
                                              collectionNames: collectionNames,
                                              smartPlaylists: playlists,
-                                             networkSources: networkSources)
+                                             networkSources: networkSources,
+                                             preferences: (record["preferences"] as? Data).flatMap { try? JSONDecoder().decode([String: Data].self, from: $0) })
         }
     }
 
@@ -77,6 +82,9 @@ enum CloudPlaybackSync {
             record["smartPlaylists"] = try JSONEncoder().encode(configuration.smartPlaylists)
             if let networkSources = configuration.networkSources {
                 record["networkSources"] = try JSONEncoder().encode(networkSources)
+            }
+            if let preferences = configuration.preferences {
+                record["preferences"] = try JSONEncoder().encode(preferences)
             }
             _ = try await database.save(record)
         }
@@ -150,6 +158,8 @@ enum CloudPlaybackSync {
     private static func fill(_ record: CKRecord, state: CloudPlaybackState) throws {
         record["updatedAt"] = state.updatedAt
         record["favorite"] = state.favorite ? 1 : 0
+        record["favoriteUpdatedAt"] = state.favoriteUpdatedAt
+        record["playbackUpdatedAt"] = state.playbackUpdatedAt
         record["watched"] = state.watched ? 1 : 0
         record["position"] = state.position
         if let duration = state.duration { record["duration"] = duration }
@@ -175,6 +185,48 @@ enum CloudPlaybackSync {
                                   favorite: favorite != 0, watched: watched != 0,
                                   position: position, duration: record["duration"] as? Double,
                                   title: title, metadata: metadata,
-                                  collectionNames: record["collections"] as? [String])
+                                  collectionNames: record["collections"] as? [String],
+                                  favoriteUpdatedAt: record["favoriteUpdatedAt"] as? Date,
+                                  playbackUpdatedAt: record["playbackUpdatedAt"] as? Date)
+    }
+}
+
+/// An explicit allowlist: never sync credentials, caches, diagnostics or the device's opt-in switch.
+enum CloudUserPreferences {
+    static let keys: Set<String> = [
+        "lucent.appearance.theme", "lucent.home.collapseDock", "lucent.home.selectedCatalog",
+        "lucent.library.autoScanInterval", "lucent.playback.atmosLayout",
+        "lucent.autoSkipSegments", "lucent.subtitleFontScale", "lucent.subtitleBackgroundOpacity",
+        "lucent.player.controlsAutoHideDelay", "lucent.player.seekPreview", "lucent.player.seekInterval",
+        "lucent.player.showRemainingTime", "lucent.player.videoScaleMode", "lucent.player.nextEpisodePrompt",
+        "lucent.player.minimumResumePercent", "lucent.player.completedPercent", "lucent.playback.discTransition",
+        "lucent.locale.interface", "lucent.locale.content", "lucent.locale.subtitles", "lucent.locale.audio",
+        "lucent.locale.region", "lucent.locale.dateOrder", "lucent.locale.clock", "lucent.locale.zone",
+        "lucent.danmaku.enabled", "lucent.danmaku.opacity", "lucent.danmaku.fontSize", "lucent.danmaku.area",
+        "lucent.danmaku.customServers", "lucent.danmaku.selectedServer",
+        "lucent.danmaku.duration", "lucent.danmaku.offset", "lucent.danmaku.blocked",
+        "lucent.library.home.continue", "lucent.library.home.movies", "lucent.library.home.series",
+        "lucent.library.home.favorites", "lucent.library.home.unwatched",
+        "lucent.gestures.doubleTap", "lucent.gestures.seek", "lucent.gestures.seekSpan",
+        "lucent.gestures.brightness", "lucent.gestures.volume", "lucent.gestures.hold",
+        "lucent.gestures.holdRate", "lucent.gestures.pinch", "lucent.gestures.restoreBrightness",
+        "lucent.network.cellularPlayback", "lucent.network.cellularSync", "lucent.network.cellularDownloads"
+    ]
+    static func capture(defaults: UserDefaults = .standard) -> [String: Data] {
+        Dictionary(uniqueKeysWithValues: keys.compactMap { key in
+            // Empty array represents a reset to the app default on every device.
+            let values: [Any] = defaults.object(forKey: key).map { [$0] } ?? []
+            return (try? PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0))
+                .map { (key, $0) }
+        })
+    }
+    static func apply(_ values: [String: Data], defaults: UserDefaults = .standard) {
+        for (key, data) in values where keys.contains(key) {
+            guard let array = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [Any],
+                  array.count <= 1 else { continue }
+            if let value = array.first { defaults.set(value, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        NetworkUsagePolicy.notifySettingsChanged()
     }
 }

@@ -243,6 +243,7 @@ struct ProfilePlaybackState: Codable, Equatable {
     var favorite: Bool
     var lastPlayedAt: Date?
     var stateUpdatedAt: Date?
+    var favoriteUpdatedAt: Date?
 
     init(item: MediaItem) {
         position = item.position
@@ -250,6 +251,7 @@ struct ProfilePlaybackState: Codable, Equatable {
         favorite = item.isFavorite
         lastPlayedAt = item.lastPlayedAt
         stateUpdatedAt = item.stateUpdatedAt
+        favoriteUpdatedAt = item.favoriteUpdatedAt
     }
 }
 
@@ -335,6 +337,8 @@ struct MediaMetadata: Codable, Equatable, Sendable {
     var backdropPath: String? = nil
     var cast: [CatalogPerson]? = nil
     var localizationKey: String? = nil
+    var seriesStatus: String? = nil
+    var seriesEndDate: String? = nil
 
     var posterURL: URL? {
         guard let posterPath, posterPath.hasPrefix("/") else { return nil }
@@ -386,6 +390,7 @@ struct MediaItem: Codable, Identifiable, Equatable, Sendable {
     var metadata: MediaMetadata?
     var downloadFileName: String?
     var stateUpdatedAt: Date?
+    var favoriteUpdatedAt: Date?
     var metadataAttemptedAt: Date?
     var serverSummary: String?
     var serverPosterKey: String?
@@ -442,4 +447,13 @@ struct MediaItem: Codable, Identifiable, Equatable, Sendable {
         guard let duration, duration > 0 else { return 0 }
         return min(max(position / duration, 0), 1)
     }
+}
+
+extension MediaItem {
+    var catalogDisplayYear: Int? {
+        [metadata?.year, metadata?.releaseDate.flatMap { Int($0.prefix(4)) },
+         identity?.movieYear, catalogEpisode?.airDate.flatMap { Int($0.prefix(4)) }]
+            .compactMap { $0 }.first { $0 > 0 }
+    }
+    var catalogDisplayYearText: String? { CatalogYearLabel.text(start: catalogDisplayYear, isSeries: identity?.seriesName != nil, status: metadata?.seriesStatus, endDate: metadata?.seriesEndDate) }
 }

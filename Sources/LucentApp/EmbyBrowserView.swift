@@ -81,7 +81,7 @@ private struct EmbyBrowserPageView: View {
             switch value?.lowercased() {
             case "tvshows": .series
             case "movies": .movies
-            case "mixed", "homevideos": .mixed
+            case "mixed", "homevideos", "": .mixed
             default: nil
             }
         }
@@ -101,8 +101,10 @@ private struct EmbyBrowserPageView: View {
     @State private var selectedDirectory: DirectoryRoute?
 
     @State private var section: Section = .programs
-    @State private var sort: EmbyClient.BrowseSort = .name
-    @State private var ascending = true
+    @State private var sort: EmbyClient.BrowseSort = .added
+    @State private var ascending = false
+    @State private var sortChosen = false
+    private var effectiveSort: EmbyClient.BrowseSort { !sortChosen && itemType == "Series" ? .latestEpisodeAdded : sort }
     @State private var entries: [JellyfinItem] = []
     @State private var totalCount = 0
     @State private var nextStartIndex = 0
@@ -115,7 +117,7 @@ private struct EmbyBrowserPageView: View {
     @State private var displayedQuery: String?
     @State private var loadGeneration = UUID()
     private var libraryCacheKey: String { "\(source.id)|\(source.baseAddress)|\(source.userID)|\(parentID ?? "root")" }
-    private var queryKey: String { "\(libraryCacheKey)|\(activeCatalog?.rawValue ?? "generic")|\(section.rawValue)|\(sort.rawValue)|\(ascending)|\(String(describing: facet))" }
+    private var queryKey: String { "\(libraryCacheKey)|\(activeCatalog?.rawValue ?? "generic")|\(section.rawValue)|\(effectiveSort.rawValue)|\(ascending)|\(String(describing: facet))" }
 
 
     private var activeCatalog: CatalogType? { catalogType ?? detectedCatalog }
@@ -125,7 +127,7 @@ private struct EmbyBrowserPageView: View {
         switch activeCatalog {
         case .series: [.programs, .genres, .studios, .folders]
         case .movies: [.programs, .genres, .studios, .folders]
-        case .mixed: [.programs, .movies, .genres, .folders]
+        case .mixed: [.movies, .programs, .genres, .folders]
         case nil: []
         }
     }
@@ -141,7 +143,11 @@ private struct EmbyBrowserPageView: View {
         switch activeCatalog {
         case .series: "Series"
         case .movies: "Movie"
-        case .mixed: section == .movies ? "Movie" : "Movie,Series,Video"
+        case .mixed:
+            if facet != nil { "Movie,Series" }
+            else if section == .movies { "Movie" }
+            else if section == .programs { "Series" }
+            else { "Movie,Series" }
         case nil: nil
         }
     }
@@ -152,9 +158,9 @@ private struct EmbyBrowserPageView: View {
             else { genericPage }
         }
         .background(EmbyBrowserPalette.page)
-        .lucentCollectionChrome(title: title, back: { if let onBack { onBack() } else { dismiss() } }) {
-            if isCatalogPage { sortMenu }
-            else { Color.clear.frame(width: LucentUI.controlSize, height: LucentUI.controlSize) }
+        .lucentCollectionChrome(title: title) {
+            if isCatalogPage && selectedDirectory == nil && selectedItemID == nil { sortMenu }
+            else { EmptyView() }
         }
         .task { await initialize() }
         .task(id: "\(initialized)|\(queryKey)") {
@@ -184,9 +190,10 @@ private struct EmbyBrowserPageView: View {
             Divider()
             ForEach(sortOptions) { option in
                 Button {
+                    sortChosen = true
                     sort = option
                 } label: {
-                    if sort == option {
+                    if effectiveSort == option {
                         Label(option.title, systemImage: "checkmark")
                     } else { Text(option.title) }
                 }
@@ -194,10 +201,8 @@ private struct EmbyBrowserPageView: View {
         } label: {
             Image(systemName: "arrow.up.arrow.down")
                 .font(.system(size: 19, weight: .medium))
-                .frame(width: 44, height: 44)
-                .modifier(LucentGlass(shape: Circle()))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.automatic)
         .accessibilityLabel("排序：\(sort.title)，\(ascending ? "升序" : "降序")")
     }
 
@@ -206,13 +211,13 @@ private struct EmbyBrowserPageView: View {
             if facet == nil {
                 Picker("", selection: $section) {
                     ForEach(sections, id: \.self) { option in
-                        Text(LocalizedStringKey(option == .programs ? (activeCatalog == .movies ? "电影" : activeCatalog == .series ? "剧集" : "全部影片") : option.rawValue))
+                        Text(LocalizedStringKey(option == .programs ? (activeCatalog == .movies ? "电影" : "剧集") : option.rawValue))
                             .tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.regular)
-                .padding(.horizontal, 20)
+                .padding(.horizontal, LucentUI.pageInset)
                 .padding(.bottom, 12)
             }
             browserContent
@@ -221,11 +226,9 @@ private struct EmbyBrowserPageView: View {
 
     private var genericPage: some View { browserContent }
 
-    private var usesPosterGrid: Bool {
-        if !isCatalogPage { return true }
-        return section == .programs || section == .movies || facet != nil ||
-            (section == .folders && activeCatalog != .series)
-    }
+    private var isLibraryOverview: Bool { parentID == nil && catalogLibraryID == nil && facet == nil }
+    private var cardAspectRatio: CGFloat { isLibraryOverview ? 16.0 / 9.0 : LucentUI.posterAspectRatio }
+    private var showingCategories: Bool { facet == nil && (section == .genres || section == .studios) }
     private func isPlayable(_ entry: JellyfinItem) -> Bool {
         entry.type == "Series" || entry.mediaType == "Video" ||
             ["Movie", "Episode", "Video", "MusicVideo"].contains(entry.type)
@@ -234,37 +237,33 @@ private struct EmbyBrowserPageView: View {
     private var browserContent: some View {
         GeometryReader { geometry in
             let columns = Array(repeating: GridItem(.flexible(), spacing: 12),
-                                count: max(3, Int((geometry.size.width - 40) / 160)))
+                                count: isLibraryOverview ? LucentUI.libraryOverviewColumnCount : LucentUI.libraryColumnCount)
             ScrollView {
                 LazyVStack(spacing: 20) {
                     if entries.isEmpty && !loaded && errorMessage == nil {
                         LazyVGrid(columns: columns, spacing: 22) {
                             ForEach(0..<9, id: \.self) { _ in
                                 VStack(alignment: .leading, spacing: 9) {
-                                    LucentSkeleton(radius: LucentUI.cardRadius).aspectRatio(2.0 / 3.0, contentMode: .fit)
+                                    LucentSkeleton(radius: LucentUI.cardRadius).aspectRatio(cardAspectRatio, contentMode: .fit)
                                     LucentSkeleton(radius: 3).frame(height: 12)
                                     LucentSkeleton(radius: 3).frame(width: 42, height: 10)
                                 }
                             }
                         }.accessibilityLabel("正在读取目录…")
-                    } else if usesPosterGrid {
+                    } else {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
                             ForEach(entries, id: \.id) { entry in
-                                posterLink(entry)
-                                    .task { if entry.id == entries.suffix(6).first?.id { await loadNextPage() } }
-                            }
-                        }
-                    } else {
-                        LazyVStack(spacing: 0) {
-                            ForEach(entries, id: \.id) { entry in
-                                directoryLink(entry)
-                                    .task { if entry.id == entries.suffix(6).first?.id { await loadNextPage() } }
+                                Group {
+                                    if showingCategories { categoryLink(entry) }
+                                    else { posterLink(entry) }
+                                }
+                                .task { if entry.id == entries.suffix(6).first?.id { await loadNextPage() } }
                             }
                         }
                     }
                     pageStatus
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, LucentUI.pageInset)
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
@@ -275,39 +274,26 @@ private struct EmbyBrowserPageView: View {
     @ViewBuilder private func posterLink(_ entry: JellyfinItem) -> some View {
         if isPlayable(entry) {
             Button { selectedItemID = library.openEmbyItem(sourceID: source.id, remote: entry).id } label: {
-                SeriesPosterTile(source: source, entry: entry, showUnplayed: entry.type == "Series")
-            }.buttonStyle(.plain)
+                SeriesPosterTile(source: source, entry: entry)
+            }.lucentContentButtonStyle()
         } else {
             Button { openDirectory(entry) } label: {
-                SeriesPosterTile(source: source, entry: entry, folder: true)
-            }.buttonStyle(.plain)
+                SeriesPosterTile(source: source, entry: entry, folder: true, stretchesImage: isLibraryOverview, aspectRatio: cardAspectRatio)
+            }.lucentContentButtonStyle()
         }
     }
 
-    private func directoryLink(_ entry: JellyfinItem) -> some View {
+    private func categoryLink(_ entry: JellyfinItem) -> some View {
         Button {
-            if section == .genres || section == .studios {
-                withAnimation {
-                    selectedDirectory = DirectoryRoute(parentID: libraryID, title: entry.name,
-                        libraryID: libraryID, catalog: activeCatalog,
-                        facet: section == .genres ? .genre(entry.id) : .studio(entry.id))
-                }
-            } else { openDirectory(entry) }
-        } label: {
-            HStack(spacing: 16) {
-                Image(systemName: section == .genres ? "tag" : section == .studios ? "building.2" : "folder")
-                    .font(.system(size: 21, weight: .regular))
-                    .foregroundStyle(.secondary).frame(width: 28)
-                Text(entry.name).font(.body.weight(.medium)).lineLimit(2)
-                Spacer(minLength: 12)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            withAnimation {
+                selectedDirectory = DirectoryRoute(parentID: libraryID, title: entry.name,
+                    libraryID: libraryID, catalog: activeCatalog,
+                    facet: section == .genres ? .genre(entry.id) : .studio(entry.id))
             }
-            .foregroundStyle(.primary)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .overlay(alignment: .bottom) { Divider().padding(.leading, 44) }
-        }.buttonStyle(.plain)
+        } label: {
+            SeriesPosterTile(source: source, entry: entry, folder: true,
+                             folderSymbol: section == .genres ? "tag" : "building.2")
+        }.lucentContentButtonStyle()
     }
 
     private func openDirectory(_ entry: JellyfinItem) {
@@ -318,27 +304,27 @@ private struct EmbyBrowserPageView: View {
         }
     }
 
+    private var hasMorePages: Bool { loaded && !entries.isEmpty && nextStartIndex < totalCount }
+
     @ViewBuilder private var pageStatus: some View {
-        if loading && !entries.isEmpty {
-            ProgressView().padding(.vertical, 16)
-        } else if loaded && nextStartIndex < totalCount {
-            Button { Task { await loadNextPage() } } label: {
-                Label("加载更多", systemImage: "chevron.down")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 22).padding(.vertical, 12)
-                    .modifier(LucentGlass(shape: Capsule()))
-            }.buttonStyle(.plain)
-        }
         if let errorMessage {
             VStack(spacing: 10) {
                 Text(errorMessage).font(.subheadline).foregroundStyle(.secondary)
                 Button("重试") { Task { await reload(force: true) } }
             }
             .frame(maxWidth: .infinity).padding(20)
-        }
-        if loaded && entries.isEmpty && errorMessage == nil {
+        } else if loading {
+            if !entries.isEmpty { ProgressView().padding(.vertical, 16) }
+        } else if loaded && entries.isEmpty {
             LucentStateView(title: "暂无内容", symbol: "square.grid.3x3")
                 .frame(maxWidth: .infinity).padding(.top, 60)
+        } else if hasMorePages {
+            Button { Task { await loadNextPage() } } label: {
+                Label("加载更多", systemImage: "chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 22).padding(.vertical, 12)
+                    .modifier(LucentGlass(shape: Capsule()))
+            }.lucentContentButtonStyle()
         }
     }
 
@@ -358,6 +344,7 @@ private struct EmbyBrowserPageView: View {
         }
         if let activeCatalog { EmbyBrowseMemory.collectionTypes[libraryCacheKey] = activeCatalog.rawValue }
         guard !Task.isCancelled else { return }
+        if let first = sections.first { section = first }
         initialized = true
     }
 
@@ -421,21 +408,19 @@ private struct EmbyBrowserPageView: View {
                                                        parentID: libraryID,
                                                        kind: section == .genres ? "Genres" : "Studios",
                                                        itemType: activeCatalog == .movies ? "Movie" :
-                                                           activeCatalog == .series ? "Series" : "Movie,Series,Video",
+                                                           activeCatalog == .series ? "Series" : "Movie,Series",
                                                        startIndex: nextStartIndex, limit: 48)
             } else if isCatalogPage, section == .folders, facet == nil {
-                let all = try await EmbyClient.browse(source: source, token: token,
-                                                      parentID: parentID, startIndex: nextStartIndex, limit: 48,
-                                                      includeMediaDetails: false)
-                fetchedCount = all.items.count
-                page = .init(items: all.items.filter { $0.isFolder == true && $0.type != "Series" },
-                             totalCount: all.totalCount)
+                // Filter on the server before it computes the page and total.
+                page = try await EmbyClient.browse(source: source, token: token,
+                    parentID: parentID, startIndex: nextStartIndex, limit: 48,
+                    includeMediaDetails: false, foldersOnly: true)
             } else {
                 page = try await EmbyClient.browse(source: source, token: token,
                                                    parentID: parentID,
                                                    startIndex: nextStartIndex, limit: 48,
                                                    itemType: itemType,
-                                                   sort: sort, ascending: ascending,
+                                                   sort: effectiveSort, ascending: ascending,
                                                    facet: facet, includeMediaDetails: false)
             }
             guard !Task.isCancelled, generation == loadGeneration, key == queryKey else { return }
@@ -469,34 +454,30 @@ private struct SeriesPosterTile: View {
     let source: EmbySource
     let entry: JellyfinItem
     var folder = false
-    var showUnplayed = true
+    var stretchesImage = false
+    var aspectRatio: CGFloat = LucentUI.posterAspectRatio
+    var folderSymbol = "folder"
     @State private var artwork: PosterImage?
     private var artworkKey: String { "\(source.id)|\(entry.id)|false" }
     private var displayedArtwork: PosterImage? { artwork ?? ArtworkImageDecoder.cachedImage(key: artworkKey, maximumPixelSize: 525) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        LucentCatalogPosterLayout {
             GeometryReader { geometry in
                 ZStack {
-                    LucentArtworkPlaceholder(symbol: folder ? "folder" : "film", showsSymbol: displayedArtwork == nil)
+                    LucentArtworkPlaceholder(symbol: folder ? folderSymbol : "film", showsSymbol: displayedArtwork == nil)
                     if let artwork = displayedArtwork {
                         #if os(macOS)
                         Image(nsImage: artwork)
-                            .resizable().scaledToFill()
+                            .resizable().modifier(LucentArtworkSizing(stretches: stretchesImage))
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped()
                         #else
                         Image(uiImage: artwork)
-                            .resizable().scaledToFill()
+                            .resizable().modifier(LucentArtworkSizing(stretches: stretchesImage))
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped()
                         #endif
-                    }
-                    if showUnplayed, !folder,
-                       let count = entry.userData?.unplayedItemCount, count > 0 {
-                        LucentCountBadge(count: count)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                            .padding(7)
                     }
                     if !folder, let rating = entry.communityRating, rating > 0 {
                         LucentRatingBadge(rating: rating)
@@ -506,14 +487,14 @@ private struct SeriesPosterTile: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
             }
-            .aspectRatio(folder ? 16.0 / 10.0 : 2.0 / 3.0, contentMode: .fit)
-            LucentPosterCaption(title: entry.name,
-                subtitle: !folder ? entry.productionYear.map { yearLabel(start: $0, endDate: entry.endDate) } : nil,
-                lines: 1)
+            .aspectRatio(aspectRatio, contentMode: .fit)
+        } caption: {
+            LucentCatalogCaption(title: entry.name, yearText: folder ? nil : entry.displayYearText,
+                                 source: folder ? nil : source, item: entry)
         }
-        .accessibilityElement(children: .combine)
         .task(id: "\(source.id)|\(entry.id)") {
             if let cached = displayedArtwork { artwork = cached; return }
+            if folder, folderSymbol != "folder", entry.imageTags?.primary == nil { return }
             guard let token = try? KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty,
                   let data = try? await LocalMediaCache.shared.imageData(
                     key: "emby|\(source.id)|\(entry.id)|false|350", fetch: {
@@ -525,9 +506,5 @@ private struct SeriesPosterTile: View {
         }
     }
 
-    private func yearLabel(start: Int, endDate: String?) -> String {
-        guard let endDate, endDate.count >= 4,
-              let endYear = Int(endDate.prefix(4)), endYear > start else { return String(start) }
-        return "\(start) - \(endYear)"
-    }
+
 }

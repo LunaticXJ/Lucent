@@ -107,7 +107,7 @@ struct StorageConnectionEditor: View {
                         LucentPasswordInput(text: $password, visible: $showPassword, placeholder: "选填").privacySensitive()
                     }
                     if kind == .webDAV {
-                        LucentFormField("路径") { TextField("选填（/dav）",text:$path) }
+                        LucentFormField("路径") { TextField("选填（默认 /）",text:$path) }
                     } else {
                         LucentFormField("域名") { TextField("选填",text:$domain) }
                         LucentFormField("共享名称") { TextField("必填，也可从下方选择",text:$share) }

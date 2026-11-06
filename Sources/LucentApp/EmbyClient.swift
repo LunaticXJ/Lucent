@@ -37,7 +37,7 @@ enum EmbyClient {
     enum BrowseSort: String, CaseIterable, Identifiable {
         case name = "SortName", added = "DateCreated", release = "PremiereDate"
         case year = "ProductionYear", imdb = "CommunityRating", critics = "CriticRating"
-        case played = "DatePlayed", latestEpisodeAdded = "DateLastMediaAdded"
+        case played = "DatePlayed", latestEpisodeAdded = "DateLastContentAdded"
         case latestEpisodeReleased = "DateLastMediaPublished", playCount = "PlayCount"
         case random = "Random", rating = "OfficialRating"
         case boxOffice = "Revenue", resolution = "Resolution"
@@ -211,25 +211,41 @@ enum EmbyClient {
                        startIndex: Int = 0, limit: Int = 100,
                        itemType: String? = nil, sort: BrowseSort = .name,
                        ascending: Bool = true, facet: BrowseFacet? = nil,
-                       includeMediaDetails: Bool = true) async throws -> BrowsePage {
-        let path = parentID == nil ? "Users/\(source.userID)/Views" : "Users/\(source.userID)/Items"
+                       includeMediaDetails: Bool = true, foldersOnly: Bool = false) async throws -> BrowsePage {
+        let request = try browseRequest(source: source, token: token, parentID: parentID,
+            startIndex: startIndex, limit: limit, itemType: itemType, sort: sort,
+            ascending: ascending, facet: facet, includeMediaDetails: includeMediaDetails, foldersOnly: foldersOnly)
+        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
+        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+    }
+
+    static func browseRequest(source: EmbySource, token: String, parentID: String?,
+                       startIndex: Int = 0, limit: Int = 100,
+                       itemType: String? = nil, sort: BrowseSort = .name,
+                       ascending: Bool = true, facet: BrowseFacet? = nil,
+                       includeMediaDetails: Bool = true, foldersOnly: Bool = false) throws -> URLRequest {
+        let path = parentID == nil && itemType == nil ? "Users/\(source.userID)/Views" : "Users/\(source.userID)/Items"
         var request = try makeRequest(baseAddress: source.baseAddress, path: path, token: token)
-        if let parentID {
+        if parentID != nil || itemType != nil {
             var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
             components.queryItems = [
-                URLQueryItem(name: "ParentId", value: parentID),
                 URLQueryItem(name: "Recursive", value: "false"),
                 URLQueryItem(name: "StartIndex", value: String(startIndex)),
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: includeMediaDetails ? "Overview,MediaSources,MediaStreams,DateCreated,Genres,Studios" : "DateCreated"),
+                URLQueryItem(name: "Fields", value: includeMediaDetails ? "Overview,MediaSources,MediaStreams,DateCreated,Genres,Studios,ProductionYear" : "DateCreated,ProductionYear"),
                 URLQueryItem(name: "EnableUserData", value: "true"),
                 URLQueryItem(name: "SortBy", value: sort.rawValue),
                 URLQueryItem(name: "SortOrder", value: ascending ? "Ascending" : "Descending")
             ]
+            if let parentID { components.queryItems?.append(.init(name: "ParentId", value: parentID)) }
             if let itemType {
                 components.queryItems?.removeAll { $0.name == "Recursive" }
                 components.queryItems?.append(URLQueryItem(name: "Recursive", value: "true"))
                 components.queryItems?.append(URLQueryItem(name: "IncludeItemTypes", value: itemType))
+            }
+            if foldersOnly {
+                components.queryItems?.append(URLQueryItem(name: "IsFolder", value: "true"))
+                components.queryItems?.append(URLQueryItem(name: "ExcludeItemTypes", value: "Series"))
             }
             switch facet {
             case .genre(let id): components.queryItems?.append(URLQueryItem(name: "GenreIds", value: id))
@@ -238,9 +254,9 @@ enum EmbyClient {
             }
             request.url = components.url
         }
-        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
-        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+        return request
     }
+
 
     static func categories(source: EmbySource, token: String, parentID: String,
                            kind: String, itemType: String = "Series",
@@ -269,7 +285,7 @@ enum EmbyClient {
             URLQueryItem(name: "Limit", value: String(limit)),
             URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
             URLQueryItem(name: "EnableUserData", value: "true"),
-            URLQueryItem(name: "Fields", value: "Overview,ProviderIds,PreferredMetadataLanguage")
+            URLQueryItem(name: "Fields", value: "Overview,ProviderIds,PreferredMetadataLanguage,Genres,CommunityRating,ProductionYear")
         ]
         request.url = components.url
         return try JSONDecoder().decode([JellyfinItem].self, from: await fetch(request))
@@ -321,10 +337,10 @@ enum EmbyClient {
             URLQueryItem(name: "Recursive", value: "true"),
             URLQueryItem(name: "IncludeItemTypes", value: itemTypes),
             URLQueryItem(name: "Limit", value: String(limit)),
-            URLQueryItem(name: "SortBy", value: "DateCreated"),
-            URLQueryItem(name: "SortOrder", value: "Descending"),
+            URLQueryItem(name: "SortBy", value: itemTypes == "Series" ? "DateLastContentAdded,DateCreated" : "DateCreated"),
+            URLQueryItem(name: "SortOrder", value: itemTypes == "Series" ? "Descending,Descending" : "Descending"),
             URLQueryItem(name: "EnableUserData", value: "true"),
-            URLQueryItem(name: "Fields", value: "CommunityRating")
+            URLQueryItem(name: "Fields", value: "CommunityRating,ProductionYear")
         ]
         request.url = components.url
         let page = try JSONDecoder().decode(Page.self, from: await fetch(request))

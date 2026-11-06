@@ -118,15 +118,15 @@ struct LocalCatalogPosterCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             LocalCatalogArtwork(item: item)
-                .overlay(alignment: .bottomTrailing) {
+                .overlay(alignment: showsPlaybackTime ? .topTrailing : .bottomTrailing) {
                     if let rating = item.metadata?.rating { LucentRatingBadge(rating: rating).padding(3) }
                 }
-                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                .aspectRatio(LucentUI.posterAspectRatio, contentMode: .fit)
+                .overlay(alignment: .bottom) {
+                    if showsPlaybackTime { LucentPlaybackProgressOverlay(position: item.position, duration: item.duration ?? item.technicalInfo?.duration, progress: item.progress) }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
-            LucentPosterCaption(title: item.catalogDisplayTitle, subtitle: item.metadata?.year.map(String.init) ?? " ")
-            if showsPlaybackTime {
-                LucentPlaybackTimeCaption(position: item.position, duration: item.duration ?? item.technicalInfo?.duration)
-            }
+            LucentPosterCaption(title: item.catalogDisplayTitle, subtitle: item.catalogDisplayYearText ?? " ", lines: 1)
         }
         .contentShape(Rectangle())
     }
@@ -183,48 +183,41 @@ struct LocalCatalogCollectionView: View {
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 19, weight: .medium))
-                .frame(width: LucentUI.controlSize, height: LucentUI.controlSize)
-                .modifier(LucentGlass(shape: Circle()))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.automatic)
         .accessibilityLabel("排序与筛选")
     }
 
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
-                let columns = max(3, Int((geometry.size.width - 40) / 160))
+                let columns = LucentUI.libraryColumnCount
                 if collection == .mediaLibraries {
-                    LazyVGrid(columns: [GridItem(.flexible()),GridItem(.flexible())], spacing:16) {
-                        ForEach(LocalCatalogCollection.homeCategories.filter { !$0.items(cards: library.localCatalogCards, files: library.localLibraryItems.filter { $0.missingSince == nil }).isEmpty }) { category in
-                            let values = category.items(cards:library.localCatalogCards, files:library.localLibraryItems)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: LucentUI.libraryOverviewColumnCount), spacing: 18) {
+                        ForEach(([LocalCatalogCollection.all] + LocalCatalogCollection.homeCategories).filter {
+                            !$0.items(cards: library.localCatalogCards, files: library.localLibraryItems.filter { $0.missingSince == nil }).isEmpty
+                        }) { category in
+                            let values = category.items(cards: library.localCatalogCards, files: library.localLibraryItems)
                             Button { withAnimation { selectedCollection = category } } label: {
-                                ZStack(alignment:.bottomLeading) {
-                                    if let first = values.first { LocalCatalogArtwork(item:first,landscape:true) }
-                                    else { LucentUI.panel }
-                                    LinearGradient(colors:[.clear,.black.opacity(0.8)],startPoint:.top,endPoint:.bottom)
-                                    HStack { Text(LocalizedStringKey(category.title)).bold(); Spacer(); Text(values.count.formatted(.number.locale(LocalizationPreferences.current.displayLocale))) }
-                                        .font(.subheadline).foregroundStyle(.white).padding(14)
-                                }.frame(height:112).clipShape(RoundedRectangle(cornerRadius:16))
+                                VStack(alignment: .leading, spacing: 7) {
+                                    ZStack(alignment: .topTrailing) {
+                                        if let first = values.first { LocalCatalogArtwork(item: first, landscape: true) }
+                                        else { LucentArtworkPlaceholder(symbol: category.icon) }
+                                        LucentCountBadge(count: values.count).padding(7)
+                                    }
+                                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
+                                    LucentPosterCaption(title: category.title, subtitle: " ", lines: 1)
+                                }
                             }.buttonStyle(.plain)
                         }
-                    }.padding(20)
-                    Button { withAnimation { selectedCollection = .all } } label: {
-                        HStack {
-                            Text("全部影片").font(.body.weight(.medium))
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        }
-                        .foregroundStyle(.primary)
-                        .padding(18)
-                        .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: LucentUI.cardRadius))
-                    }.buttonStyle(.plain).padding(.horizontal, 20).padding(.bottom, 24)
+                    }.padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 32)
                 } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns),
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: columns),
                           alignment: .leading, spacing: 22) {
                     ForEach(displayed) { item in
                         Button {
-                            transitionKey = "grid:\(item.id)"; selectedItemID = item.id
+                            transitionKey = collection == .continueWatching ? nil : "grid:\(item.id)"; selectedItemID = item.id
                         } label: {
                             LocalCatalogPosterCard(item: item, showsPlaybackTime: collection == .continueWatching)
                                 .modifier(HomeMatchedSource(key: "grid:\(item.id)", namespace: detailTransition))
@@ -242,7 +235,7 @@ struct LocalCatalogCollectionView: View {
                 }
             }.background(LucentUI.page)
         }
-        .lucentCollectionChrome(title: collection.title, back: { if let onBack { onBack() } else { dismiss() } }) { filterMenu }
+        .lucentCollectionChrome(title: collection.title) { if selectedCollection == nil && selectedItemID == nil { filterMenu } }
         .navigationDestination(item: $selectedCollection) { destination in
             Group {
                 LocalCatalogCollectionView(collection: destination, detailPresented: $detailPresented,
@@ -263,5 +256,134 @@ struct LocalCatalogCollectionView: View {
         }
         .onChange(of: selectedItemID) { _, value in detailPresented = value != nil }
         .sheet(item: $matchingItem) { item in MetadataMatchView(item: item).environmentObject(library) }
+    }
+}
+
+/// Favorites belong to the Lucent user, independently of server user data.
+struct LucentFavoritesView: View {
+    @EnvironmentObject private var library: LibraryStore
+    @State private var selectedItemID: UUID?
+    private struct Group: Identifiable {
+        let id: String
+        let title: String
+        var asset: String? = nil
+        let items: [MediaItem]
+    }
+    private var groups: [Group] {
+        let visible = Set(library.visibleItems.map(\.id))
+        let local = LocalCatalogCollection.favorites.items(cards: library.localCatalogCards,
+            files: library.localLibraryItems.filter { $0.missingSince == nil && visible.contains($0.id) })
+        var result = [Group(id: "library", title: String(localized: "聚合媒体库"), items: local)]
+        let favorites = library.visibleItems.filter(\.isFavorite)
+        result += library.embySources.map { source in
+            Group(id: "emby:\(source.id)", title: source.name, asset: source.kind.assetName, items: favorites.filter {
+                if case .embyItem(let id, _) = $0.location { return id == source.id }; return false
+            })
+        }
+        result += library.jellyfinSources.map { source in
+            Group(id: "jellyfin:\(source.id)", title: source.name, asset: "JellyfinBrand", items: favorites.filter {
+                if case .jellyfinItem(let id, _) = $0.location { return id == source.id }; return false
+            })
+        }
+        result += library.plexSources.map { source in
+            Group(id: "plex:\(source.id)", title: source.name, asset: "PlexBrand", items: favorites.filter {
+                if case .plexItem(let id, _, _) = $0.location { return id == source.id }; return false
+            })
+        }
+        return result.filter { !$0.items.isEmpty }
+    }
+    private func removeFavorite(_ item: MediaItem) {
+        if library.localLibraryItems.contains(where: { $0.id == item.id }) {
+            let ids = library.localLibraryItems.filter { $0.catalogGroupID == item.catalogGroupID && $0.isFavorite }.map(\.id)
+            for id in ids { library.toggleFavorite(id: id) }
+        } else { library.toggleFavorite(id: item.id) }
+    }
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 28) {
+                if groups.isEmpty {
+                    ContentUnavailableView("暂无收藏", systemImage: "heart",
+                        description: Text("在内容详情页添加收藏后，会显示在这里。"))
+                        .frame(maxWidth: .infinity).padding(.top, 64)
+                }
+                ForEach(groups) { group in
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label {
+                            Text(group.title)
+                        } icon: {
+                            if let asset = group.asset {
+                                Image(asset).resizable().scaledToFit().frame(width: 20, height: 20)
+                            } else {
+                                Image(systemName: "rectangle.stack")
+                            }
+                        }.font(.title3.bold())
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
+                                                 count: LucentUI.libraryColumnCount), alignment: .leading, spacing: 22) {
+                            ForEach(group.items) { item in
+                                Button { selectedItemID = item.id } label: {
+                                    if group.id == "library" {
+                                        LocalCatalogPosterCard(item: item)
+                                    } else {
+                                        LucentFavoriteCard(item: item)
+                                    }
+                                }.lucentContentButtonStyle()
+                                .contextMenu {
+                                    Button("取消收藏", systemImage: "heart.slash") { removeFavorite(item) }
+                                }
+                            }
+                        }
+                        #if os(tvOS)
+                        .focusSection()
+                        #endif
+                    }
+                }
+            }.padding(.horizontal, LucentUI.pageInset).padding(.top, 18).padding(.bottom, 32)
+        }
+        .background(LucentUI.page)
+        .lucentCollectionChrome(title: "收藏") { EmptyView() }
+        .navigationDestination(item: $selectedItemID) { id in
+            MediaDetailView(itemID: id, onBack: { selectedItemID = nil })
+                .environmentObject(library).lucentSecondaryPage()
+        }
+    }
+}
+
+private struct LucentFavoriteCard: View {
+    @EnvironmentObject private var library: LibraryStore
+    let item: MediaItem
+    private var request: URLRequest? {
+        if let url = library.posterURL(for: item) { return URLRequest(url: url) }
+        switch item.location {
+        case .embyItem(let id, let remoteID):
+            if let source = library.embySources.first(where: { $0.id == id }),
+               let token = try? KeychainPasswordStore.embyToken(for: id) {
+                return EmbyClient.posterRequest(source: source, token: token, itemID: remoteID)
+            }
+        case .jellyfinItem(let id, let remoteID):
+            if let source = library.jellyfinSources.first(where: { $0.id == id }),
+               let token = try? KeychainPasswordStore.jellyfinToken(for: id) {
+                return JellyfinClient.posterRequest(source: source, token: token, itemID: remoteID)
+            }
+        case .plexItem(let id, _, _):
+            if let source = library.plexSources.first(where: { $0.id == id }),
+               let token = try? KeychainPasswordStore.plexToken(for: id), let thumb = item.serverPosterKey {
+                return PlexClient.posterRequest(source: source, token: token, thumb: thumb)
+            }
+        default: break
+        }
+        return item.metadata?.posterURL.map { URLRequest(url: $0) }
+    }
+    var body: some View {
+        LucentCatalogPosterLayout {
+            LucentRemoteArtwork(request: request,
+                cacheKey: "favorites|\(item.id)|\(item.serverPosterKey ?? item.metadata?.posterPath ?? "")")
+                .aspectRatio(LucentUI.posterAspectRatio, contentMode: .fit)
+                .overlay(alignment: .bottomTrailing) {
+                    if let rating = item.metadata?.rating { LucentRatingBadge(rating: rating).padding(3) }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
+        } caption: {
+            LucentCatalogCaption(title: item.catalogDisplayTitle, yearText: item.catalogDisplayYearText)
+        }
     }
 }

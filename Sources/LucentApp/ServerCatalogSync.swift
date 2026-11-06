@@ -1,7 +1,6 @@
 import Foundation
 
-/// Refresh only entries previously opened locally. Homepage queries discover new entries;
-/// this batch validates cached IDs without importing/scanning an entire server library.
+/// Fetch explicitly scoped IDs in bounded batches; never discover or scan a whole library.
 enum ServerCatalogSync {
     enum Failure: LocalizedError {
         case invalidResponse, requestFailed
@@ -12,19 +11,25 @@ enum ServerCatalogSync {
         let total: Int
         enum CodingKeys: String, CodingKey { case items = "Items", total = "TotalRecordCount" }
     }
-    static func cachedItems(base: String, userID: String, token: String, ids: [String]) async throws -> [JellyfinItem] {
+    static func batches(ids: [String]) -> [[String]] {
+        let unique = Array(Set(ids)).sorted()
+        return stride(from: 0, to: unique.count, by: 80).map {
+            Array(unique[$0..<min(unique.count, $0 + 80)])
+        }
+    }
+    static func cachedItems(base: String, userID: String, token: String, ids: [String], fields: String = "Overview,MediaSources") async throws -> [JellyfinItem] {
         guard let base = URL(string: base) else { throw Failure.invalidResponse }
         var result: [JellyfinItem] = []
-        for offset in stride(from: 0, to: ids.count, by: 80) {
-            let batch = Array(ids[offset..<min(ids.count, offset + 80)])
+        for batch in batches(ids: ids) {
             var start = 0
             repeat {
                 try Task.checkCancellation()
                 var components = URLComponents(url: base.appendingPathComponent("Users").appendingPathComponent(userID)
                     .appendingPathComponent("Items"), resolvingAgainstBaseURL: false)!
                 components.queryItems = [.init(name: "Ids", value: batch.joined(separator: ",")),
+                    .init(name: "Recursive", value: "true"), .init(name: "EnableTotalRecordCount", value: "true"),
                     .init(name: "StartIndex", value: String(start)), .init(name: "Limit", value: "80"),
-                    .init(name: "EnableUserData", value: "true"), .init(name: "Fields", value: "Overview,MediaSources")]
+                    .init(name: "EnableUserData", value: "true"), .init(name: "Fields", value: fields)]
                 var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
                 request.setValue(token, forHTTPHeaderField: "X-Emby-Token")
                 let (data, response) = try await URLSession.shared.data(for: request)

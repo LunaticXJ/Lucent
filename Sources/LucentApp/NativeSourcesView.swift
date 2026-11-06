@@ -97,7 +97,7 @@ struct NativeSourcesView: View {
             }
         }
         .sheet(item: $editor, onDismiss: { countsRevision = UUID() }) { route in NativeServerEditor(kind: route.kind, existingID: route.existing).environmentObject(library) }
-        .sheet(isPresented: $storageManager, onDismiss: {
+        .lucentHierarchicalPresentation(isPresented: $storageManager, onDismiss: {
             if let pendingStorage {
                 self.pendingStorage = nil
                 if pendingStorage.kind == .cloud { editCloud(pendingStorage.id) }
@@ -105,10 +105,12 @@ struct NativeSourcesView: View {
             }
             else if pendingAdd { pendingAdd = false; addingStorage = true }
         }) {
-            NavigationStack {
-                StorageManagementView(add: { pendingAdd = true; storageManager = false }, edit: { id in
-                    pendingStorage = library.libraryStorages.first { $0.id == id }; storageManager = false
-                })
+            Group {
+                #if os(tvOS)
+                storageManagerContent
+                #else
+                NavigationStack { storageManagerContent }
+                #endif
             }.environmentObject(library).frame(idealWidth: 760, idealHeight: 650)
         }
         .sheet(isPresented: $addingStorage, onDismiss: {
@@ -137,6 +139,11 @@ struct NativeSourcesView: View {
             Button("移除", role: .destructive) { if let value = removal { remove(value) }; removal = nil }
         }
 
+    }
+    private var storageManagerContent: some View {
+        StorageManagementView(add: { pendingAdd = true; storageManager = false }, edit: { id in
+            pendingStorage = library.libraryStorages.first { $0.id == id }; storageManager = false
+        })
     }
     private enum StorageAction { case local, smb, webDAV, cloud, dlna }
     @State private var pendingAddStorageAction: StorageAction?

@@ -144,7 +144,7 @@ struct DanmakuOverlay: View {
 struct DanmakuSettingsView: View {
     @ObservedObject var model: DanmakuModel
     let item: MediaItem
-    @Environment(\.dismiss) private var dismiss
+    let close: () -> Void
     @AppStorage("lucent.danmaku.enabled") private var enabled = false
     @AppStorage("lucent.danmaku.opacity") private var opacity = 0.8
     @AppStorage("lucent.danmaku.fontSize") private var fontSize = 22.0
@@ -152,16 +152,22 @@ struct DanmakuSettingsView: View {
     @AppStorage("lucent.danmaku.duration") private var duration = 8.0
     @AppStorage("lucent.danmaku.offset") private var offset = 0.0
     @AppStorage("lucent.danmaku.blocked") private var blocked = ""
+    @AppStorage(CustomDanmakuServers.key) private var customServersData = Data()
+    @AppStorage("lucent.danmaku.selectedServer") private var selectedServerID = "official"
     @State private var query = ""
+    private var servers: [DandanplayClient.Server] { [.official] + CustomDanmakuServers.available(customServersData) }
+    private var selectedServer: DandanplayClient.Server {
+        servers.first(where: { $0.id == selectedServerID }) ?? servers.first(where: { !$0.isOfficial }) ?? .official
+    }
     @State private var matches: [DandanplayClient.Episode] = []
     @State private var busy = false
     @State private var searched = false
     @State private var status: String?
     @State private var importer = false
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                settingsSection(nil) {
                     Toggle("显示弹幕", isOn: $enabled)
                     LabeledContent("当前来源", value: model.source)
                     #if !os(tvOS)
@@ -169,7 +175,10 @@ struct DanmakuSettingsView: View {
                     #endif
                     if !model.comments.isEmpty { Button("移除此影片弹幕", role: .destructive) { model.clear(for: item.id) } }
                 }
-                Section("在线匹配 · 弹弹play") {
+                settingsSection("在线匹配") {
+                    Picker("弹幕服务器", selection: $selectedServerID) {
+                        ForEach(servers) { server in Text(server.name).tag(server.id) }
+                    }.disabled(busy)
                     TextField("影片或剧集名称", text: $query).submitLabel(.search).onSubmit { search() }
                     Button("搜索匹配的剧集", systemImage: "magnifyingglass") { search() }.disabled(query.count < 2 || busy)
                     if item.metadata != nil {
@@ -184,21 +193,21 @@ struct DanmakuSettingsView: View {
                             Task {
                                 defer { busy = false }
                                 do {
-                                    let data = try await DandanplayClient.comments(episodeID: match.id)
-                                    try await model.install(data: data, source: "弹弹play · \(match.anime) · \(match.title)", itemID: item.id)
-                                    enabled = true; dismiss()
-                                } catch { status = error.localizedDescription }
+                                    let data = try await DandanplayClient.comments(episodeID: match.id, server: match.server)
+                                    try await model.install(data: data, source: "\(match.server.name) · \(match.anime) · \(match.title)", itemID: item.id)
+                                    enabled = true; close()
+                                } catch { status = DanmakuError.message(for: error) }
                             }
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(match.anime).font(.subheadline)
+                                Text(match.anime).font(.system(size: PlayerControlStyle.scaled(14)))
                                 Text(match.title).font(.caption).foregroundStyle(.secondary)
                             }
                         }.disabled(busy)
                     }
-                    NavigationLink("服务配置") { PlaybackServicesView(scope: .danmaku).lucentSecondaryPage() }
+
                 }
-                Section("显示") {
+                settingsSection("显示") {
                     slider("不透明度", value: $opacity, range: 0.2...1, formatted: "\(Int(opacity * 100))%")
                     slider("字号", value: $fontSize, range: 14...36, formatted: "\(Int(fontSize))")
                     Picker("显示区域", selection: $area) {
@@ -209,17 +218,25 @@ struct DanmakuSettingsView: View {
                     Text("时间偏移：\(offset.formatted(.number.precision(.fractionLength(1)))) 秒")
                     Text("正值延后，负值提前。 ").font(.caption).foregroundStyle(.secondary)
                 }
-                Section("屏蔽词 · 每行一个") {
+                settingsSection("屏蔽词 · 每行一个") {
                     #if os(tvOS)
                     TextField("屏蔽词", text: $blocked)
                     #else
-                    TextEditor(text: $blocked).frame(minHeight: 80)
+                    TextEditor(text: $blocked).scrollContentBackground(.hidden).frame(minHeight: 80)
                     #endif
                 }
             }
-            .navigationTitle("弹幕").lucentNavigationTitleStyle()
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-            .task { query = item.identity?.seriesName ?? item.metadata?.localizedTitle ?? item.title }
+            .font(.system(size: PlayerControlStyle.scaled(14)))
+            .padding(16)
+            }
+            .task {
+                query = item.identity?.seriesName ?? item.metadata?.localizedTitle ?? item.title
+                selectedServerID = selectedServer.id
+            }
+            .onChange(of: selectedServerID) { _, _ in matches = []; searched = false; status = nil }
+            .onChange(of: customServersData) { _, _ in
+                selectedServerID = selectedServer.id; matches = []; searched = false; status = nil
+            }
             #if !os(tvOS)
             .fileImporter(isPresented: $importer, allowedContentTypes: [.xml, .json]) { result in
                 Task {
@@ -230,27 +247,38 @@ struct DanmakuSettingsView: View {
                         guard size > 0, size <= DanmakuParser.maximumBytes else { throw DanmakuError.invalidFile }
                         let data = try Data(contentsOf: url)
                         try await model.install(data: data, source: url.lastPathComponent, itemID: item.id)
-                        enabled = true; dismiss()
+                        enabled = true; close()
                     } catch { status = error.localizedDescription }
                 }
             }
             #endif
+    }
+    private func settingsSection<Content: View>(_ title: String?, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title { Text(LocalizedStringKey(title)).font(.system(size: PlayerControlStyle.scaled(12), weight: .semibold)).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: 12, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 14))
         }
     }
     private func search(precise: Bool = false) {
         busy = true; status = nil; matches = []
+        let endpoint = selectedServer
         Task {
             defer { busy = false }
             do {
                 let episode: Int?
                 if case .episode(_, _, let number, _) = item.identity { episode = number } else { episode = nil }
-                matches = try await DandanplayClient.search(query,
+                let values = try await DandanplayClient.search(query,
                     tmdbID: precise ? item.metadata?.providerID : nil,
-                    movie: item.identity?.seriesName == nil, episode: precise ? episode : nil)
+                    movie: item.identity?.seriesName == nil, episode: precise ? episode : nil, server: endpoint)
+                guard endpoint == selectedServer, !Task.isCancelled else { return }
+                matches = values
                 searched = true
                 if precise && matches.isEmpty { status = "资料未匹配到弹幕，可改用片名搜索后手动选集。" }
             }
-            catch { status = error.localizedDescription }
+            catch { status = DanmakuError.message(for: error) }
         }
     }
     private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, formatted: String) -> some View {

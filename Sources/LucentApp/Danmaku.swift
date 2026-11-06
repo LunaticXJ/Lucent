@@ -64,55 +64,114 @@ enum DanmakuParser {
     }
 }
 
+struct CustomDanmakuServer: Codable, Identifiable, Hashable, Sendable {
+    var id = UUID()
+    var name = ""
+    var address = ""
+    var enabled = true
+    var displayName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    func endpoint() throws -> DandanplayClient.Server {
+        guard !displayName.isEmpty else { throw DanmakuError.invalidServer }
+        return try .custom(id: id.uuidString, name: displayName, address: address)
+    }
+}
+
+enum CustomDanmakuServers {
+    static let key = "lucent.danmaku.customServers"
+    static func decode(_ data: Data) -> [CustomDanmakuServer] {
+        (try? JSONDecoder().decode([CustomDanmakuServer].self, from: data)) ?? []
+    }
+    static func available(_ data: Data) -> [DandanplayClient.Server] {
+        decode(data).filter(\.enabled).compactMap { try? $0.endpoint() }
+    }
+}
+
 enum DanmakuError: LocalizedError {
-    case credentials, request(Int), invalidFile, noComments
+    case credentials, request(Int), invalidFile, noComments, invalidServer, invalidResponse
+    static func message(for error: Error) -> String {
+        if let error = error as? URLError {
+            if error.code == .appTransportSecurityRequiresSecureConnection {
+                return "系统阻止了此 HTTP 连接，请使用 HTTPS 地址。"
+            }
+            return "连接失败，请检查服务器地址和网络。"
+        }
+        return error.localizedDescription
+    }
     var errorDescription: String? {
         switch self {
-        case .credentials: "请先在设置的字幕与弹幕服务中填写弹弹play App ID 和 Secret。"
+        case .credentials: "请先在设置的弹幕服务中填写弹弹play App ID 和 Secret，或选择自定义弹幕 API。"
         case .request(let code): "弹幕请求失败（\(code)），请检查服务授权或稍后再试。"
         case .invalidFile: "弹幕文件无效或超过 15 MB，支持弹弹play JSON 和 Bilibili XML。"
         case .noComments: "没有可显示的弹幕。"
+        case .invalidServer: "请输入名称和有效的 HTTP 或 HTTPS API 地址。"
+        case .invalidResponse: "服务器未返回兼容弹弹play协议的数据，请检查 API 地址。"
         }
     }
 }
 
 enum DandanplayClient {
+    struct Server: Identifiable, Hashable, Sendable {
+        let id: String
+        let name: String
+        let baseURL: URL
+        var isOfficial: Bool { id == "official" }
+        static let official = Server(id: "official", name: "弹弹play", baseURL: URL(string: "https://api.dandanplay.net/api/v2")!)
+        static func custom(id: String, name: String, address: String) throws -> Server {
+            let text = address.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard var components = URLComponents(string: text),
+                  ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+                  let host = components.host, !host.isEmpty,
+                  components.user == nil, components.password == nil, components.fragment == nil else { throw DanmakuError.invalidServer }
+            components.scheme = components.scheme?.lowercased()
+            var path = components.percentEncodedPath
+            while path.hasSuffix("/") { path.removeLast() }
+            if !path.hasSuffix("/api/v2") { path += "/api/v2" }
+            components.percentEncodedPath = path
+            guard let url = components.url else { throw DanmakuError.invalidServer }
+            return Server(id: "custom:" + id, name: name, baseURL: url)
+        }
+    }
     struct Episode: Identifiable, Sendable {
         let id: Int64
         let anime: String
         let title: String
+        var server: Server = .official
     }
     private struct SearchResponse: Decodable {
         struct Anime: Decodable {
             struct Episode: Decodable { let episodeId: Int64; let episodeTitle: String? }
             let animeTitle: String?; let episodes: [Episode]?
         }
-        let animes: [Anime]?
+        let animes: [Anime]
     }
     static func signature(appID: String, secret: String, timestamp: String, path: String) -> String {
         Data(SHA256.hash(data: Data((appID + timestamp + path + secret).utf8))).base64EncodedString()
     }
-    static func search(_ query: String, tmdbID: Int? = nil, movie: Bool = false, episode: Int? = nil) async throws -> [Episode] {
+    static func search(_ query: String, tmdbID: Int? = nil, movie: Bool = false, episode: Int? = nil, server: Server = .official) async throws -> [Episode] {
         var parameters: [URLQueryItem] = [.init(name: "v2", value: "true")]
-        if let tmdbID {
+        if let tmdbID, server.isOfficial {
             parameters += [.init(name: "tmdbId", value: String(tmdbID)), .init(name: "tmdbIdType", value: movie ? "1" : "0")]
         } else { parameters.append(.init(name: "anime", value: query)) }
         if let episode, episode > 0 { parameters.append(.init(name: "episode", value: String(episode))) }
-        let data = try await fetch(path: "search/episodes", parameters: parameters)
+        let data = try await fetch(path: "search/episodes", parameters: parameters, server: server)
+        return try decodeSearch(data, query: query, server: server)
+    }
+    static func decodeSearch(_ data: Data, query: String, server: Server) throws -> [Episode] {
+        guard let response = try? JSONDecoder().decode(SearchResponse.self, from: data) else { throw DanmakuError.invalidResponse }
         var seen = Set<Int64>()
-        return try JSONDecoder().decode(SearchResponse.self, from: data).animes?.flatMap { anime in
+        return response.animes.flatMap { anime in
             (anime.episodes ?? []).compactMap { value -> Episode? in
                 guard value.episodeId > 0, seen.insert(value.episodeId).inserted else { return nil }
-                return Episode(id: value.episodeId, anime: anime.animeTitle ?? query, title: value.episodeTitle ?? "未命名剧集")
+                return Episode(id: value.episodeId, anime: anime.animeTitle ?? query, title: value.episodeTitle ?? "未命名剧集", server: server)
             }
-        } ?? []
+        }
     }
-    static func comments(episodeID: Int64) async throws -> Data {
-        let cache = cacheURL("episode-\(episodeID).json")
+    static func comments(episodeID: Int64, server: Server = .official) async throws -> Data {
+        let cache = commentsCacheURL(episodeID: episodeID, server: server)
         if let date = try? cache.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
            Date().timeIntervalSince(date) < 24 * 3600, let data = try? Data(contentsOf: cache),
            (try? DanmakuParser.parse(data).isEmpty) == false { return data }
-        let data = try await fetch(path: "comment/\(episodeID)", parameters: [.init(name: "withRelated", value: "true")])
+        let data = try await fetch(path: "comment/\(episodeID)", parameters: [.init(name: "withRelated", value: "true"), .init(name: "format", value: "json")], server: server)
         guard !(try DanmakuParser.parse(data)).isEmpty else { throw DanmakuError.noComments }
         try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: cache, options: .atomic)
@@ -136,19 +195,35 @@ enum DandanplayClient {
     static func cacheURL(_ name: String) -> URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Danmaku", isDirectory: true).appendingPathComponent(name)
     }
-    private static func fetch(path: String, parameters: [URLQueryItem]) async throws -> Data {
-        guard let appID = try KeychainPasswordStore.playbackServiceSecret("dandan-app-id"), !appID.isEmpty,
-              let secret = try KeychainPasswordStore.playbackServiceSecret("dandan-secret"), !secret.isEmpty else { throw DanmakuError.credentials }
-        var components = URLComponents(string: "https://api.dandanplay.net/api/v2/\(path)")!
-        components.queryItems = parameters
-        let timestamp = String(Int(Date().timeIntervalSince1970))
-        var request = URLRequest(url: components.url!); request.timeoutInterval = 25
-        request.setValue(appID, forHTTPHeaderField: "X-AppId")
-        request.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
-        request.setValue(signature(appID: appID, secret: secret, timestamp: timestamp, path: components.path), forHTTPHeaderField: "X-Signature")
+    static func commentsCacheURL(episodeID: Int64, server: Server) -> URL {
+        let scope = SHA256.hash(data: Data(server.baseURL.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        return cacheURL("\(scope)-episode-\(episodeID).json")
+    }
+    static func makeRequest(path: String, parameters: [URLQueryItem], server: Server,
+                            appID: String? = nil, secret: String? = nil,
+                            timestamp: String = String(Int(Date().timeIntervalSince1970))) throws -> URLRequest {
+        guard var components = URLComponents(url: server.baseURL, resolvingAgainstBaseURL: false) else { throw DanmakuError.invalidServer }
+        components.percentEncodedPath += "/" + path
+        let names = Set(parameters.map(\.name))
+        components.queryItems = (components.queryItems ?? []).filter { !names.contains($0.name) } + parameters
+        guard let url = components.url else { throw DanmakuError.invalidServer }
+        var request = URLRequest(url: url); request.timeoutInterval = 25
+        if server.isOfficial {
+            guard let appID, !appID.isEmpty, let secret, !secret.isEmpty else { throw DanmakuError.credentials }
+            request.setValue(appID, forHTTPHeaderField: "X-AppId")
+            request.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
+            request.setValue(signature(appID: appID, secret: secret, timestamp: timestamp, path: components.path), forHTTPHeaderField: "X-Signature")
+        }
+        return request
+    }
+    private static func fetch(path: String, parameters: [URLQueryItem], server: Server) async throws -> Data {
+        // Never read or forward official credentials to a user-defined endpoint.
+        let appID = server.isOfficial ? try KeychainPasswordStore.playbackServiceSecret("dandan-app-id") : nil
+        let secret = server.isOfficial ? try KeychainPasswordStore.playbackServiceSecret("dandan-secret") : nil
+        var request = try makeRequest(path: path, parameters: parameters, server: server, appID: appID, secret: secret)
         request.setValue("Lucent/1.0", forHTTPHeaderField: "User-Agent")
         // Strip signing headers when the provider redirects comment bodies to its CDN.
-        let delegate = DandanRedirectDelegate()
+        let delegate = DandanRedirectDelegate(origin: server.baseURL)
         let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(for: request)
@@ -162,14 +237,23 @@ enum DandanplayClient {
     }
 }
 
-private final class DandanRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class DandanRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let origin: URL
+    init(origin: URL) { self.origin = origin }
+    func redirectedRequest(_ request: URLRequest) -> URLRequest? {
+        guard let url = request.url, ["http", "https"].contains(url.scheme ?? ""),
+              !(origin.scheme == "https" && url.scheme != "https") else { return nil }
+        var safe = request
+        func port(_ url: URL) -> Int { url.port ?? (url.scheme == "https" ? 443 : 80) }
+        if url.host != origin.host || url.scheme != origin.scheme || port(url) != port(origin) {
+            for key in ["X-AppId", "X-AppSecret", "X-Timestamp", "X-Signature", "Authorization", "Cookie"] {
+                safe.setValue(nil, forHTTPHeaderField: key)
+            }
+        }
+        return safe
+    }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        guard request.url?.scheme == "https" else { completionHandler(nil); return }
-        var safe = request
-        if request.url?.host != "api.dandanplay.net" {
-            for key in ["X-AppId", "X-AppSecret", "X-Timestamp", "X-Signature", "Authorization"] { safe.setValue(nil, forHTTPHeaderField: key) }
-        }
-        completionHandler(safe)
+        completionHandler(redirectedRequest(request))
     }
 }

@@ -28,13 +28,38 @@ private struct EpisodeCardArtwork: View {
     }
 }
 
-private enum PlayerControlStyle {
+enum PlayerControlStyle {
     static let secondary = Color.white.opacity(0.64)
     static let rowFill = Color.white.opacity(0.055)
     static let selectedFill = Color.white.opacity(0.14)
     static let divider = Color.white.opacity(0.1)
+    #if os(tvOS)
+    static let controlSize: CGFloat = 72
+    static let panelRadius: CGFloat = 32
+    static let rowHeight: CGFloat = 88
+    static let panelInset: CGFloat = 32
+    static let outerInset: CGFloat = 60
+    #else
     static let controlSize: CGFloat = 44
     static let panelRadius: CGFloat = 26
+    static let rowHeight: CGFloat = 58
+    static let panelInset: CGFloat = 16
+    static let outerInset: CGFloat = 20
+    #endif
+    static func scaled(_ size: CGFloat) -> CGFloat {
+        #if os(tvOS)
+        size * 1.65
+        #else
+        size
+        #endif
+    }
+    static func panelWidth(_ available: CGFloat) -> CGFloat {
+        #if os(tvOS)
+        min(760, max(620, available * 0.4))
+        #else
+        min(400, max(300, available * 0.46))
+        #endif
+    }
 }
 
 private struct PlayerOptionRow: View {
@@ -46,22 +71,21 @@ private struct PlayerOptionRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(selected ? Color.white : Color.white.opacity(0.28))
+                .font(.system(size: PlayerControlStyle.scaled(19), weight: .medium))
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 15, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(.white).lineLimit(2)
+                Text(title).font(.system(size: PlayerControlStyle.scaled(15), weight: selected ? .semibold : .medium))
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail {
-                    Text(detail).font(.system(size: 12))
-                        .foregroundStyle(PlayerControlStyle.secondary).lineLimit(2)
+                    Text(detail).font(.system(size: PlayerControlStyle.scaled(12)))
+                        .foregroundStyle(.secondary).lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
             if pending { LucentLoadingView().tint(.white).controlSize(.small) }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: PlayerControlStyle.rowHeight, alignment: .leading)
         .background(selected ? PlayerControlStyle.selectedFill : .clear,
                     in: RoundedRectangle(cornerRadius: 15))
         .overlay(RoundedRectangle(cornerRadius: 15)
@@ -103,13 +127,13 @@ struct PlaybackView: View {
     @State private var isSeeking = false
     #if os(tvOS)
     @FocusState private var seekTrackFocused: Bool
+    @Namespace private var playerFocusScope
     #endif
     @State private var nextPromptDismissed = false
     @AppStorage("lucent.player.nextEpisodePrompt") private var nextEpisodePrompt = true
     @StateObject private var playerWindow = PlayerWindowController()
     @StateObject private var danmaku = DanmakuModel()
     @AppStorage("lucent.danmaku.enabled") private var danmakuEnabled = false
-    @State private var showDanmaku = false
     @State private var showSkipSettings = false
     @State private var showSubtitleSearch = false
     @Environment(\.scenePhase) private var scenePhase
@@ -137,10 +161,7 @@ struct PlaybackView: View {
     @State private var controlsVisible = true
     @State private var lastControlInteraction = Date()
     @State private var secondaryPanel: ControlPanel?
-    @State private var trackTab = TrackTab.subtitles
-    @State private var aspectRatio = "original"
-    private enum ControlPanel: String { case tracks = "字幕与音轨", rate = "播放速度", settings = "播放设置", playlist = "播放列表", diagnostics = "播放信息" }
-    private enum TrackTab: String, CaseIterable { case audio = "音轨", subtitles = "字幕" }
+    private enum ControlPanel: String { case danmaku = "弹幕", audio = "音轨", subtitles = "字幕", rate = "播放速度", settings = "更多设置", playlist = "播放列表", diagnostics = "播放信息" }
     private var primaryControlsVisible: Bool {
         controlsVisible && secondaryPanel == nil && !showEpisodeList
     }
@@ -296,7 +317,7 @@ struct PlaybackView: View {
                 }
                 if !session.subtitleText.isEmpty {
                     Text(session.subtitleText)
-                        .font(.system(size: 22 * subtitleFontScale, weight: .semibold))
+                        .font(.system(size: PlayerControlStyle.scaled(22) * subtitleFontScale, weight: .semibold))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white)
                         .shadow(color: .black, radius: 5)
@@ -336,10 +357,18 @@ struct PlaybackView: View {
             if let gestureHUD {
                 VStack(spacing: 10) {
                     if gestureActive && seekPreviewEnabled && gesturePreviewing { seekPreviewCard(at: gestureTarget) }
-                    Text(gestureHUD).font(.system(size: 20, weight: .semibold, design: .rounded))
+                    Text(gestureHUD).font(.system(size: PlayerControlStyle.scaled(20), weight: .semibold, design: .rounded))
                         .monospacedDigit().padding(.horizontal, 24).padding(.vertical, 16)
                         .background(.ultraThinMaterial, in: Capsule())
                 }.allowsHitTesting(false)
+            }
+            #elseif os(tvOS)
+            if !controlsVisible && secondaryPanel == nil && !showEpisodeList {
+                Button {
+                    controlsVisible = true; lastControlInteraction = Date()
+                } label: { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                .buttonStyle(.plain).focusEffectDisabled()
+                .accessibilityLabel("显示播放控制")
             }
             #else
             Color.clear.contentShape(Rectangle())
@@ -355,6 +384,7 @@ struct PlaybackView: View {
             VStack(spacing: 0) {
                 if !controlsLocked && primaryControlsVisible { playbackHeader }
                 Spacer(minLength: 0)
+                #if !os(tvOS)
                 if primaryControlsVisible {
                     HStack {
                         roundControl("锁定或解锁控制", systemImage: controlsLocked ? "lock.fill" : "lock.open") {
@@ -364,10 +394,14 @@ struct PlaybackView: View {
                     }
                     .padding(.horizontal, 28)
                 }
+                #endif
                 Spacer(minLength: 0)
                 if !controlsLocked && primaryControlsVisible { playbackFooter }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #if os(tvOS)
+            .focusSection()
+            #endif
             .simultaneousGesture(TapGesture().onEnded { lastControlInteraction = Date() })
             if !controlsVisible, !controlsLocked, secondaryPanel == nil, !showEpisodeList,
                !session.autoSkipSegments, let segment = session.activeSkipSegment {
@@ -392,7 +426,7 @@ struct PlaybackView: View {
                             }
                             Button("下一集") { onContinue?() }.buttonStyle(.bordered)
                             Button { nextPromptDismissed = true } label: { Image(systemName: "xmark").frame(width: 30, height: 36) }
-                                .buttonStyle(.plain).accessibilityLabel("关闭下一集提示")
+                                .lucentPlayerButtonStyle().accessibilityLabel("关闭下一集提示")
                         }
                         .padding(14).frame(maxWidth: 390)
                         .lucentVideoGlass()
@@ -413,8 +447,10 @@ struct PlaybackView: View {
         .animation(.easeInOut(duration: 0.2), value: session.isPreparing || session.isBuffering || session.isSeekingPlayback)
         .ignoresSafeArea(edges: .vertical)
         .background(.black)
+        #if !os(tvOS)
         .foregroundStyle(.white)
         .tint(.white)
+        #endif
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showSkipSettings) {
             PlaybackSkipSettingsView(item: item, duration: session.duration, currentTime: session.currentTime) { intro, credits in
@@ -426,7 +462,6 @@ struct PlaybackView: View {
                 session.installExternalSubtitle(data, filename: filename)
             }.environmentObject(library)
         }
-        .sheet(isPresented: $showDanmaku) { DanmakuSettingsView(model: danmaku, item: item) }
         .task(id: item.id) { await danmaku.restore(for: item.id) }
         .task {
             while !Task.isCancelled {
@@ -439,9 +474,6 @@ struct PlaybackView: View {
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { controlsVisible = false }
                 }
             }
-        }
-        .onChange(of: session.useMPV) { _, enabled in
-            if enabled { session.setAspectRatio(aspectRatio == "original" ? nil : aspectRatio) }
         }
         .onChange(of: videoScaleModeRaw) { _, _ in
             session.setVideoScaleMode(videoScaleMode)
@@ -486,7 +518,13 @@ struct PlaybackView: View {
             #endif
         }
         #if os(tvOS)
+        .focusScope(playerFocusScope)
+        .onMoveCommand { _ in
+            lastControlInteraction = Date()
+            if !controlsVisible && secondaryPanel == nil && !showEpisodeList { controlsVisible = true }
+        }
         .onPlayPauseCommand {
+            lastControlInteraction = Date()
             if isSeeking { session.seek(to: seekPosition); session.clearPreview(); isSeeking = false }
             else { session.togglePlayback() }
         }
@@ -494,6 +532,7 @@ struct PlaybackView: View {
             if isSeeking { session.clearPreview(); isSeeking = false }
             else if secondaryPanel != nil { closePanel() }
             else if showEpisodeList { showEpisodeList = false }
+            else if controlsVisible { controlsVisible = false }
             else { dismiss() }
         }
         #endif
@@ -577,7 +616,7 @@ struct PlaybackView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 14) {
                         Text("选集")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: PlayerControlStyle.scaled(16), weight: .semibold))
                         Menu {
                             Button("全部剧集") { selectedEpisodeSeason = nil }
                             ForEach(Array(Set(episodeChoices.map(\.season))).sorted(), id: \.self) { season in
@@ -590,7 +629,7 @@ struct PlaybackView: View {
                                 Text(selectedEpisodeSeason.map { $0 == 0 ? "特别篇" : "第 \($0) 季" } ?? "全部剧集")
                                 Image(systemName: "chevron.down").font(.caption2)
                             }
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: PlayerControlStyle.scaled(13), weight: .medium))
                             .foregroundStyle(.white.opacity(0.82))
                             .padding(.horizontal, 12).frame(minHeight: 40)
                             .lucentVideoGlass()
@@ -601,7 +640,7 @@ struct PlaybackView: View {
                             .font(.caption).foregroundStyle(.white.opacity(0.65))
                         Button("关闭选集", systemImage: "xmark") { showEpisodeList = false }
                             .labelStyle(.iconOnly)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: PlayerControlStyle.scaled(14), weight: .semibold))
                             .frame(width: 44, height: 44)
                             .lucentVideoGlass()
                     }
@@ -630,7 +669,7 @@ struct PlaybackView: View {
                                                 .overlay(alignment: .bottomTrailing) {
                                                     if choice.id == currentEpisodeID || choice.item?.id == item.id {
                                                         Image(systemName: "waveform")
-                                                            .font(.system(size: 13, weight: .semibold))
+                                                            .font(.system(size: PlayerControlStyle.scaled(13), weight: .semibold))
                                                             .padding(8)
                                                             .background(.black.opacity(0.68), in: Circle())
                                                             .padding(5)
@@ -639,7 +678,7 @@ struct PlaybackView: View {
                                                 .overlay(alignment: .topTrailing) {
                                                     if choice.watched {
                                                         Image(systemName: "checkmark.circle.fill")
-                                                            .font(.system(size: 14, weight: .semibold))
+                                                            .font(.system(size: PlayerControlStyle.scaled(14), weight: .semibold))
                                                             .foregroundStyle(.white)
                                                             .padding(6).shadow(radius: 2)
                                                     }
@@ -654,22 +693,22 @@ struct PlaybackView: View {
                                                     }
                                                 }
                                             Text("E\(String(format: "%02d", choice.number)) · \(choice.title)")
-                                                .font(.system(size: 13, weight: .medium))
+                                                .font(.system(size: PlayerControlStyle.scaled(13), weight: .medium))
                                                 .lineLimit(2)
                                                 .frame(height: 34, alignment: .topLeading)
                                                 .frame(width: 190, alignment: .leading)
                                             if let summary = choice.summary, !summary.isEmpty {
-                                                Text(summary).font(.system(size: 11))
+                                                Text(summary).font(.system(size: PlayerControlStyle.scaled(11)))
                                                     .foregroundStyle(.white.opacity(0.62))
                                                     .lineLimit(2).frame(width: 190, alignment: .leading)
                                             }
                                             if let ticks = choice.detail?.runTimeTicks, ticks > 0 {
                                                 Text("\(Int(ticks / 600_000_000)) 分钟")
-                                                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.62))
+                                                    .font(.system(size: PlayerControlStyle.scaled(11))).foregroundStyle(.white.opacity(0.62))
                                             }
                                         }
                                     }
-                                    .buttonStyle(.plain)
+                                    .lucentPlayerButtonStyle()
                                     .id(choice.id)
                                 }
                             }
@@ -824,11 +863,11 @@ struct PlaybackView: View {
         ZStack {
             VStack(spacing: 4) {
                 Text(item.identity?.seriesName ?? item.title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: PlayerControlStyle.scaled(16), weight: .semibold))
                     .lineLimit(1)
                 if case .episode(_, let season, let episode, _) = item.identity {
                     Text("第 \(season) 季 · 第 \(episode) 集")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: PlayerControlStyle.scaled(12), weight: .medium))
                         .foregroundStyle(PlayerControlStyle.secondary)
                 }
             }
@@ -843,13 +882,6 @@ struct PlaybackView: View {
                     dismiss()
                     #endif
                 }
-                roundControl(videoScaleMode == .fit ? "铺满画面" : "显示完整画面",
-                             systemImage: videoScaleMode == .fit
-                                ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left") {
-                    videoScaleModeRaw = (videoScaleMode == .fit ? VideoScaleMode.fill : .fit).rawValue
-                    lastControlInteraction = Date()
-                }
-                .accessibilityValue(videoScaleMode.title)
                 Spacer()
                 if !session.useMPV {
                     AudioRoutePicker(player: nativeWindowPlayer)
@@ -863,7 +895,7 @@ struct PlaybackView: View {
                 }
             }
         }
-        .padding(.horizontal, 28).padding(.top, 14).padding(.bottom, 24)
+        .lucentPlaybackHorizontalPadding().padding(.top, 14).padding(.bottom, 24)
         .background(.linearGradient(colors: [.black.opacity(0.62), .clear],
                                     startPoint: .top, endPoint: .bottom))
     }
@@ -875,11 +907,11 @@ struct PlaybackView: View {
                 HStack(spacing: 14) {
                     Image(systemName: "exclamationmark.circle")
                         .foregroundStyle(.red.opacity(0.9))
-                    Text(LocalizedStringKey(message)).font(.system(size: 12))
+                    Text(LocalizedStringKey(message)).font(.system(size: PlayerControlStyle.scaled(12)))
                         .foregroundStyle(.white.opacity(0.9))
                         .frame(maxWidth: .infinity, alignment: .leading).lineLimit(2)
                     Button("重试") { session.retryPlayback() }
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: PlayerControlStyle.scaled(13), weight: .semibold))
                         .padding(.horizontal, 15).frame(minHeight: 36)
                         .background(.white.opacity(0.14), in: Capsule())
                         .disabled(session.engineSwitchTarget != nil)
@@ -892,11 +924,11 @@ struct PlaybackView: View {
                     LucentLoadingView().tint(.white).controlSize(.small)
                     Text("正在切换至 \(target.title)…")
                 }
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: PlayerControlStyle.scaled(12), weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
             } else if let notice = session.engineSwitchNotice {
-                Text(notice).font(.system(size: 12))
+                Text(notice).font(.system(size: PlayerControlStyle.scaled(12)))
                     .foregroundStyle(PlayerControlStyle.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -914,7 +946,7 @@ struct PlaybackView: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { showRemainingTime.toggle() }
             }
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .font(.system(size: PlayerControlStyle.scaled(12), weight: .medium, design: .monospaced))
             .foregroundStyle(.white.opacity(0.86))
 
             HStack(spacing: 12) {
@@ -929,9 +961,9 @@ struct PlaybackView: View {
                     }
                     Button { openPanel(.rate) } label: {
                         Text("\(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale)))×")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: PlayerControlStyle.scaled(14), weight: .semibold))
                             .monospacedDigit()
-                            .frame(width: 48, height: 48)
+                            .frame(width: PlayerControlStyle.scaled(48), height: PlayerControlStyle.controlSize)
                     }
                     .accessibilityLabel("播放速度 \(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale))) 倍")
                 }
@@ -945,10 +977,13 @@ struct PlaybackView: View {
                     }
                     Button { session.togglePlayback() } label: {
                         Image(systemName: session.currentEngineHasFailed ? "arrow.clockwise" : playbackIsActive ? "pause.fill" : "play.fill")
-                            .font(.system(size: 24, weight: .semibold))
-                            .frame(width: 68, height: 48)
+                            .font(.system(size: PlayerControlStyle.scaled(24), weight: .semibold))
+                            .frame(width: PlayerControlStyle.scaled(68), height: PlayerControlStyle.controlSize)
                             .contentShape(Capsule())
                     }
+                    #if os(tvOS)
+                    .prefersDefaultFocus(true, in: playerFocusScope)
+                    #endif
                     .accessibilityLabel(session.currentEngineHasFailed ? "重试播放" : playbackIsActive ? "暂停" : "播放")
                     .lucentVideoGlass()
                     toolButton("前进 \(Int(seekInterval)) 秒", symbol: "goforward.\(Int(seekInterval))") {
@@ -957,21 +992,21 @@ struct PlaybackView: View {
                 }
 
                 HStack(spacing: 0) {
-                    toolButton("音轨，\(audioSummary)", symbol: "waveform") { openTracks(.audio) }
-                    toolButton("字幕，\(subtitleSummary)", symbol: "captions.bubble") { openTracks(.subtitles) }
+                    toolButton("音轨，\(audioSummary)", symbol: "waveform") { openPanel(.audio) }
+                    toolButton("字幕，\(subtitleSummary)", symbol: "captions.bubble") { openPanel(.subtitles) }
                     #if os(iOS)
-                    toolButton("弹幕", symbol: danmakuEnabled ? "text.bubble.fill" : "text.bubble") { closePanel(); showDanmaku = true }
+                    toolButton("弹幕", symbol: danmakuEnabled ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right") { openPanel(.danmaku) }
                     #endif
-                    toolButton("播放设置", symbol: "slider.horizontal.3") { openPanel(.settings) }
+                    toolButton("更多设置", symbol: "slider.horizontal.3") { openPanel(.settings) }
                 }
                 .padding(.horizontal, 4)
                 .lucentVideoGlass()
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .buttonStyle(.plain)
-            .frame(height: 52)
+            .lucentPlayerButtonStyle()
+            .frame(height: PlayerControlStyle.controlSize + 8)
         }
-        .padding(.horizontal, 28).padding(.top, 12).padding(.bottom, 18)
+        .lucentPlaybackHorizontalPadding().padding(.top, 12).padding(.bottom, 18)
         .background(.linearGradient(colors: [.clear, .black.opacity(0.48), .black.opacity(0.78)],
                                     startPoint: .top, endPoint: .bottom))
     }
@@ -996,8 +1031,8 @@ struct PlaybackView: View {
     private func toolButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 20, weight: .regular))
-                .frame(width: PlayerControlStyle.controlSize, height: 48)
+                .font(.system(size: PlayerControlStyle.scaled(20), weight: .regular))
+                .frame(width: PlayerControlStyle.controlSize, height: PlayerControlStyle.controlSize)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(title)
@@ -1013,14 +1048,9 @@ struct PlaybackView: View {
     private var subtitleSummary: String {
         guard session.subtitlesEnabled else { return "关闭" }
         if let index = session.selectedSubtitleIndex, session.subtitleOptions.indices.contains(index) {
-            return session.subtitleOptions[index]
+            return SubtitleLanguageDisplay.title(session.subtitleOptions[index])
         }
         return session.hasSidecarSubtitle && session.subtitlesEnabled ? "外挂字幕" : "关闭"
-    }
-
-    private func openTracks(_ tab: TrackTab) {
-        trackTab = tab
-        openPanel(.tracks)
     }
 
     private func openPanel(_ panel: ControlPanel) {
@@ -1042,39 +1072,37 @@ struct PlaybackView: View {
     private func controlPanel(_ panel: ControlPanel) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .trailing) {
-                Color.black.opacity(0.2).contentShape(Rectangle()).onTapGesture { closePanel() }
+                Color.clear.contentShape(Rectangle()).onTapGesture { closePanel() }
                     .accessibilityLabel("关闭播放面板")
                     .accessibilityAddTraits(.isButton)
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(panel.rawValue).font(.system(size: 20, weight: .semibold))
+                            Text(panel.rawValue).font(.system(size: PlayerControlStyle.scaled(20), weight: .semibold))
                             Text(panelSubtitle(panel))
-                                .font(.system(size: 12)).foregroundStyle(PlayerControlStyle.secondary)
+                                .font(.system(size: PlayerControlStyle.scaled(12))).foregroundStyle(PlayerControlStyle.secondary)
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 0)
                         Button { closePanel() } label: {
-                            Image(systemName: "xmark").font(.system(size: 14, weight: .semibold))
-                                .frame(width: 44, height: 44)
+                            Image(systemName: "xmark").font(.system(size: PlayerControlStyle.scaled(14), weight: .semibold))
+                                .frame(width: PlayerControlStyle.controlSize, height: PlayerControlStyle.controlSize)
                                 .background(.white.opacity(0.09), in: Circle())
                                 .contentShape(Circle())
                         }
                         .accessibilityLabel("关闭面板")
                     }
                     .padding(20)
-                    if panel == .tracks {
-                        Picker("音轨或字幕", selection: $trackTab) {
-                            ForEach(TrackTab.allCases, id: \.self) { tab in Text(tab.rawValue).tag(tab) }
-                        }
-                        .pickerStyle(.segmented).tint(.gray)
-                        .padding(.horizontal, 20).padding(.bottom, 14)
-                    }
                     Rectangle().fill(PlayerControlStyle.divider).frame(height: 0.5)
+                    if panel == .danmaku {
+                        DanmakuSettingsView(model: danmaku, item: item, close: closePanel)
+                    } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 22) {
                             switch panel {
-                            case .tracks: trackControls
+                            case .danmaku: EmptyView()
+                            case .audio: trackControls(audio: true)
+                            case .subtitles: trackControls(audio: false)
                             case .rate: rateControls
                             case .playlist:
                                 panelSection("共 \(session.playlistEntries.count) 项") {
@@ -1089,22 +1117,25 @@ struct PlaybackView: View {
                                 PlaybackDiagnosticsPanel(report: session.diagnostics, buffering: session.isBuffering,
                                                          stalls: session.stallCount, failure: session.message)
                             case .settings:
-                                engineSelectionControls
                                 advancedControls
                             }
                         }
-                        .padding(16)
+                        .padding(PlayerControlStyle.panelInset)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .scrollIndicators(.hidden)
+                    }
                 }
-                .frame(width: min(400, max(300, geometry.size.width * 0.46)),
-                       height: max(180, geometry.size.height - 32))
+                .frame(width: PlayerControlStyle.panelWidth(geometry.size.width),
+                       height: max(180, geometry.size.height - PlayerControlStyle.outerInset * 2))
                 .lucentVideoGlass(radius: PlayerControlStyle.panelRadius)
-                .padding(.trailing, 20).padding(.vertical, 16)
-                .buttonStyle(.plain)
+                .padding(.trailing, PlayerControlStyle.outerInset).padding(.vertical, PlayerControlStyle.outerInset)
+                .lucentPlayerButtonStyle()
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .id(panel)
+                #if os(tvOS)
+                .focusSection()
+                #endif
                 .accessibilityElement(children: .contain)
                 .accessibilityAction(.escape) { closePanel() }
             }
@@ -1114,7 +1145,9 @@ struct PlaybackView: View {
 
     private func panelSubtitle(_ panel: ControlPanel) -> String {
         switch panel {
-        case .tracks: return trackTab == .audio ? audioSummary : subtitleSummary
+        case .danmaku: return danmaku.source
+        case .audio: return audioSummary
+        case .subtitles: return subtitleSummary
         case .rate: return "当前 \(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale))) 倍速"
         case .settings: return "当前使用 \(session.activeEngineTitle)"
         case .playlist: return "选择接下来播放的内容"
@@ -1124,7 +1157,7 @@ struct PlaybackView: View {
 
     private func panelSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(LocalizedStringKey(title)).font(.system(size: 12, weight: .semibold))
+            Text(LocalizedStringKey(title)).font(.system(size: PlayerControlStyle.scaled(12), weight: .semibold))
                 .foregroundStyle(PlayerControlStyle.secondary)
                 .padding(.horizontal, 12)
             LazyVStack(alignment: .leading, spacing: 4, content: content)
@@ -1135,9 +1168,9 @@ struct PlaybackView: View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("\(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale)))×")
-                    .font(.system(size: 38, weight: .medium, design: .rounded)).monospacedDigit()
+                    .font(.system(size: PlayerControlStyle.scaled(38), weight: .medium, design: .rounded)).monospacedDigit()
                 Text(LocalizedStringKey(session.playbackRate == 1 ? "标准速度" : "选择适合你的观看节奏"))
-                    .font(.system(size: 13)).foregroundStyle(PlayerControlStyle.secondary)
+                    .font(.system(size: PlayerControlStyle.scaled(13))).foregroundStyle(PlayerControlStyle.secondary)
             }
             .padding(.horizontal, 12)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
@@ -1148,12 +1181,14 @@ struct PlaybackView: View {
                         closePanel()
                     } label: {
                         Text("\(rate.formatted(.number.locale(LocalizationPreferences.current.displayLocale)))×")
-                            .font(.system(size: 17, weight: selected ? .semibold : .medium))
+                            .font(.system(size: PlayerControlStyle.scaled(17), weight: selected ? .semibold : .medium))
                             .monospacedDigit()
                             .frame(maxWidth: .infinity, minHeight: 54)
+                            #if !os(tvOS)
                             .foregroundStyle(selected ? .black : .white)
                             .background(selected ? .white : PlayerControlStyle.rowFill,
                                         in: RoundedRectangle(cornerRadius: 14))
+                            #endif
                     }
                     .accessibilityLabel("\(rate.formatted(.number.locale(LocalizationPreferences.current.displayLocale))) 倍速")
                     .accessibilityAddTraits(selected ? .isSelected : [])
@@ -1193,7 +1228,7 @@ struct PlaybackView: View {
     }
     private var playbackGestureSurface: some View {
         PlaybackGestureSurface(
-            enabled: !controlsLocked && secondaryPanel == nil && !showEpisodeList && !showSubtitleSearch && !showDanmaku && !showSkipSettings &&
+            enabled: !controlsLocked && secondaryPanel == nil && !showEpisodeList && !showSubtitleSearch && !showSkipSettings &&
                 scenePhase == .active && session.engineSwitchTarget == nil && !session.isPreparing &&
                 !session.isSeekingPlayback && !session.currentEngineHasFailed && playbackStarted && !networkSuspended,
             singleTap: {
@@ -1270,32 +1305,6 @@ struct PlaybackView: View {
 
     private var videoScaleMode: VideoScaleMode { VideoScaleMode(rawValue: videoScaleModeRaw) ?? .fit }
 
-    private var engineSelectionControls: some View {
-        panelSection("播放内核") {
-            ForEach(PlaybackEnginePreference.allCases, id: \.self) { preference in
-                Button {
-                    // Keep this a direct action: close the drawer before switching.
-                    closePanel()
-                    session.selectEnginePreference(preference)
-                } label: {
-                    PlayerOptionRow(title: preference.title, detail: engineDetail(preference),
-                                    selected: session.enginePreference == preference,
-                                    pending: session.engineSwitchTarget == preference)
-                }
-                .accessibilityAddTraits(session.enginePreference == preference ? .isSelected : [])
-                .accessibilityIdentifier("playback.engine.\(preference.rawValue)")
-            }
-        }
-    }
-
-    private func engineDetail(_ preference: PlaybackEnginePreference) -> String {
-        switch preference {
-        case .automatic: return "优先原生播放，按片源兼容性选择"
-        case .system: return "使用苹果原生画质与视频输出"
-        case .mpv: return "兼容更多格式与特效字幕"
-        }
-    }
-
     private func seekPreviewCard(at target: Double) -> some View {
         VStack(spacing: 5) {
             if seekPreviewEnabled {
@@ -1311,13 +1320,13 @@ struct PlaybackView: View {
                 }.frame(width: 160, height: 90)
                 .overlay(alignment: .bottomTrailing) {
                     if session.seekPreview != nil, let time = session.seekPreviewTime {
-                        Text("≈ " + Self.timeLabel(time)).font(.system(size: 10, design: .monospaced))
+                        Text("≈ " + Self.timeLabel(time)).font(.system(size: PlayerControlStyle.scaled(10), design: .monospaced))
                             .padding(4).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4)).padding(4)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            Text(Self.timeLabel(target)).font(.system(size: 13, weight: .semibold, design: .monospaced))
+            Text(Self.timeLabel(target)).font(.system(size: PlayerControlStyle.scaled(13), weight: .semibold, design: .monospaced))
                 .padding(.horizontal, 10).padding(.vertical, 4).background(.black.opacity(0.65), in: Capsule())
         }.frame(width: 160).accessibilityHidden(true)
     }
@@ -1393,8 +1402,8 @@ struct PlaybackView: View {
     private func roundControl(_ title: String, systemImage: String,
                               action: @escaping () -> Void) -> some View {
         Button(title, systemImage: systemImage, action: action)
-            .labelStyle(.iconOnly).buttonStyle(.plain)
-            .font(.system(size: 19, weight: .medium))
+            .labelStyle(.iconOnly).lucentPlayerButtonStyle()
+            .font(.system(size: PlayerControlStyle.scaled(19), weight: .medium))
             .frame(width: PlayerControlStyle.controlSize, height: PlayerControlStyle.controlSize)
             .contentShape(Circle())
             .lucentVideoGlass()
@@ -1403,14 +1412,14 @@ struct PlaybackView: View {
     private func skipButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 7) {
-                Text(LocalizedStringKey(title)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                Image(systemName: "forward.end.fill").font(.system(size: 10))
+                Text(LocalizedStringKey(title)).font(.system(size: PlayerControlStyle.scaled(12), weight: .semibold)).lineLimit(1)
+                Image(systemName: "forward.end.fill").font(.system(size: PlayerControlStyle.scaled(10)))
             }
             .padding(.horizontal, 15).frame(minHeight: 36)
             .lucentVideoGlass()
             .frame(minHeight: 44)
         }
-        .buttonStyle(.plain)
+        .lucentPlayerButtonStyle()
     }
 
     private func audioChoice(_ title: String, index: Int) -> some View {
@@ -1438,8 +1447,8 @@ struct PlaybackView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    @ViewBuilder private var trackControls: some View {
-        if trackTab == .audio {
+    @ViewBuilder private func trackControls(audio: Bool) -> some View {
+        if audio {
             if !session.audioOptions.isEmpty {
                 panelSection("可用音轨 · \(session.audioOptions.count)") {
                     ForEach(session.audioOptions.indices, id: \.self) { index in
@@ -1471,13 +1480,13 @@ struct PlaybackView: View {
                 panelSection("可用字幕 · \(session.subtitleOptions.count)") {
                     subtitleChoice("关闭字幕", index: nil)
                     ForEach(session.subtitleOptions.indices, id: \.self) { index in
-                        subtitleChoice(session.subtitleOptions[index], index: index)
+                        subtitleChoice(SubtitleLanguageDisplay.title(session.subtitleOptions[index]), index: index)
                     }
                 }
             }
             if let notice = session.subtitleNotice {
                 Label(notice, systemImage: session.pendingSubtitleIndex == nil ? "info.circle" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 12)).foregroundStyle(PlayerControlStyle.secondary)
+                    .font(.system(size: PlayerControlStyle.scaled(12))).foregroundStyle(PlayerControlStyle.secondary)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 12)
             }
             if session.hasSidecarSubtitle {
@@ -1487,7 +1496,7 @@ struct PlaybackView: View {
                         set: { enabled in
                             if session.subtitlesEnabled != enabled { session.toggleSidecarSubtitle() }
                         }))
-                        .font(.system(size: 15))
+                        .font(.system(size: PlayerControlStyle.scaled(15)))
                         .tint(.gray).padding(14)
                         .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 15))
                 }
@@ -1499,7 +1508,7 @@ struct PlaybackView: View {
                     }
                     ForEach(session.serverTracks.subtitles) { track in
                         Button { closePanel(); session.switchServerSubtitle(track.id) } label: {
-                            PlayerOptionRow(title: track.title, selected: session.selectedServerSubtitleID == track.id)
+                            PlayerOptionRow(title: SubtitleLanguageDisplay.title(track.title), selected: session.selectedServerSubtitleID == track.id)
                         }
                     }
                 }
@@ -1517,10 +1526,10 @@ struct PlaybackView: View {
 
     private func emptyTrackState(_ icon: String, title: String, detail: String) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 30, weight: .light))
+            Image(systemName: icon).font(.system(size: PlayerControlStyle.scaled(30), weight: .light))
                 .foregroundStyle(PlayerControlStyle.secondary)
-            Text(LocalizedStringKey(title)).font(.system(size: 16, weight: .medium))
-            Text(detail).font(.system(size: 13))
+            Text(LocalizedStringKey(title)).font(.system(size: PlayerControlStyle.scaled(16), weight: .medium))
+            Text(detail).font(.system(size: PlayerControlStyle.scaled(13)))
                 .foregroundStyle(PlayerControlStyle.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 28).padding(.horizontal, 12)
@@ -1536,9 +1545,9 @@ struct PlaybackView: View {
                 .accessibilityLabel("字幕提前半秒")
                 VStack(spacing: 3) {
                     Text("\(session.subtitleDelay.formatted(.number.precision(.fractionLength(1)))) 秒")
-                        .font(.system(size: 18, weight: .medium, design: .rounded)).monospacedDigit()
+                        .font(.system(size: PlayerControlStyle.scaled(18), weight: .medium, design: .rounded)).monospacedDigit()
                     Text(LocalizedStringKey(session.subtitleDelay == 0 ? "与画面同步" : session.subtitleDelay > 0 ? "延后显示" : "提前显示"))
-                        .font(.system(size: 11)).foregroundStyle(PlayerControlStyle.secondary)
+                        .font(.system(size: PlayerControlStyle.scaled(11))).foregroundStyle(PlayerControlStyle.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 Button { session.adjustSubtitleDelay(by: 0.5) } label: {
@@ -1549,7 +1558,7 @@ struct PlaybackView: View {
             }
             .padding(12)
             Button("重置同步") { session.adjustSubtitleDelay(by: -session.subtitleDelay) }
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: PlayerControlStyle.scaled(13), weight: .medium))
                 .foregroundStyle(PlayerControlStyle.secondary)
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
@@ -1558,44 +1567,44 @@ struct PlaybackView: View {
     private var subtitleAppearanceControls: some View {
         panelSection("文本字幕外观") {
             Text("这是字幕显示预览")
-                .font(.system(size: 19 * subtitleFontScale, weight: .semibold))
+                .font(.system(size: PlayerControlStyle.scaled(19) * subtitleFontScale, weight: .semibold))
                 .padding(8)
                 .background(.black.opacity(subtitleBackgroundOpacity), in: RoundedRectangle(cornerRadius: 6))
                 .frame(maxWidth: .infinity, minHeight: 76)
                 .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 15))
             HStack {
-                Text("字号").font(.system(size: 14))
+                Text("字号").font(.system(size: PlayerControlStyle.scaled(14)))
                 LucentValueSlider(value: $subtitleFontScale, range: 0.75...1.5, step: 0.05).tint(.white)
                     .accessibilityLabel("字幕字号")
                 Text("\(Int((subtitleFontScale * 100).rounded()))%")
-                    .font(.system(size: 12)).monospacedDigit().frame(width: 42)
+                    .font(.system(size: PlayerControlStyle.scaled(12))).monospacedDigit().frame(width: 42)
             }
             .padding(.horizontal, 12)
             HStack {
-                Text("底色").font(.system(size: 14))
+                Text("底色").font(.system(size: PlayerControlStyle.scaled(14)))
                 LucentValueSlider(value: $subtitleBackgroundOpacity, range: 0...0.85, step: 0.05).tint(.white)
                     .accessibilityLabel("字幕底色不透明度")
                 Text("\(Int((subtitleBackgroundOpacity * 100).rounded()))%")
-                    .font(.system(size: 12)).monospacedDigit().frame(width: 42)
+                    .font(.system(size: PlayerControlStyle.scaled(12))).monospacedDigit().frame(width: 42)
             }
             .padding(.horizontal, 12)
             Text("外观用于 Lucent 显示的文本字幕，特效字幕保留片源样式。")
-                .font(.system(size: 11)).foregroundStyle(PlayerControlStyle.secondary)
+                .font(.system(size: PlayerControlStyle.scaled(11))).foregroundStyle(PlayerControlStyle.secondary)
                 .padding(.horizontal, 12).padding(.top, 5)
         }
     }
 
     private func panelRow(_ title: String, symbol: String, value: String? = nil) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 17))
+            Image(systemName: symbol).font(.system(size: PlayerControlStyle.scaled(17)))
                 .foregroundStyle(PlayerControlStyle.secondary).frame(width: 22)
-            Text(LocalizedStringKey(title)).font(.system(size: 14, weight: .medium))
+            Text(LocalizedStringKey(title)).font(.system(size: PlayerControlStyle.scaled(14), weight: .medium))
             Spacer(minLength: 12)
             if let value {
-                Text(value).font(.system(size: 12))
+                Text(value).font(.system(size: PlayerControlStyle.scaled(12)))
                     .foregroundStyle(PlayerControlStyle.secondary).lineLimit(1)
             }
-            Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+            Image(systemName: "chevron.right").font(.system(size: PlayerControlStyle.scaled(10), weight: .semibold))
                 .foregroundStyle(.white.opacity(0.35))
         }
         .frame(maxWidth: .infinity, minHeight: 48)
@@ -1605,110 +1614,32 @@ struct PlaybackView: View {
     }
 
     @ViewBuilder private var advancedControls: some View {
-        panelSection("播放") {
-            Button { openPanel(.rate) } label: {
-                panelRow("播放速度", symbol: "speedometer", value: "\(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale)))×")
+        panelSection("画面大小") {
+            Picker("画面大小", selection: $videoScaleModeRaw) {
+                ForEach(VideoScaleMode.allCases, id: \.rawValue) { mode in
+                    Text(LocalizedStringKey(mode.title)).tag(mode.rawValue)
+                }
             }
-            Button { openTracks(.audio) } label: {
-                panelRow("音轨", symbol: "waveform", value: audioSummary)
-            }
-            Button { openTracks(.subtitles) } label: {
-                panelRow("字幕", symbol: "captions.bubble", value: subtitleSummary)
-            }
-            Button { closePanel(); showDanmaku = true } label: {
-                panelRow("弹幕", symbol: "text.bubble", value: danmakuEnabled ? "开启" : "关闭")
-            }
+            .pickerStyle(.segmented)
+            Text(LocalizedStringKey(videoScaleMode.explanation))
+                .font(.system(size: PlayerControlStyle.scaled(11))).foregroundStyle(PlayerControlStyle.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+        }
+        panelSection("片头片尾") {
             Button { closePanel(); showSkipSettings = true } label: {
                 panelRow("片头片尾", symbol: "forward.end", value: "设置跳过时间")
             }
             Toggle(isOn: $session.autoSkipSegments) {
                 Label("自动跳过片头片尾", systemImage: "forward.end")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: PlayerControlStyle.scaled(14), weight: .medium))
             }
             .tint(.gray).padding(14)
             .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 14))
         }
-        panelSection("画面") {
-            Picker("画面缩放", selection: $videoScaleModeRaw) {
-                ForEach(VideoScaleMode.allCases, id: \.rawValue) { mode in Text(LocalizedStringKey(mode.title)).tag(mode.rawValue) }
-            }
-            .pickerStyle(.segmented).tint(.gray)
-            Text(videoScaleMode.explanation)
-                .font(.system(size: 11)).foregroundStyle(PlayerControlStyle.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-            if session.useMPV {
-                Menu {
-                    ForEach(["original", "16:9", "4:3", "2.35:1"], id: \.self) { ratio in
-                        Button {
-                            aspectRatio = ratio
-                            session.setAspectRatio(ratio == "original" ? nil : ratio)
-                        } label: {
-                            if aspectRatio == ratio { Label(ratio == "original" ? "原始比例" : ratio, systemImage: "checkmark") }
-                            else { Text(LocalizedStringKey(ratio == "original" ? "原始比例" : ratio)) }
-                        }
-                    }
-                } label: {
-                    panelRow("画面比例", symbol: "aspectratio", value: aspectRatio == "original" ? "原始" : aspectRatio)
-                }
-            }
+        Button { openPanel(.diagnostics) } label: {
+            panelRow("播放信息", symbol: "info.circle")
         }
-        if !session.chapters.isEmpty || session.playlistEntries.count > 1 {
-            panelSection("内容") {
-                if !session.chapters.isEmpty {
-                    Menu {
-                        ForEach(session.chapters) { chapter in
-                            Button(chapter.title) { session.selectChapter(chapter); closePanel() }
-                        }
-                    } label: {
-                        panelRow("章节", symbol: "list.bullet.rectangle", value: "\(session.chapters.count) 个")
-                    }
-                }
-                if session.playlistEntries.count > 1 {
-                    Button { openPanel(.playlist) } label: {
-                        panelRow("播放列表", symbol: "text.line.first.and.arrowtriangle.forward",
-                                 value: "\(session.playlistEntries.count) 项")
-                    }
-                }
-            }
-        }
-        LucentDisclosure {
-            VStack(spacing: 8) {
-                if !session.useMPV && !session.useAether {
-                    Menu {
-                        Button("自动") { session.setPreferredPeakBitRate(0) }
-                        ForEach([20, 10, 5, 2], id: \.self) { megabits in
-                            Button("最高 \(megabits) Mbps") { session.setPreferredPeakBitRate(Double(megabits) * 1_000_000) }
-                        }
-                    } label: {
-                        panelRow("网络码率上限", symbol: "network",
-                                 value: session.preferredPeakBitRate == 0 ? "自动" :
-                                    "\(Int(session.preferredPeakBitRate / 1_000_000)) Mbps")
-                    }
-                }
-                if case .embyItem = item.location {
-                    Menu {
-                        ForEach([2, 5, 8, 12, 20], id: \.self) { megabits in
-                            Button("请求转码 · \(megabits) Mbps 上限") {
-                                closePanel()
-                                session.selectEmbyTranscodeBitrate(megabits * 1_000_000)
-                            }
-                        }
-                    } label: { panelRow("请求服务器转码", symbol: "server.rack") }
-                    Text("仅在服务器已开放转码时可用，这些数值是请求上限。")
-                        .font(.system(size: 11)).foregroundStyle(PlayerControlStyle.secondary)
-                        .padding(.horizontal, 12)
-                }
-                Button { openPanel(.diagnostics) } label: {
-                    panelRow("播放信息", symbol: "info.circle")
-                }
-            }
-            .padding(.top, 10)
-        } label: {
-            Text("高级选项").font(.system(size: 13, weight: .medium))
-                .foregroundStyle(PlayerControlStyle.secondary)
-        }
-        .tint(.white).padding(.horizontal, 12)
     }
 
     private struct PlaybackDiagnosticsPanel: View {
@@ -1721,12 +1652,12 @@ struct PlaybackView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(spacing: 14) {
                     Image(systemName: "play.rectangle")
-                        .font(.system(size: 26, weight: .light))
-                        .frame(width: 48, height: 48)
+                        .font(.system(size: PlayerControlStyle.scaled(26), weight: .light))
+                        .frame(width: PlayerControlStyle.scaled(48), height: PlayerControlStyle.controlSize)
                         .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(report.engine.rawValue).font(.system(size: 20, weight: .semibold))
-                        Text(report.routeReason).font(.system(size: 12))
+                        Text(report.engine.rawValue).font(.system(size: PlayerControlStyle.scaled(20), weight: .semibold))
+                        Text(report.routeReason).font(.system(size: PlayerControlStyle.scaled(12)))
                             .foregroundStyle(PlayerControlStyle.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1752,7 +1683,7 @@ struct PlaybackView: View {
                 .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 20))
                 if let explanation = report.dolbyVisionExplanation {
                     Label(explanation, systemImage: "info.circle")
-                        .font(.system(size: 12)).foregroundStyle(PlayerControlStyle.secondary)
+                        .font(.system(size: PlayerControlStyle.scaled(12))).foregroundStyle(PlayerControlStyle.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 VStack(spacing: 0) {
@@ -1764,7 +1695,7 @@ struct PlaybackView: View {
                 .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 20))
                 if let failure {
                     Label(failure, systemImage: "exclamationmark.circle")
-                        .font(.system(size: 13)).foregroundStyle(.red)
+                        .font(.system(size: PlayerControlStyle.scaled(13))).foregroundStyle(.red)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1780,7 +1711,7 @@ struct PlaybackView: View {
                 Text(report.displayValue(value)).multilineTextAlignment(.trailing).foregroundStyle(.white).textSelection(.enabled)
                 #endif
             }
-            .font(.system(size: 13))
+            .font(.system(size: PlayerControlStyle.scaled(13)))
             .padding(.vertical, 14)
         }
     }

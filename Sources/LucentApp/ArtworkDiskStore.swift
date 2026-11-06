@@ -44,3 +44,35 @@ actor ArtworkDiskStore {
         }
     }
 }
+
+/// FIFO concurrency budget; cache hits never need a permit.
+actor ArtworkWorkGate {
+    static let downloads = ArtworkWorkGate(limit: 4)
+    static let decoding = ArtworkWorkGate(limit: 2)
+    static let shelves = ArtworkWorkGate(limit: 2)
+    private let limit: Int
+    private var active = 0
+    private var waiting: [(UUID, CheckedContinuation<Void, Error>)] = []
+    init(limit: Int) { self.limit = max(1, limit) }
+    func acquire() async throws {
+        try Task.checkCancellation()
+        if active < limit { active += 1; return }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { waiting.append((id, continuation)) }
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+    }
+    private func cancel(_ id: UUID) {
+        guard let index = waiting.firstIndex(where: { $0.0 == id }) else { return }
+        waiting.remove(at: index).1.resume(throwing: CancellationError())
+    }
+    func release() {
+        if !waiting.isEmpty { waiting.removeFirst().1.resume() }
+        else { active -= 1 }
+    }
+}

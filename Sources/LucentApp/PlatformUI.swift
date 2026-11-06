@@ -29,7 +29,23 @@ enum LucentClipboard {
 }
 
 extension View {
-    /// Navigation destinations own tab visibility; popping restores the root's default.
+    @ViewBuilder func lucentHideTopScrollEdge() -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .top) }
+        else { self }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder func lucentTabRoot() -> some View {
+        #if os(iOS)
+        toolbar(.visible, for: .tabBar)
+        #else
+        self
+        #endif
+    }
+    /// Navigation destinations own tab visibility; roots explicitly restore visibility after popping.
     @ViewBuilder func lucentSecondaryPage() -> some View {
         #if os(iOS)
         toolbar(.hidden, for: .tabBar)
@@ -235,3 +251,111 @@ struct LucentDisclosure<Content: View, Label: View>: View {
     }
 }
 #endif
+
+/// Capture the initial midpoint once, then move with the title content.
+struct LucentPosterLoadingIndicator: View {
+    #if os(iOS)
+    @State private var safeTop: CGFloat?
+    #else
+    private let safeTop: CGFloat? = 0
+    #endif
+    @State private var initialTitleTop: CGFloat?
+    @State private var initialOffset: CGFloat?
+    var body: some View {
+        GeometryReader { title in
+            ProgressView()
+                .accessibilityLabel("正在加载海报")
+                .position(x: title.size.width / 2, y: initialOffset ?? 0)
+                .opacity(initialOffset == nil ? 0 : 1)
+                .onAppear {
+                    if initialTitleTop == nil { initialTitleTop = title.frame(in: .global).minY }
+                    resolveInitialOffset()
+                }
+                .onChange(of: safeTop) { _, _ in resolveInitialOffset() }
+        }
+        .allowsHitTesting(false)
+        #if os(iOS)
+        .background(PosterSafeAreaAnchor { safeTop = $0 }.frame(width: 0, height: 0))
+        #endif
+    }
+    private func resolveInitialOffset() {
+        guard initialOffset == nil, let initialTitleTop, let safeTop else { return }
+        initialOffset = (safeTop - initialTitleTop) / 2
+    }
+}
+
+#if os(iOS)
+private struct PosterSafeAreaAnchor: UIViewRepresentable {
+    let changed: (CGFloat) -> Void
+    func makeUIView(context: Context) -> Anchor { Anchor(changed: changed) }
+    func updateUIView(_ view: Anchor, context: Context) { view.changed = changed; view.report() }
+    final class Anchor: UIView {
+        var changed: (CGFloat) -> Void
+        private var last: CGFloat?
+        init(changed: @escaping (CGFloat) -> Void) { self.changed = changed; super.init(frame: .zero); isUserInteractionEnabled = false }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() { super.didMoveToWindow(); report() }
+        override func safeAreaInsetsDidChange() { super.safeAreaInsetsDidChange(); report() }
+        override func layoutSubviews() { super.layoutSubviews(); report() }
+        func report() {
+            guard let window else { return }
+            let top = window.safeAreaInsets.top
+            guard last != top else { return }
+            last = top
+            DispatchQueue.main.async { [weak self] in self?.changed(top) }
+        }
+    }
+}
+#endif
+
+extension View {
+    @ViewBuilder func lucentPlayerButtonStyle() -> some View {
+        #if os(tvOS)
+        buttonStyle(.bordered)
+        #else
+        buttonStyle(.plain)
+        #endif
+    }
+}
+
+extension View {
+    /// Allows the remote focus engine to scroll informational shelves without fake buttons.
+    @ViewBuilder func lucentReadableFocus() -> some View {
+        #if os(tvOS)
+        focusable().accessibilityElement(children: .combine)
+        #else
+        self
+        #endif
+    }
+}
+
+extension View {
+    @ViewBuilder func lucentPlaybackHorizontalPadding() -> some View {
+        #if os(tvOS)
+        padding(.horizontal, LucentUI.pageInset)
+        #else
+        padding(.horizontal)
+        #endif
+    }
+}
+
+extension View {
+    @ViewBuilder func lucentFormActionStyle() -> some View {
+        #if os(tvOS)
+        buttonStyle(.automatic)
+        #else
+        buttonStyle(.plain)
+        #endif
+    }
+    @ViewBuilder func lucentHierarchicalPresentation<Destination: View>(isPresented: Binding<Bool>,
+        onDismiss: @escaping () -> Void, @ViewBuilder destination: @escaping () -> Destination) -> some View {
+        #if os(tvOS)
+        navigationDestination(isPresented: isPresented, destination: destination)
+            .onChange(of: isPresented.wrappedValue) { wasPresented, presented in
+                if wasPresented && !presented { onDismiss() }
+            }
+        #else
+        sheet(isPresented: isPresented, onDismiss: onDismiss, content: destination)
+        #endif
+    }
+}

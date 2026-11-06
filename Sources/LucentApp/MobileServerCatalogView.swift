@@ -60,7 +60,7 @@ struct MobileServerCatalogView: View {
                                         source: source, token: token, itemID: item.id), cacheKey: "jellyfin|\(sourceID)|\(item.id)")
                                         .modifier(HomeMatchedSource(key: "jellyfin:\(item.id)",
                                                                     namespace: detailTransition))
-                                    LucentPosterCaption(title: item.name, subtitle: item.productionYear.map(String.init))
+                                    LucentPosterCaption(title: item.name, subtitle: item.displayYearText)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -139,7 +139,7 @@ struct MobileServerCatalogView: View {
                 jellyfinItems += page.filter { !known.contains($0.id) }
                 nextStart += 60
                 hasMore = page.count == 60
-                if reset { try await library.synchronizeServerHome(sourceID: sourceID, emby: false) }
+                if reset { try await library.synchronizeServerHome(sourceID: sourceID, emby: false, displayedItems: jellyfinItems) }
             } else if let source = library.plexSources.first(where: { $0.id == sourceID }),
                       let token = try KeychainPasswordStore.plexToken(for: sourceID) {
                 let page = try await PlexClient.browsePage(source: source, token: token,

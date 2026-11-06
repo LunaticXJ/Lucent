@@ -176,6 +176,17 @@ struct PlaybackDiscTransition: View {
     }
 }
 
+private struct DiscPlaybackControlsHiddenKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var discPlaybackControlsHidden: Bool {
+        get { self[DiscPlaybackControlsHiddenKey.self] }
+        set { self[DiscPlaybackControlsHiddenKey.self] = newValue }
+    }
+}
+
 private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
     @Binding var requested: MediaItem?
     let destination: (MediaItem) -> Destination
@@ -193,8 +204,12 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
         ZStack {
             Color.black.ignoresSafeArea()
             content.opacity(pageOpacity)
+                .environment(\.discPlaybackControlsHidden, controlsHidden)
                 .allowsHitTesting(disc == nil)
         }
+            #if os(iOS)
+            .navigationBarBackButtonHidden(controlsHidden)
+            #endif
             .background {
                 GeometryReader { geometry in
                     Color.clear.onChange(of: geometry.size, initial: true) { _, size in
@@ -218,11 +233,20 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
                 guard id != nil, let requested else { return }
                 revealTask?.cancel()
                 lastItem = requested
-                if presented != nil || !enabled { present(requested); return }
+                if presented != nil || !animatesDisc { present(requested); return }
                 guard disc == nil else { return }
                 inserting = true; disc = requested
             }
     }
+    private var animatesDisc: Bool {
+        #if os(tvOS)
+        false // Apple TV has no Dynamic Island; use the native fullscreen presentation.
+        #else
+        enabled
+        #endif
+    }
+    private var controlsHidden: Bool { disc != nil || presented != nil || pageOpacity < 1 }
+
     private func present(_ item: MediaItem) {
         #if os(iOS)
         LucentOrientationDelegate.setPlaybackPresented(true)
@@ -254,7 +278,7 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
         #if os(iOS)
         LucentOrientationDelegate.setPlaybackPresented(false, forceUpdate: true)
         #endif
-        guard enabled, let lastItem else { pageOpacity = 1; return }
+        guard animatesDisc, let lastItem else { pageOpacity = 1; return }
         revealTask?.cancel()
         revealTask = Task { @MainActor in
             #if os(iOS)

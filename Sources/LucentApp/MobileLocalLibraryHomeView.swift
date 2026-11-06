@@ -69,6 +69,7 @@ struct MobileLocalLibraryHomeView: View {
             Group {
                 LocalCatalogCollectionView(collection: collection, detailPresented: $detailPresented,
                                            onBack: { withAnimation { selectedCollection = nil } }).environmentObject(library)
+                    .modifier(HomeCollectionZoom(key: collection == .continueWatching ? nil : "collection:\(collection.rawValue)", namespace: detailTransition))
             }.lucentSecondaryPage()
         }
         .onChange(of: selectedItemID) { _, _ in updateNavigationState() }
@@ -155,29 +156,18 @@ struct MobileLocalLibraryHomeView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(alignment: .top, spacing: 14) {
                             ForEach(items.prefix(12)) { item in
-                                let key = "continue:\(item.id)"
-                                Button { open(item, key: key) } label: {
+                                Button { transitionKey = nil; selectedItemID = item.id } label: {
                                     VStack(alignment: .leading, spacing: 8) {
                                         LocalCatalogArtwork(item: item, landscape: true)
                                             .frame(width: width, height: width * 9 / 16)
+                                            .clipShape(RoundedRectangle(cornerRadius: 13))
                                             .overlay(alignment: .bottom) {
-                                                GeometryReader { proxy in
-                                                    ZStack(alignment: .leading) {
-                                                        Color.white.opacity(0.22)
-                                                        Color.white.frame(width: proxy.size.width * item.progress)
-                                                    }
-                                                }.frame(height: 3)
-                                            }
-                                            .overlay(alignment: .bottomTrailing) {
-                                                Image(systemName: "play.fill").font(.system(size: 13))
-                                                    .foregroundStyle(.white).frame(width: 30, height: 30)
-                                                    .background(.black.opacity(0.5), in: Circle()).padding(9)
+                                                LucentPlaybackProgressOverlay(position: item.position,
+                                                    duration: item.duration ?? item.technicalInfo?.duration, progress: item.progress)
                                             }
                                             .clipShape(RoundedRectangle(cornerRadius: 13))
-                                            .modifier(HomeMatchedSource(key: key, namespace: detailTransition))
-                                        Text(item.catalogDisplayTitle).font(.footnote.weight(.medium)).lineLimit(1)
-                                        if let label = item.identity?.episodeLabel { Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
-                                        LucentPlaybackTimeCaption(position: item.position, duration: item.duration ?? item.technicalInfo?.duration)
+                                        LucentPosterCaption(title: item.catalogDisplayTitle, lines: 1)
+                                        if let label = item.identity?.episodeLabel { Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                                     }.frame(width: width, alignment: .leading)
                                 }.buttonStyle(.plain)
                             }
@@ -199,6 +189,7 @@ struct MobileLocalLibraryHomeView: View {
                 }.foregroundStyle(.secondary).padding(.vertical, 8)
             }.buttonStyle(.plain)
         }.padding(.horizontal, 22)
+            .modifier(HomeMatchedSource(key: "collection:\(collection.rawValue)", namespace: detailTransition))
     }
     private func open(_ item: MediaItem, key: String) { transitionKey = key; selectedItemID = item.id }
     private func updateNavigationState() { detailPresented = selectedItemID != nil }

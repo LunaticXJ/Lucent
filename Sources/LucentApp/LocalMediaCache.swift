@@ -54,9 +54,17 @@ final class LocalMediaCache: @unchecked Sendable {
         }
         let task = Task { @MainActor in
             if let cached = await ArtworkDiskStore.shared.read(key) { return cached }
-            let data = try await fetch()
-            if !data.isEmpty { await ArtworkDiskStore.shared.store(data, key: key) }
-            return data
+            try await ArtworkWorkGate.downloads.acquire()
+            do {
+                try Task.checkCancellation()
+                let data = try await fetch()
+                await ArtworkWorkGate.downloads.release()
+                if !data.isEmpty { await ArtworkDiskStore.shared.store(data, key: key) }
+                return data
+            } catch {
+                await ArtworkWorkGate.downloads.release()
+                throw error
+            }
         }
         Self.imageRequests[key] = task
         defer { Self.imageRequests[key] = nil }

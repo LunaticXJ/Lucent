@@ -95,7 +95,7 @@ struct LocalizationSettingsView: View {
             } footer: { Text("按已匹配的 TMDB 编号更新聚合媒体库，不重新识别文件。影视服务器资料由服务器提供。") }
         }
             .modifier(LucentSettingsPageStyle())
-        .navigationTitle("语言与地区")
+        .navigationTitle("语言与地区").lucentNavigationTitleStyle()
         .tint(.gray)
     }
     private var languageOptions: some View {
@@ -115,7 +115,7 @@ private struct LocaleChoiceList: View {
             ForEach(options.filter { query.isEmpty || $0.1.localizedStandardContains(query) || $0.0.localizedStandardContains(query) }.sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }, id: \.0) { id, title in
                 choice(id, title: title)
             }
-        }.navigationTitle(LocalizedStringKey(title)).searchable(text: $query)
+        }.navigationTitle(LocalizedStringKey(title)).lucentNavigationTitleStyle().searchable(text: $query)
     }
     private func choice(_ id: String, title: String) -> some View {
         Button { selection = id } label: {

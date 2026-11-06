@@ -105,10 +105,13 @@ struct MediaDetailView: View {
                     LucentStateView(title: "影片已移除", symbol: "film", actionTitle: "返回", action: goBack)
                 }
             }
+            .lucentSecondaryPage()
             .navigationTitle("")
             #if os(iOS)
-            .toolbar(.hidden, for: .navigationBar)
-            .background(DetailBackSwipeEnabler().frame(width: 0, height: 0))
+            .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(false)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             #endif
             .sheet(item: $advancedDetailItem) { selected in
                 NavigationStack {
@@ -792,24 +795,6 @@ struct MediaDetailView: View {
     }
 }
 
-#if os(iOS)
-private struct DetailBackSwipeEnabler: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> Controller { Controller() }
-    func updateUIViewController(_ controller: Controller, context: Context) { controller.enableBackSwipe() }
-
-    final class Controller: UIViewController {
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            enableBackSwipe()
-        }
-
-        func enableBackSwipe() {
-            guard let navigationController, navigationController.viewControllers.count > 1 else { return }
-            navigationController.interactivePopGestureRecognizer?.isEnabled = true
-        }
-    }
-}
-#endif
 
 struct LocalPosterView: View {
     let url: URL

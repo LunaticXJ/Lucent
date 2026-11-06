@@ -55,6 +55,11 @@ struct PlaybackServicesView: View {
             }
             if scope == .danmaku {
                 Section {
+                    NavigationLink("自定义弹幕 API") {
+                        CustomDanmakuServersView().lucentSecondaryPage()
+                    }
+                }
+                Section {
                     TextField("App ID", text: $appID)
                     SecureField("App Secret", text: $secret)
                     Link("弹弹play 开发者中心", destination: URL(string: "https://dev.dandanplay.com/")!)
@@ -104,6 +109,129 @@ struct PlaybackServicesView: View {
                 try PlaybackServiceConfiguration.saveSession(value)
                 loggedIn = true; password = ""; status = "账户已登录"
             } catch { status = error.localizedDescription }
+        }
+    }
+}
+
+struct CustomDanmakuServersView: View {
+    @AppStorage(CustomDanmakuServers.key) private var data = Data()
+    @State private var editing: CustomDanmakuServer?
+    private var servers: [CustomDanmakuServer] { CustomDanmakuServers.decode(data) }
+    var body: some View {
+        Form {
+            Section {
+                ForEach(servers) { server in
+                    HStack(spacing: 12) {
+                        Button { editing = server } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(server.displayName).foregroundStyle(.primary)
+                                Text(URLComponents(string: server.address)?.host ?? "")
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        #if os(tvOS)
+                        .buttonStyle(.automatic)
+                        #else
+                        .buttonStyle(.plain)
+                        #endif
+                        Toggle("启用", isOn: Binding(get: { server.enabled }, set: { enabled in
+                            var value = server; value.enabled = enabled; store(value)
+                        })).labelsHidden().accessibilityLabel("启用：\(server.displayName)")
+                    }
+                }.onDelete { indices in
+                    var values = servers; values.remove(atOffsets: indices); persist(values)
+                }
+                if servers.isEmpty {
+                    Text("尚未添加弹幕服务器").foregroundStyle(.secondary)
+                }
+                Button("添加服务器", systemImage: "plus") { editing = CustomDanmakuServer() }
+            } footer: {
+                Text("支持兼容弹弹play协议的 API。可填写服务器根地址或以 /api/v2 结尾的地址，并保留服务提供的鉴权路径。")
+            }
+        }
+        .navigationTitle("自定义弹幕 API").lucentNavigationTitleStyle()
+        .modifier(LucentSettingsPageStyle())
+        .navigationDestination(item: $editing) { server in
+            CustomDanmakuServerEditor(server: server,
+                existing: servers.contains(where: { $0.id == server.id }), save: {
+                    store($0)
+                    UserDefaults.standard.set("custom:" + $0.id.uuidString, forKey: "lucent.danmaku.selectedServer")
+                }, remove: { persist(servers.filter { $0.id != server.id }) }).lucentSecondaryPage()
+        }
+    }
+    private func store(_ server: CustomDanmakuServer) {
+        var values = servers
+        if let index = values.firstIndex(where: { $0.id == server.id }) { values[index] = server }
+        else { values.append(server) }
+        persist(values)
+    }
+    private func persist(_ values: [CustomDanmakuServer]) {
+        if let encoded = try? JSONEncoder().encode(values) { data = encoded }
+    }
+}
+
+private struct CustomDanmakuServerEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var server: CustomDanmakuServer
+    let existing: Bool
+    let save: (CustomDanmakuServer) -> Void
+    let remove: () -> Void
+    @State private var busy = false
+    @State private var status: String?
+    @State private var testTask: Task<Void, Never>?
+    private var valid: Bool { (try? server.endpoint()) != nil }
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("名称") { TextField("服务器名称", text: $server.name).multilineTextAlignment(.trailing) }
+                LabeledContent("地址") {
+                    TextField("https://example.com", text: $server.address).multilineTextAlignment(.trailing)
+                        #if os(iOS)
+                        .keyboardType(.URL).textInputAutocapitalization(.never)
+                        #endif
+                }
+                Toggle("启用", isOn: $server.enabled)
+            } footer: { Text("仅填写 API 基础地址，不需要填写搜索或弹幕接口路径。") }
+            .disabled(busy)
+            Section {
+                Button("检测连接") { test() }.disabled(!valid || busy)
+                if busy { ProgressView() }
+                if let status { Text(LocalizedStringKey(status)).font(.footnote).foregroundStyle(.secondary) }
+            } footer: { Text("检测会验证搜索接口是否兼容；实际弹幕以播放时的匹配和下载结果为准。") }
+            Section {
+                Button("保存配置") {
+                    guard valid else { return }
+                    server.name = server.displayName
+                    server.address = server.address.trimmingCharacters(in: .whitespacesAndNewlines)
+                    save(server); dismiss()
+                }.disabled(!valid || busy)
+                if existing {
+                    Button("删除服务器", role: .destructive) { remove(); dismiss() }.disabled(busy)
+                }
+            }
+        }
+        .navigationTitle("弹幕服务器").lucentNavigationTitleStyle()
+        .modifier(LucentSettingsPageStyle())
+        .autocorrectionDisabled()
+        .onChange(of: server) { _, _ in status = nil }
+        .onDisappear { testTask?.cancel() }
+    }
+    private func test() {
+        guard let endpoint = try? server.endpoint() else { return }
+        busy = true; status = nil
+        testTask?.cancel()
+        testTask = Task {
+            defer { busy = false }
+            do {
+                _ = try await DandanplayClient.search("Lucent", server: endpoint)
+                try Task.checkCancellation()
+                status = "连接成功，搜索接口兼容。"
+            } catch {
+                guard !Task.isCancelled else { return }
+                // Do not echo a credential-bearing API URL from an underlying URL error.
+                status = DanmakuError.message(for: error)
+            }
         }
     }
 }

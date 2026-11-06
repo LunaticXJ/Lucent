@@ -4907,28 +4907,6 @@
         }
       }
     },
-    "选填（/dav）": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选填（/dav）"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Optional (/dav)"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "選填（/dav）"
-          }
-        }
-      }
-    },
     "必填，也可从下方选择": {
       "localizations": {
         "zh-Hans": {
@@ -5430,7 +5408,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "服務器名稱"
+            "value": "伺服器名稱"
           }
         }
       }
@@ -17081,6 +17059,732 @@
           "stringUnit": {
             "state": "translated",
             "value": "開啟後，行動網路播放不再詢問；關閉後播放前會詢問。本機檔案和已下載影片不受影響。"
+          }
+        }
+      }
+    },
+    "第%lld季·第%lld集": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "S%lld · E%lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第%lld季·第%lld集"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第%lld季·第%lld集"
+          }
+        }
+      }
+    },
+    "现在": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Present"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "现在"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在"
+          }
+        }
+      }
+    },
+    "配置媒体库": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure Media Library"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置媒体库"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置媒體庫"
+          }
+        }
+      }
+    },
+    "尚未导入文件源": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No File Sources Imported"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未导入文件源"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未匯入檔案來源"
+          }
+        }
+      }
+    },
+    "通用": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一般"
+          }
+        }
+      }
+    },
+    "添加文件源": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add File Source"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加文件源"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入檔案來源"
+          }
+        }
+      }
+    },
+    "选填（默认 /）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optional (default /)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选填（默认 /）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選填（預設 /）"
+          }
+        }
+      }
+    },
+    "空空如也": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing Here Yet"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空空如也"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空空如也"
+          }
+        }
+      }
+    },
+    "暂无收藏": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无收藏"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Favorites"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫無收藏"
+          }
+        }
+      }
+    },
+    "在内容详情页添加收藏后，会显示在这里。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在内容详情页添加收藏后，会显示在这里。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add favorites from content details to see them here."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在內容詳情頁加入收藏後，會顯示在這裡。"
+          }
+        }
+      }
+    },
+    "iCloud 数据同步": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 数据同步"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud Data Sync"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 資料同步"
+          }
+        }
+      }
+    },
+    "开启后同步收藏、聚合媒体库观看记录、片源与用户配置。影音服务器观看进度仍与服务器同步。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后同步收藏、聚合媒体库观看记录、片源与用户配置。影音服务器观看进度仍与服务器同步。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync favorites, aggregate library watch history, sources, and preferences. Media server playback progress continues to sync with the server."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟後同步收藏、聚合媒體庫觀看記錄、片源與使用者設定。影音伺服器觀看進度仍與伺服器同步。"
+          }
+        }
+      }
+    },
+    "更多设置": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多设置"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More Settings"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多設定"
+          }
+        }
+      }
+    },
+    "画面大小": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画面大小"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Picture Size"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "畫面大小"
+          }
+        }
+      }
+    },
+    "拉伸全屏": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拉伸全屏"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stretch to Fill"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拉伸全螢幕"
+          }
+        }
+      }
+    },
+    "裁切全屏": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裁切全屏"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crop to Fill"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裁切全螢幕"
+          }
+        }
+      }
+    },
+    "拉伸画面填满屏幕，不保留片源比例。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拉伸画面填满屏幕，不保留片源比例。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stretch the picture to fill the screen without preserving its aspect ratio."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拉伸畫面填滿螢幕，不保留片源比例。"
+          }
+        }
+      }
+    },
+    "自定义弹幕 API": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自定义弹幕 API"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Danmaku API"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自訂彈幕 API"
+          }
+        }
+      }
+    },
+    "尚未添加弹幕服务器": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未添加弹幕服务器"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No danmaku servers added"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未新增彈幕伺服器"
+          }
+        }
+      }
+    },
+    "添加服务器": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加服务器"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Server"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增伺服器"
+          }
+        }
+      }
+    },
+    "弹幕服务器": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "弹幕服务器"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Danmaku Server"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "彈幕伺服器"
+          }
+        }
+      }
+    },
+    "检测连接": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检测连接"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test Connection"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "測試連線"
+          }
+        }
+      }
+    },
+    "删除服务器": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除服务器"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Server"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除伺服器"
+          }
+        }
+      }
+    },
+    "在线匹配": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在线匹配"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online Matching"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "線上配對"
+          }
+        }
+      }
+    },
+    "连接成功，搜索接口兼容。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接成功，搜索接口兼容。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected. The search API is compatible."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連線成功，搜尋介面相容。"
+          }
+        }
+      }
+    },
+    "连接失败，请检查服务器地址和网络。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接失败，请检查服务器地址和网络。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection failed. Check the server address and network."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連線失敗，請檢查伺服器地址和網路。"
+          }
+        }
+      }
+    },
+    "仅填写 API 基础地址，不需要填写搜索或弹幕接口路径。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅填写 API 基础地址，不需要填写搜索或弹幕接口路径。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter the API base address without a search or comment endpoint."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅填寫 API 基礎地址，不需要填寫搜尋或彈幕介面路徑。"
+          }
+        }
+      }
+    },
+    "检测会验证搜索接口是否兼容；实际弹幕以播放时的匹配和下载结果为准。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检测会验证搜索接口是否兼容；实际弹幕以播放时的匹配和下载结果为准。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This test checks search API compatibility. Matching and downloading comments are checked during playback."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "測試會驗證搜尋介面是否相容；實際彈幕以播放時的配對和下載結果為準。"
+          }
+        }
+      }
+    },
+    "支持兼容弹弹play协议的 API。可填写服务器根地址或以 /api/v2 结尾的地址，并保留服务提供的鉴权路径。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支持兼容弹弹play协议的 API。可填写服务器根地址或以 /api/v2 结尾的地址，并保留服务提供的鉴权路径。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supports APIs compatible with the Dandanplay protocol. Enter a server root or an address ending in /api/v2, including any authentication path provided by the service."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支援相容彈彈play協定的 API。可填寫伺服器根地址或以 /api/v2 結尾的地址，並保留服務提供的驗證路徑。"
+          }
+        }
+      }
+    },
+    "请输入名称和有效的 HTTP 或 HTTPS API 地址。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入名称和有效的 HTTP 或 HTTPS API 地址。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a name and a valid HTTP or HTTPS API address."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請輸入名稱和有效的 HTTP 或 HTTPS API 地址。"
+          }
+        }
+      }
+    },
+    "服务器未返回兼容弹弹play协议的数据，请检查 API 地址。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器未返回兼容弹弹play协议的数据，请检查 API 地址。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server did not return Dandanplay-compatible data. Check the API address."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "伺服器未回傳相容彈彈play協定的資料，請檢查 API 地址。"
+          }
+        }
+      }
+    },
+    "请先在设置的弹幕服务中填写弹弹play App ID 和 Secret，或选择自定义弹幕 API。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先在设置的弹幕服务中填写弹弹play App ID 和 Secret，或选择自定义弹幕 API。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter your Dandanplay App ID and Secret in Danmaku settings, or select a custom API."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請先在設定的彈幕服務中填寫彈彈play App ID 和 Secret，或選擇自訂彈幕 API。"
+          }
+        }
+      }
+    },
+    "系统阻止了此 HTTP 连接，请使用 HTTPS 地址。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统阻止了此 HTTP 连接，请使用 HTTPS 地址。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The system blocked this HTTP connection. Use an HTTPS address."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系統阻止了此 HTTP 連線，請使用 HTTPS 地址。"
           }
         }
       }

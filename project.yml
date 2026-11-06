@@ -55,7 +55,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源。
+        NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源和弹幕服务器。
         NSBonjourServices: [_smb._tcp]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -93,7 +93,7 @@ targets:
         CFBundleDisplayName: Lucent
         UIBackgroundModes: [audio]
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源。
+        NSLocalNetworkUsageDescription: Lucent 需要访问你添加的局域网媒体片源和弹幕服务器。
         NSBonjourServices: [_smb._tcp]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -130,7 +130,7 @@ targets:
         CFBundleDisplayName: Lucent
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSBonjourServices: [_smb._tcp]
-        NSLocalNetworkUsageDescription: Lucent 需要发现和访问你添加的局域网媒体片源。
+        NSLocalNetworkUsageDescription: Lucent 需要发现和访问你添加的局域网媒体片源和弹幕服务器。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     entitlements:

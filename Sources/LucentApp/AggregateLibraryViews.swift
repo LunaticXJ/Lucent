@@ -4,6 +4,7 @@ struct AggregateLibraryOverview: View {
     @EnvironmentObject private var library: LibraryStore
     let manageStorage: () -> Void
     let importSource: () -> Void
+    var onNavigationChange: (Bool) -> Void = { _ in }
     @State private var browsing: LibraryFileSource?
     @State private var renaming: LibraryFileSource?
     @State private var name = ""
@@ -18,13 +19,7 @@ struct AggregateLibraryOverview: View {
                 Button(action: importSource) { Label("导入目录", systemImage: "folder.badge.plus").font(.subheadline) }
             }
             if library.fileSources.isEmpty {
-                ContentUnavailableView {
-                    Label("从目录建立媒体库", systemImage: "folder.badge.plus")
-                } description: {
-                    Text(LocalizedStringKey(library.libraryStorages.isEmpty ? "先连接存储，再选择要加入的目录。" : "从存储中选择目录，扫描后即可在首页浏览。"))
-                } actions: {
-                    Button(library.libraryStorages.isEmpty ? "添加存储" : "选择目录", action: manageStorage).buttonStyle(.bordered)
-                }
+                ContentUnavailableView("尚未导入文件源", systemImage: "folder")
             } else {
                 VStack(spacing: 0) {
                     ForEach(library.fileSources) { source in
@@ -39,12 +34,23 @@ struct AggregateLibraryOverview: View {
                 .clipShape(RoundedRectangle(cornerRadius: 22))
             }
         }
+        #if !os(macOS)
+        .onChange(of: browsing != nil) { _, value in onNavigationChange(value) }
+        .navigationDestination(isPresented: Binding(get: { browsing != nil }, set: { if !$0 { browsing = nil } })) {
+            if let source = browsing {
+                StorageDirectoryBrowser(storageID: source.storageID,
+                    root: .init(identifier: source.directoryID, name: source.name, path: source.path, isDirectory: true))
+                    .environmentObject(library).lucentSecondaryPage()
+            }
+        }
+        #else
         .sheet(item: $browsing) { source in
             NavigationStack {
                 StorageDirectoryBrowser(storageID: source.storageID,
                     root: .init(identifier: source.directoryID, name: source.name, path: source.path, isDirectory: true))
             }.environmentObject(library)
         }
+        #endif
         .alert("重命名文件源", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("名称", text: $name)
             Button("保存") { if let source = renaming { library.renameFileSource(id: source.id, name: name) }; renaming = nil }
@@ -135,6 +141,7 @@ struct StorageManagementView: View {
     @Environment(\.dismiss) private var dismiss
     let add: () -> Void
     let edit: (UUID) -> Void
+    var onBack: (() -> Void)? = nil
     @State private var browsing: LibraryStorage?
     @State private var renaming: LibraryStorage?
     @State private var removing: LibraryStorage?
@@ -149,6 +156,17 @@ struct StorageManagementView: View {
                 LucentStateView(title: "尚未添加存储", symbol: "externaldrive.badge.plus", message: "添加本地文件夹、网络共享或网盘后选择目录。")
             }
         }
+        #if !os(macOS)
+        .lucentCollectionChrome(title: "存储") {
+            if browsing == nil { Button("添加存储", systemImage: "plus", action: add) }
+        }
+        .navigationDestination(isPresented: Binding(get: { browsing != nil }, set: { if !$0 { browsing = nil } })) {
+            if let storage = browsing {
+                StorageDirectoryBrowser(storageID: storage.id, root: .root)
+                    .environmentObject(library).lucentSecondaryPage()
+            }
+        }
+        #else
         .navigationTitle("存储").lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
@@ -157,6 +175,7 @@ struct StorageManagementView: View {
         .sheet(item: $browsing) { storage in
             NavigationStack { StorageDirectoryBrowser(storageID: storage.id, root: .root) }.environmentObject(library)
         }
+        #endif
         .alert("重命名存储", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("名称", text: $name)
             Button("保存") { if let storage = renaming { library.renameLibraryStorage(storage.id, name: name) }; renaming = nil }
@@ -197,6 +216,15 @@ struct StorageManagementView: View {
     }
 }
 
+fileprivate final class StorageDirectorySelection: ObservableObject {
+    @Published var selected: [StorageDirectory] = []
+    @Published var selectionMode = false
+}
+fileprivate struct StorageBreadcrumb {
+    let title: String
+    let goBack: () -> Void
+}
+
 struct StorageDirectoryBrowser: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
@@ -204,8 +232,24 @@ struct StorageDirectoryBrowser: View {
     let root: StorageDirectory
     @State private var trail: [StorageDirectory] = []
     @State private var entries: [StorageDirectory] = []
-    @State private var selected: [StorageDirectory] = []
-    @State private var selectionMode = false
+    @StateObject private var selection: StorageDirectorySelection
+    private let ancestors: [StorageBreadcrumb]
+    @State private var child: StorageDirectory?
+    private var selected: [StorageDirectory] {
+        get { selection.selected }
+        nonmutating set { selection.selected = newValue }
+    }
+    private var selectionMode: Bool {
+        get { selection.selectionMode }
+        nonmutating set { selection.selectionMode = newValue }
+    }
+    fileprivate init(storageID: UUID, root: StorageDirectory,
+                     selection: StorageDirectorySelection? = nil, ancestors: [StorageBreadcrumb] = []) {
+        self.storageID = storageID
+        self.root = root
+        self.ancestors = ancestors
+        _selection = StateObject(wrappedValue: selection ?? StorageDirectorySelection())
+    }
     @State private var loading = false
     @State private var message: String?
     @State private var showingReview = false
@@ -235,12 +279,21 @@ struct StorageDirectoryBrowser: View {
             }
         }
         .background(LucentUI.page)
+        #if !os(macOS)
+        .lucentCollectionChrome(title: trail.isEmpty ? (root.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "存储") : root.name) : current.name) {
+            if child == nil { Button(selectionMode ? "取消选择" : "选择目录") {
+                selectionMode.toggle()
+                if !selectionMode { selected = [] }
+            }.font(.subheadline) }
+        }
+        #else
         .navigationTitle(trail.isEmpty ? (root.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "存储") : root.name) : current.name)
         .lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
             ToolbarItem(placement: .primaryAction) { Button(selectionMode ? "取消选择" : "选择目录") { selectionMode.toggle(); if !selectionMode { selected = [] } } }
         }
+        #endif
         .safeAreaInset(edge: .bottom) {
             if selectionMode {
                 HStack {
@@ -253,7 +306,23 @@ struct StorageDirectoryBrowser: View {
                 }.padding(16).modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))).padding(12)
             }
         }
+        #if !os(macOS)
+        .navigationDestination(isPresented: Binding(get: { child != nil }, set: { if !$0 { child = nil } })) {
+            if let child {
+                StorageDirectoryBrowser(storageID: storageID, root: child, selection: selection,
+                    ancestors: ancestors + [.init(title: root.path.isEmpty ? "根目录" : root.name, goBack: { self.child = nil })])
+                    .environmentObject(library).lucentSecondaryPage()
+            }
+        }
+        #endif
         .task(id: current.identifier) { await load() }
+        #if os(tvOS)
+        .navigationDestination(isPresented: $showingReview) {
+            DirectoryImportReview(storageID: storageID, directories: selected) {
+                showingReview = false; selected = []; selectionMode = false
+            }.environmentObject(library)
+        }
+        #else
         .sheet(isPresented: $showingReview) {
             NavigationStack {
                 DirectoryImportReview(storageID: storageID, directories: selected) {
@@ -261,6 +330,7 @@ struct StorageDirectoryBrowser: View {
                 }
             }.environmentObject(library)
         }
+        #endif
         .discPlaybackCover(item: $playing) { item in
             PlaybackView(item: item).environmentObject(library)
         }
@@ -268,11 +338,19 @@ struct StorageDirectoryBrowser: View {
     private var breadcrumbs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                #if !os(macOS)
+                ForEach(Array(ancestors.enumerated()), id: \.offset) { _, ancestor in
+                    Button(ancestor.title, action: ancestor.goBack)
+                    Image(systemName: "chevron.right").font(.caption2)
+                }
+                Text(root.path.isEmpty ? "根目录" : root.name)
+                #else
                 Button(root.path.isEmpty ? "根目录" : root.name) { trail = [] }
                 ForEach(Array(trail.enumerated()), id: \.element.id) { index, directory in
                     Image(systemName: "chevron.right").font(.caption2)
                     Button(directory.name) { trail = Array(trail.prefix(index + 1)) }
                 }
+                #endif
             }.font(.subheadline).foregroundStyle(.secondary).padding(16)
         }
     }
@@ -284,13 +362,19 @@ struct StorageDirectoryBrowser: View {
                 Button { toggle(entry) } label: {
                     Image(systemName: covered ? "checkmark.circle.fill" : "circle").font(.title3)
                         .foregroundStyle(existing == nil ? Color.primary : Color.secondary)
-                        .frame(width: 30, height: 40)
-                }.buttonStyle(.plain).disabled(existing != nil)
+                        .frame(width: LucentUI.controlSize == 72 ? 64 : 30, height: LucentUI.controlSize == 72 ? 72 : 40)
+                }.lucentFormActionStyle().disabled(existing != nil)
                     .accessibilityLabel("选择\(entry.name)")
             }
             Button {
                 if currentRow { if selectionMode { toggle(entry) } }
-                else { trail.append(entry) }
+                else {
+                    #if !os(macOS)
+                    child = entry
+                    #else
+                    trail.append(entry)
+                    #endif
+                }
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "folder").font(.title3)
@@ -301,7 +385,7 @@ struct StorageDirectoryBrowser: View {
                     Spacer()
                     if !currentRow { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
                 }.contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            }.lucentFormActionStyle()
         }
     }
     private func toggle(_ entry: StorageDirectory) {

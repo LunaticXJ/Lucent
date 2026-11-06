@@ -2,13 +2,30 @@ import AVKit
 import SwiftUI
 
 enum VideoScaleMode: String, CaseIterable {
-    case fit, fill
+    // Keep the persisted fill value for the existing aspect-preserving crop mode.
+    case fit, stretch, fill
 
-    var title: String { self == .fit ? "等比适应" : "铺满屏幕" }
-    var explanation: String {
-        self == .fit ? "显示完整画面，保留片源比例。" : "等比放大填满屏幕，裁剪超出屏幕的边缘。"
+    var title: String {
+        switch self {
+        case .fit: "等比适应"
+        case .stretch: "拉伸全屏"
+        case .fill: "裁切全屏"
+        }
     }
-    var videoGravity: AVLayerVideoGravity { self == .fit ? .resizeAspect : .resizeAspectFill }
+    var explanation: String {
+        switch self {
+        case .fit: "显示完整画面，保留片源比例。"
+        case .stretch: "拉伸画面填满屏幕，不保留片源比例。"
+        case .fill: "等比放大填满屏幕，裁剪超出屏幕的边缘。"
+        }
+    }
+    var videoGravity: AVLayerVideoGravity {
+        switch self {
+        case .fit: .resizeAspect
+        case .stretch: .resize
+        case .fill: .resizeAspectFill
+        }
+    }
 }
 
 /// Reads the asset already opened by AVPlayer. No second URL probe/demuxer is

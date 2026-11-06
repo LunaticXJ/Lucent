@@ -1,8 +1,8 @@
 import Foundation
 
-struct JellyfinItem: Decodable, Sendable {
-    struct MediaSource: Decodable, Sendable {
-        struct Stream: Decodable, Sendable {
+struct JellyfinItem: Codable, Sendable {
+    struct MediaSource: Codable, Sendable {
+        struct Stream: Codable, Sendable {
             let index: Int?
             let type: String?
             let language: String?
@@ -48,11 +48,11 @@ struct JellyfinItem: Decodable, Sendable {
             case mediaStreams = "MediaStreams"
         }
     }
-    struct ImageTags: Decodable, Sendable {
+    struct ImageTags: Codable, Sendable {
         let primary: String?
         enum CodingKeys: String, CodingKey { case primary = "Primary" }
     }
-    struct Person: Decodable, Sendable, Identifiable {
+    struct Person: Codable, Sendable, Identifiable {
         let id: String?
         let name: String
         let role: String?
@@ -62,7 +62,7 @@ struct JellyfinItem: Decodable, Sendable {
             case id = "Id", name = "Name", role = "Role", primaryImageTag = "PrimaryImageTag"
         }
     }
-    struct UserData: Decodable, Sendable {
+    struct UserData: Codable, Sendable {
         let played: Bool?
         let isFavorite: Bool?
         let playbackPositionTicks: Int64?
@@ -90,6 +90,7 @@ struct JellyfinItem: Decodable, Sendable {
     let indexNumber: Int?
     let productionYear: Int?
     let premiereDate: String?
+    let status: String?
     let endDate: String?
     let communityRating: Double?
     let runTimeTicks: Int64?
@@ -118,6 +119,7 @@ struct JellyfinItem: Decodable, Sendable {
          indexNumber: Int? = nil,
          productionYear: Int? = nil,
          premiereDate: String? = nil,
+         status: String? = nil,
          endDate: String? = nil,
          communityRating: Double? = nil,
          runTimeTicks: Int64? = nil,
@@ -145,6 +147,7 @@ struct JellyfinItem: Decodable, Sendable {
         self.indexNumber = indexNumber
         self.productionYear = productionYear
         self.premiereDate = premiereDate
+        self.status = status
         self.endDate = endDate
         self.communityRating = communityRating
         self.runTimeTicks = runTimeTicks
@@ -170,6 +173,7 @@ struct JellyfinItem: Decodable, Sendable {
         case indexNumber = "IndexNumber"
         case productionYear = "ProductionYear"
         case premiereDate = "PremiereDate"
+        case status = "Status"
         case endDate = "EndDate"
         case communityRating = "CommunityRating"
         case runTimeTicks = "RunTimeTicks"
@@ -284,6 +288,32 @@ enum JellyfinClient {
         ]
         request.url = components.url
         return try JSONDecoder().decode(Page.self, from: await fetch(request)).items
+    }
+
+    /// Browse an actual folder, season or series without flattening the entire library.
+    static func directory(source: JellyfinSource, token: String, parentID: String?,
+                          start: Int = 0, limit: Int = 60) async throws -> (items: [JellyfinItem], total: Int) {
+        let request = try directoryRequest(source: source, token: token, parentID: parentID, start: start, limit: limit)
+        let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
+        return (page.items, page.totalRecordCount)
+    }
+    static func directoryRequest(source: JellyfinSource, token: String, parentID: String?,
+                                 start: Int = 0, limit: Int = 60) throws -> URLRequest {
+        var request = try makeRequest(baseAddress: source.baseAddress, path: "Items", token: token)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            .init(name: "UserId", value: source.userID),
+            .init(name: "Recursive", value: parentID == nil ? "true" : "false"),
+            .init(name: "StartIndex", value: String(start)), .init(name: "Limit", value: String(limit)),
+            .init(name: "SortBy", value: parentID == nil ? "DateCreated" : "SortName"),
+            .init(name: "SortOrder", value: parentID == nil ? "Descending" : "Ascending"),
+            .init(name: "EnableUserData", value: "true"),
+            .init(name: "Fields", value: "Overview,ProductionYear,CommunityRating")
+        ]
+        if let parentID { components.queryItems?.append(.init(name: "ParentId", value: parentID)) }
+        else { components.queryItems?.append(.init(name: "IncludeItemTypes", value: "Movie,Series")) }
+        request.url = components.url
+        return request
     }
 
     static func mediaCounts(source: JellyfinSource, token: String) async throws -> (movies: Int, series: Int) {
@@ -443,4 +473,9 @@ extension JellyfinItem.MediaSource {
                                      defaultStyledSubtitle: subtitles.contains { $0.isDefault == true },
                                      audioCodec: audio?.codec, dynamicRange: range, resolution: resolution)
     }
+}
+
+extension JellyfinItem {
+    var displayYear: Int? { [productionYear, premiereDate.flatMap { Int($0.prefix(4)) }].compactMap { $0 }.first { $0 > 0 } }
+    var displayYearText: String? { CatalogYearLabel.text(start: displayYear, isSeries: type == "Series", status: status, endDate: endDate) }
 }

@@ -6,7 +6,8 @@ from pathlib import Path
 import subprocess, tempfile
 root = Path(__file__).resolve().parents[1]
 def read(name): return (root/'Sources/LucentApp'/name).read_text()
-jelly = read('JellyfinClient.swift').split('enum JellyfinClient {')[0]
+jelly_source = read('JellyfinClient.swift')
+jelly = jelly_source.split('enum JellyfinClient {')[0] + jelly_source[jelly_source.index('extension JellyfinItem {'):]
 diag = read('PlaybackDiagnostics.swift')
 features = diag[diag.index('struct PlaybackMediaFeatures:'):diag.index('enum MediaInfoLabels {')]
 collection = read('LocalCatalogCollectionView.swift')

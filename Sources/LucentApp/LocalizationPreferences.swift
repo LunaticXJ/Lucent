@@ -147,3 +147,87 @@ extension String {
         String(format: key.lucentLocalized, locale: LocalizationPreferences.current.displayLocale, arguments: arguments)
     }
 }
+
+/// Presentation only: track ids and selection order are never changed.
+/// Like IINA, use the container language and Foundation's localized language names.
+/// Filename inference is a fallback for poorly tagged subtitle tracks.
+enum SubtitleLanguageDisplay {
+    private nonisolated(unsafe) static let cache = NSCache<NSString, NSString>()
+    private static let aliases: [String: String] = {
+        var result: [String: String] = [:]
+        let english = Locale(identifier: "en")
+        for code in Locale.LanguageCode.isoLanguageCodes {
+            let identifier = code.identifier
+            result[identifier.lowercased()] = identifier
+            if let name = english.localizedString(forLanguageCode: identifier) {
+                result[name.lowercased()] = identifier
+            }
+        }
+        // Bibliographic aliases and common subtitle filename conventions.
+        for (code, values) in [
+            ("zh", ["chi", "zho", "chinese", "zhongwen"]),
+            ("en", ["eng", "english"]), ("ja", ["jpn", "japanese"]),
+            ("ko", ["kor", "korean"]), ("fr", ["fre", "fra", "french"]),
+            ("de", ["ger", "deu", "german"]), ("es", ["spa", "spanish"]),
+            ("pt", ["por", "portuguese"]), ("ru", ["rus", "russian"]),
+            ("zh-Hans", ["chs", "sc", "zh-cn", "zh-hans"]),
+            ("zh-Hant", ["cht", "tc", "zh-tw", "zh-hk", "zh-hant"])
+        ] { for value in values { result[value] = code } }
+        return result
+    }()
+
+    static func languages(in name: String, declared: String? = nil) -> [String] {
+        let text = name.lowercased().replacingOccurrences(of: "_", with: "-")
+        let tokens = text.components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-")).inverted)
+        var inferred: [String] = []
+        let simplified = ["简中", "简体", "簡中", "簡體", "简英", "簡英", "简日", "簡日", "简繁", "簡繁", "simplified"]
+        let traditional = ["繁中", "繁体", "繁體", "繁英", "繁日", "简繁", "簡繁", "traditional"]
+        if simplified.contains(where: text.contains) { inferred.append("zh-Hans") }
+        if traditional.contains(where: text.contains) { inferred.append("zh-Hant") }
+        if ["中英", "简英", "簡英", "繁英"].contains(where: text.contains) { inferred.append("en") }
+        if ["中日", "简日", "簡日", "繁日"].contains(where: text.contains) { inferred.append("ja") }
+        if inferred.isEmpty && ["中文", "国语", "國語", "普通话", "普通話"].contains(where: text.contains) { inferred.append("zh") }
+        let formatTokens: Set<String> = ["ass", "ssa", "srt", "sub", "sup", "smi", "vtt", "ttml", "pgs", "sdh", "cc"]
+        for token in tokens where !formatTokens.contains(token) {
+            if let code = aliases[token] { inferred.append(code) }
+        }
+        var resolved: [String] = []
+        if let declared = declared?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !["", "und", "unk", "unknown", "mul", "zxx"].contains(declared) {
+            let tag = declared.replacingOccurrences(of: "_", with: "-")
+            let primary = String(tag.split(separator: "-").first ?? "")
+            if let canonical = aliases[tag] ?? aliases[primary] {
+                // A generic Chinese tag can be refined by an explicit script in its title.
+                if canonical == "zh", inferred.contains(where: { $0.hasPrefix("zh-") }) {
+                    resolved = inferred.filter { $0.hasPrefix("zh-") }
+                } else { resolved = [tag.contains("-") ? (aliases[tag] ?? tag) : canonical] }
+            }
+        }
+        if resolved.isEmpty { resolved = inferred }
+        // Explicit bilingual titles retain both languages even when the container has one tag.
+        if ["中英", "简英", "簡英", "繁英", "中日", "简日", "簡日", "繁日"].contains(where: text.contains) {
+            resolved += inferred
+        }
+        var seen = Set<String>()
+        let hasScript = resolved.contains { $0.hasPrefix("zh-") }
+        return resolved.filter { !(hasScript && $0 == "zh") && seen.insert($0).inserted }
+    }
+
+    static func title(_ original: String, language: String? = nil,
+                      locale: Locale = LocalizationPreferences.current.displayLocale) -> String {
+        let key = "\(locale.identifier)|\(language ?? "")|\(original)" as NSString
+        if let cached = cache.object(forKey: key) { return cached as String }
+        let codes = languages(in: original, declared: language)
+        let names = codes.compactMap { locale.localizedString(forIdentifier: $0) }
+        guard !names.isEmpty else { return original }
+        let label = names.joined(separator: " / ")
+        // Formatting can be called again by a view after the engine already localized it.
+        let result: String
+        if original.hasPrefix(label) { result = original }
+        else if aliases[original.lowercased()] != nil { result = label }
+        else { result = label + " · " + original }
+        cache.countLimit = 256
+        cache.setObject(result as NSString, forKey: key)
+        return result
+    }
+}

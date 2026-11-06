@@ -64,6 +64,7 @@ private struct BrowsingFileSource: Identifiable {
 }
 
 struct LibraryView: View {
+
     private enum SortOrder { case newest, title }
     private enum MediaFilter { case all, unwatched, favorites }
     #if os(iOS)
@@ -86,6 +87,7 @@ struct LibraryView: View {
     @State private var checkingServers: Set<UUID> = []
     private enum SourceAddition { case folder, smb, webDAV, cloud, dlna, emby, fnos, zspace, ugreen, jellyfin, plex, importDirectories }
     @State private var showStorageManager = false
+    @State private var mobileStorageBrowsing = false
     @State private var pendingStorageEdit: UUID?
     @State private var addStorageAfterDismiss = false
     private struct SourceRemoval: Identifiable {
@@ -398,12 +400,6 @@ struct LibraryView: View {
             .sheet(isPresented: $showSMB) { smbSheet }
             #if os(iOS)
             .sheet(isPresented: $showSourceChooser, onDismiss: performSourceAddition) { sourceChooser }
-            .sheet(isPresented: $showStorageManager, onDismiss: finishStorageManagement) {
-                NavigationStack {
-                    StorageManagementView(add: { addStorageAfterDismiss = true; showStorageManager = false },
-                        edit: { pendingStorageEdit = $0; showStorageManager = false })
-                }.environmentObject(library).tint(.gray)
-            }
             .confirmationDialog("移除 \(pendingSourceRemoval?.name ?? "片源")？",
                                 isPresented: Binding(get: { pendingSourceRemoval != nil },
                                                      set: { if !$0 { pendingSourceRemoval = nil } }),
@@ -414,17 +410,6 @@ struct LibraryView: View {
                 Text("会移除该片源的本机配置与关联媒体记录，存储中的原始文件不会删除。")
             }
             .sheet(item: $editingFolder) { source in folderEditSheet(source) }
-            .sheet(isPresented: Binding(get: { browsingFolderID != nil }, set: { if !$0 { browsingFolderID = nil } })) {
-                if let id = browsingFolderID {
-                    NavigationStack { MobileFolderBrowserView(sourceID: id).environmentObject(library) }
-                }
-            }
-            .sheet(item: $browsingFileSource) { source in
-                NavigationStack {
-                    MobileScannedSourceBrowserView(sourceID: source.id, sourceName: source.name)
-                        .environmentObject(library)
-                }
-            }
             #endif
             .sheet(item: $editingSMB) { source in smbCredentialsSheet(source) }
             #if os(iOS)
@@ -486,6 +471,7 @@ struct LibraryView: View {
                 } else if catalog.hasPrefix("emby:") {
                     MobileHomeView(showSources: { mobileTab = .sources },
                                    preferredSourceID: UUID(uuidString: String(catalog.dropFirst(5))),
+                                   onCollectionChange: { mobileLibraryCollectionPresented = $0 },
                                    refreshID: homeRefreshID,
                                    showCacheSettings: { showCacheSettings = true },
                                    detailPresented: $mobileDetailPresented,
@@ -496,9 +482,21 @@ struct LibraryView: View {
                 }
             }
             .environmentObject(library)
-            .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .topLeading) {
+            .toolbar(.visible, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar(mobileDetailPresented || mobileLibraryCollectionPresented ? .hidden : .visible, for: .tabBar)
+            .toolbar {
                 if mobileTab == .home {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink {
+                            LucentFavoritesView().environmentObject(library)
+                                .lucentSecondaryPage()
+                        } label: {
+                            Label("收藏", systemImage: "heart")
+                                .labelStyle(.iconOnly)
+                        }
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
                     Menu {
                         Picker("首页内容", selection: Binding(get: { effectiveHomeCatalog },
                                                         set: { selectedHomeCatalog = $0 })) {
@@ -523,19 +521,17 @@ struct LibraryView: View {
                             Button("刷新首页", systemImage: "arrow.clockwise") { homeRefreshID = UUID() }
                         }
                     } label: {
-                        HStack(spacing: 7) {
+                        if homeCatalogKind == "library" {
+                            Label("聚合媒体库", systemImage: "rectangle.stack")
+                                .labelStyle(.iconOnly)
+                        } else {
                             ServerBrandIcon(kind: homeCatalogKind)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Color.primary)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .modifier(LucentGlass(shape: Capsule()))
                     }
+                    .buttonStyle(.automatic)
+                    .menuIndicator(.hidden)
                     .accessibilityLabel("首页片源：\(homeCatalogTitle)")
-                    .padding(.leading, 20)
-                    .padding(.top, 8)
+                    }
                 }
             }
         }
@@ -608,7 +604,8 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 20) {
             MobileSegmentedTabs(options: [("影视服务器", 1), ("聚合媒体库", 0)], selection: $mobileSourceKind)
             if mobileSourceKind == 0 {
-                AggregateLibraryOverview(manageStorage: { showStorageManager = true }, importSource: { showStorageManager = true })
+                AggregateLibraryOverview(manageStorage: { showStorageManager = true }, importSource: { showStorageManager = true },
+                                         onNavigationChange: { mobileStorageBrowsing = $0 })
                     .environmentObject(library)
             } else {
                 serverGrid
@@ -630,8 +627,7 @@ struct LibraryView: View {
 
     private var sourceChooser: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+            Form {
                     if sourceChooserScope == .servers {
                         additionSection("影视服务器", detail: "直接使用服务器中的海报、分类和观看记录") {
                             additionRow("Emby", detail: "账户密码或访问令牌", brand: "EmbyBrand", icon: "server.rack", choice: .emby)
@@ -643,7 +639,7 @@ struct LibraryView: View {
                         }
                     }
                     if sourceChooserScope == .library {
-                        additionSection("文件源", detail: "从已连接的存储选择目录，独立命名并扫描入库") {
+                        additionSection("添加文件源", detail: "从已连接的存储选择目录，独立命名并扫描入库") {
                             additionRow("从存储导入目录", detail: "支持跨目录多选与批量命名", icon: "folder.badge.plus", choice: .importDirectories)
                         }
                     }
@@ -658,10 +654,9 @@ struct LibraryView: View {
                             additionRow("DLNA", detail: "发现或手动连接媒体设备", icon: "dot.radiowaves.left.and.right", choice: .dlna)
                         }
                     }
-                }.padding(LucentUI.pageInset)
             }
             .background(LucentUI.page)
-            .navigationTitle(LocalizedStringKey(sourceChooserScope == .servers ? "添加影视服务器" : sourceChooserScope == .storage ? "添加存储" : "添加片源")).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(LocalizedStringKey(sourceChooserScope == .servers ? "添加影视服务器" : sourceChooserScope == .storage ? "添加存储" : "配置媒体库")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showSourceChooser = false } } }
         }
         .tint(.gray)
@@ -669,12 +664,10 @@ struct LibraryView: View {
 
     private func additionSection<Content: View>(_ title: String, detail: String,
                                                 @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(LocalizedStringKey(title)).font(.headline)
-            Text(LocalizedStringKey(detail)).font(.caption).foregroundStyle(.secondary)
-            VStack(spacing: 2, content: content)
-                .padding(6)
-                .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: 22))
+        Section(content: content) {
+            Text(LocalizedStringKey(title))
+        } footer: {
+            Text(LocalizedStringKey(detail))
         }
     }
 
@@ -1238,11 +1231,38 @@ struct LibraryView: View {
                         .environmentObject(library)
                     #endif
                 }
-                .frame(maxWidth: 1100, alignment: .leading)
+                .frame(maxWidth: LucentUI.sourceContentWidth, alignment: .leading)
                 .padding(24)
                 .frame(maxWidth: .infinity)
             }
             .navigationTitle(sourcePageTitle)
+            #if os(iOS)
+            .toolbar(showStorageManager || mobileStorageBrowsing || browsingFolderID != nil || browsingFileSource != nil ? .hidden : .visible, for: .tabBar)
+            .navigationDestination(isPresented: Binding(get: { browsingFolderID != nil }, set: { if !$0 { browsingFolderID = nil } })) {
+                if let id = browsingFolderID {
+                    MobileFolderBrowserView(sourceID: id).environmentObject(library).lucentSecondaryPage()
+                }
+            }
+            .navigationDestination(isPresented: Binding(get: { browsingFileSource != nil }, set: { if !$0 { browsingFileSource = nil } })) {
+                if let source = browsingFileSource {
+                    MobileScannedSourceBrowserView(sourceID: source.id, sourceName: source.name, embedded: true)
+                        .environmentObject(library).lucentSecondaryPage()
+                }
+            }
+            .navigationDestination(isPresented: $showStorageManager) {
+                StorageManagementView(add: {
+                    sourceChooserScope = .storage
+                    showSourceChooser = true
+                }, edit: {
+                    pendingStorageEdit = $0
+                    finishStorageManagement()
+                }, onBack: { withAnimation { showStorageManager = false } })
+                    .environmentObject(library)
+                    .lucentSecondaryPage()
+            }
+            #else
+            .lucentTabRoot()
+            #endif
             #if os(iOS)
             .background(LucentUI.page)
             .refreshable {
@@ -2868,6 +2888,7 @@ private struct MobileScannedSourceBrowserView: View {
     @Environment(\.dismiss) private var dismiss
     let sourceID: UUID
     let sourceName: String
+    var embedded = false
     var directory = ""
     @State private var playingItem: MediaItem?
     @State private var entries: [SourceDirectoryEntry] = []
@@ -2988,7 +3009,7 @@ private struct MobileScannedSourceBrowserView: View {
                 } label: { Image(systemName: "ellipsis") }
                 .accessibilityLabel("目录选项")
             }
-            if directory.isEmpty {
+            if directory.isEmpty && !embedded {
                 ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
             }
         }

@@ -119,6 +119,8 @@ extension MediaItem {
         if let metadata {
             value["ProviderIds"] = ["Tmdb": String(metadata.providerID)]
             value["CommunityRating"] = asSeries ? metadata.rating : (catalogEpisode?.rating ?? metadata.rating)
+            value["Status"] = metadata.seriesStatus
+            value["EndDate"] = metadata.seriesEndDate
             value["ProductionYear"] = metadata.year
             value["Genres"] = metadata.genres
             value["PremiereDate"] = catalogEpisode?.airDate ?? metadata.releaseDate

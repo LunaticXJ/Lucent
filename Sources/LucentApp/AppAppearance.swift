@@ -29,6 +29,7 @@ struct AppAppearance: ViewModifier {
     func body(content: Content) -> some View {
         let theme = AppTheme(rawValue: rawTheme) ?? .system
         content
+            .scrollIndicators(.hidden)
             .environment(\.appTheme, theme)
             .background(Color("AppBackground").ignoresSafeArea())
             #if os(iOS) || os(tvOS)

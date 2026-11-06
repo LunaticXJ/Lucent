@@ -59,7 +59,8 @@ final class LibraryStore: ObservableObject {
     @Published var iCloudSyncEnabled = UserDefaults.standard.bool(forKey: "lucent.iCloudSyncEnabled") {
         didSet {
             UserDefaults.standard.set(iCloudSyncEnabled, forKey: "lucent.iCloudSyncEnabled")
-            scheduleSync()
+            if iCloudSyncEnabled { scheduleSync() }
+            else { syncTask?.cancel() }
         }
     }
     @Published var errorMessage: String?
@@ -89,6 +90,8 @@ final class LibraryStore: ObservableObject {
     private var pausedSMBDownloads: Set<UUID> = []
     private var restoredInterruptedDownloads = false
     private var networkObserver: NSObjectProtocol?
+    private var preferencesObserver: NSObjectProtocol?
+    private var lastUserPreferences: [String: Data] = [:]
     private var userPausedDownloadIDs: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: "lucent.userPausedDownloads") ?? []) }
         set { UserDefaults.standard.set(Array(newValue), forKey: "lucent.userPausedDownloads") }
@@ -173,6 +176,18 @@ final class LibraryStore: ObservableObject {
             items[index].technicalProbeAttemptedAt = nil
         }
         lastNetworkConfiguration = networkConfiguration()
+        lastUserPreferences = CloudUserPreferences.capture()
+        preferencesObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
+                                                                     object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let current = CloudUserPreferences.capture()
+                guard current != self.lastUserPreferences else { return }
+                self.lastUserPreferences = current
+                self.libraryConfigUpdatedAt = Date()
+                self.save()
+            }
+        }
         _ = NetworkUsagePolicy.shared
         networkObserver = NotificationCenter.default.addObserver(forName: NetworkUsagePolicy.changed, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -292,12 +307,14 @@ final class LibraryStore: ObservableObject {
                 items[index].position = state.position
                 items[index].watched = state.watched
                 items[index].favorite = state.favorite
+                items[index].favoriteUpdatedAt = state.favoriteUpdatedAt
                 items[index].lastPlayedAt = state.lastPlayedAt
                 items[index].stateUpdatedAt = state.stateUpdatedAt
             } else {
                 items[index].position = 0
                 items[index].watched = false
                 items[index].favorite = false
+                items[index].favoriteUpdatedAt = nil
                 items[index].lastPlayedAt = nil
                 items[index].stateUpdatedAt = nil
             }
@@ -1063,7 +1080,6 @@ final class LibraryStore: ObservableObject {
                             items[itemIndex].stateUpdatedAt == nil {
                             items[itemIndex].position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
                             items[itemIndex].watched = remote.userData?.played ?? false
-                            items[itemIndex].favorite = remote.userData?.isFavorite ?? false
                             items[itemIndex].stateUpdatedAt = remote.remoteStateDate ?? Date()
                         }
                     } else {
@@ -1073,7 +1089,6 @@ final class LibraryStore: ObservableObject {
                         item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
                         item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
                         item.watched = remote.userData?.played ?? false
-                        item.favorite = remote.userData?.isFavorite ?? false
                         item.stateUpdatedAt = remote.remoteStateDate ?? Date()
                         item.serverSummary = remote.overview
                         item.serverPosterKey = remote.imageTags?.primary
@@ -1111,7 +1126,6 @@ final class LibraryStore: ObservableObject {
         item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
         item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
         item.watched = remote.userData?.played ?? false
-        item.favorite = remote.userData?.isFavorite ?? false
         item.stateUpdatedAt = remote.remoteStateDate ?? Date()
         item.serverSummary = remote.overview
         item.serverPosterKey = remote.imageTags?.primary
@@ -1253,29 +1267,12 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
-    func synchronizeServerHome(sourceID: UUID, emby: Bool) async throws {
-        let cached = items.compactMap { item -> String? in
-            switch item.location {
-            case .embyItem(let id, let remoteID) where emby && id == sourceID: return remoteID
-            case .jellyfinItem(let id, let remoteID) where !emby && id == sourceID: return remoteID
-            default: return nil
-            }
-        }
-        guard !cached.isEmpty else { return }
-        let base: String, userID: String, token: String
-        if emby, let source = embySources.first(where: { $0.id == sourceID }),
-           let value = try KeychainPasswordStore.embyToken(for: sourceID) {
-            base = source.baseAddress; userID = source.userID; token = value
-        } else if !emby, let source = jellyfinSources.first(where: { $0.id == sourceID }),
-                  let value = try KeychainPasswordStore.jellyfinToken(for: sourceID) {
-            base = source.baseAddress; userID = source.userID; token = value
-        } else { throw ServerCatalogSync.Failure.requestFailed }
-        let remote = try await ServerCatalogSync.cachedItems(base: base, userID: userID, token: token, ids: cached)
+    func synchronizeServerHome(sourceID: UUID, emby: Bool, displayedItems: [JellyfinItem]) async throws {
         try Task.checkCancellation()
-        // A connection may have been edited/removed while requests were in flight.
-        guard emby ? embySources.contains(where: { $0.id == sourceID && $0.userID == userID && $0.baseAddress == base }) :
-            jellyfinSources.contains(where: { $0.id == sourceID && $0.userID == userID && $0.baseAddress == base }) else { return }
-        let byID = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
+        let remote = displayedItems
+        let cached = displayedItems.map(\.id)
+        guard !cached.isEmpty else { return }
+        let byID = Dictionary(remote.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         let requested = Set(cached)
         var removed = Set<UUID>()
         for index in items.indices {
@@ -1300,7 +1297,6 @@ final class LibraryStore: ObservableObject {
             if let date = value.remoteStateDate, date >= (items[index].stateUpdatedAt ?? .distantPast) {
                 items[index].position = Double(value.userData?.playbackPositionTicks ?? 0) / 10_000_000
                 items[index].watched = value.userData?.played ?? items[index].watched
-                items[index].favorite = value.userData?.isFavorite ?? items[index].favorite
                 items[index].stateUpdatedAt = date
             }
         }
@@ -1324,7 +1320,6 @@ final class LibraryStore: ObservableObject {
         item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
         item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
         item.watched = remote.userData?.played ?? false
-        item.favorite = remote.userData?.isFavorite ?? false
         item.stateUpdatedAt = remote.remoteStateDate ?? Date()
         item.serverSummary = remote.overview
         item.serverPosterKey = remote.imageTags?.primary
@@ -1914,8 +1909,7 @@ final class LibraryStore: ObservableObject {
     func toggleFavorite(id: UUID) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].favorite = !items[index].isFavorite
-        items[index].stateUpdatedAt = Date()
-        reportServerProgress(item: items[index], stopped: true)
+        items[index].favoriteUpdatedAt = Date()
         save()
     }
 
@@ -2017,11 +2011,11 @@ final class LibraryStore: ObservableObject {
         case .embyItem(let id, let remoteID):
             guard let source = embySources.first(where: { $0.id == id }) else { return }
             guard let token = try KeychainPasswordStore.embyToken(for: id) else { throw URLError(.userAuthenticationRequired) }
-            try await EmbyClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched, favorite: item.isFavorite)
+            try await EmbyClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched)
         case .jellyfinItem(let id, let remoteID):
             guard let source = jellyfinSources.first(where: { $0.id == id }) else { return }
             guard let token = try KeychainPasswordStore.jellyfinToken(for: id) else { throw URLError(.userAuthenticationRequired) }
-            try await JellyfinClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched, favorite: item.isFavorite)
+            try await JellyfinClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched)
         case .plexItem(let id, let remoteID, _):
             guard let source = plexSources.first(where: { $0.id == id }) else { return }
             guard let token = try KeychainPasswordStore.plexToken(for: id) else { throw URLError(.userAuthenticationRequired) }
@@ -2863,12 +2857,24 @@ final class LibraryStore: ObservableObject {
         }
         do {
             let remote = try await CloudPlaybackSync.fetchAll()
+            guard iCloudSyncEnabled, !Task.isCancelled else { return }
             var changed = false
             for index in items.indices {
                 guard let key = CloudPlaybackSync.key(for: items[index], library: self),
-                      let state = remote[key],
-                      state.updatedAt > (items[index].stateUpdatedAt ?? .distantPast) else { continue }
-                items[index].favorite = state.favorite
+                      let state = remote[key] else { continue }
+                let favoriteDate = state.favoriteUpdatedAt ?? state.updatedAt
+                if favoriteDate > (items[index].favoriteUpdatedAt ?? items[index].stateUpdatedAt ?? .distantPast) {
+                    items[index].favorite = state.favorite
+                    items[index].favoriteUpdatedAt = favoriteDate
+                    changed = true
+                }
+                // A server owns playback progress; iCloud must not replace it.
+                switch items[index].location {
+                case .embyItem, .jellyfinItem, .plexItem: continue
+                default: break
+                }
+                let playbackDate = state.playbackUpdatedAt ?? state.updatedAt
+                guard playbackDate > (items[index].stateUpdatedAt ?? .distantPast) else { continue }
                 items[index].watched = state.watched
                 items[index].position = state.position
                 items[index].duration = state.duration
@@ -2892,10 +2898,11 @@ final class LibraryStore: ObservableObject {
                         }
                     }
                 }
-                items[index].stateUpdatedAt = state.updatedAt
+                items[index].stateUpdatedAt = playbackDate
                 changed = true
             }
             let remoteConfiguration = try await CloudPlaybackSync.fetchConfiguration()
+            guard iCloudSyncEnabled, !Task.isCancelled else { return }
             if let remoteConfiguration,
                remoteConfiguration.updatedAt > (libraryConfigUpdatedAt ?? .distantPast) {
                 let allowedNames = Set(remoteConfiguration.collectionNames)
@@ -2905,6 +2912,10 @@ final class LibraryStore: ObservableObject {
                     collections.append(MediaCollection(name: name))
                 }
                 smartPlaylists = remoteConfiguration.smartPlaylists
+                if let preferences = remoteConfiguration.preferences {
+                    CloudUserPreferences.apply(preferences)
+                    lastUserPreferences = CloudUserPreferences.capture()
+                }
                 if let sources = remoteConfiguration.networkSources {
                     let localSMB = smbSources.filter { $0.syncAllowed == false }
                     let localWebDAV = webDAVSources.filter { $0.syncAllowed == false }
@@ -2924,13 +2935,15 @@ final class LibraryStore: ObservableObject {
             var uploads: [CloudPlaybackState] = []
             for item in items {
                 guard let key = CloudPlaybackSync.key(for: item, library: self),
-                      let updatedAt = item.stateUpdatedAt,
+                      let updatedAt = [item.stateUpdatedAt, item.favoriteUpdatedAt].compactMap({ $0 }).max(),
                       updatedAt > (remote[key]?.updatedAt ?? .distantPast) else { continue }
                 uploads.append(CloudPlaybackState(
                     key: key, updatedAt: updatedAt, favorite: item.isFavorite,
                     watched: item.watched, position: item.position, duration: item.duration,
                     title: item.title, metadata: item.metadata,
-                    collectionNames: collections.filter { $0.itemIDs.contains(item.id) }.map(\.name)
+                    collectionNames: collections.filter { $0.itemIDs.contains(item.id) }.map(\.name),
+                    favoriteUpdatedAt: item.favoriteUpdatedAt,
+                    playbackUpdatedAt: item.stateUpdatedAt
                 ))
             }
             if !uploads.isEmpty { try await CloudPlaybackSync.saveMany(uploads) }
@@ -2938,7 +2951,7 @@ final class LibraryStore: ObservableObject {
                !collections.isEmpty || !smartPlaylists.isEmpty ||
                !smbSources.isEmpty || !webDAVSources.isEmpty || !jellyfinSources.isEmpty ||
                !embySources.isEmpty || !plexSources.isEmpty || !cloudSources.isEmpty ||
-               !dlnaSources.isEmpty {
+               !dlnaSources.isEmpty || !lastUserPreferences.isEmpty {
                 libraryConfigUpdatedAt = Date()
                 save()
             }
@@ -2948,7 +2961,8 @@ final class LibraryStore: ObservableObject {
                     CloudLibraryConfiguration(updatedAt: libraryConfigUpdatedAt,
                                               collectionNames: collections.map(\.name),
                                               smartPlaylists: smartPlaylists,
-                                              networkSources: networkConfiguration()))
+                                              networkSources: networkConfiguration(),
+                                              preferences: CloudUserPreferences.capture()))
             }
             syncStatus = String.lucentFormat("上次同步：%@", Date().lucentFormatted())
         } catch {

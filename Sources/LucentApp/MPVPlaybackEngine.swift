@@ -351,9 +351,8 @@ final class MPVPlaybackEngine {
     func setSubtitleDelay(_ seconds: Double) { set("sub-delay", String(seconds)) }
     func setAspectRatio(_ ratio: String?) { set("video-aspect-override", ratio ?? "no") }
     func setVideoScaleMode(_ mode: VideoScaleMode) {
-        // Native pan-and-scan preserves aspect and works in both gpu-next and
-        // libmpv renderers. An aspect override would stretch the image instead.
-        set("keepaspect", "yes")
+        // Use renderer scaling, without changing the source aspect metadata.
+        set("keepaspect", mode == .stretch ? "no" : "yes")
         set("video-unscaled", "no")
         set("panscan", mode == .fill ? "1" : "0")
     }
@@ -364,9 +363,12 @@ final class MPVPlaybackEngine {
         let count = max(0, min(128, Int(intProperty("track-list/count") ?? 0)))
         return (0..<count).compactMap { index in
             guard stringProperty("track-list/\(index)/type") == type else { return nil }
+            let language = stringProperty("track-list/\(index)/lang")
             let title = stringProperty("track-list/\(index)/title")
-                ?? stringProperty("track-list/\(index)/lang")
-            return title?.isEmpty == false ? title : "\(type == "audio" ? "音轨" : "字幕") \(index + 1)"
+                ?? stringProperty("track-list/\(index)/external-filename")
+                ?? language
+            let name = title?.isEmpty == false ? title! : "\(type == "audio" ? "音轨" : "字幕") \(index + 1)"
+            return type == "sub" ? SubtitleLanguageDisplay.title(name, language: language) : name
         }
     }
 

@@ -2,6 +2,24 @@
 import SwiftUI
 import Combine
 
+enum NativeLayout {
+    #if os(tvOS)
+    static let pageInset: CGFloat = 60
+    static let posterWidth: CGFloat = 230
+    static let landscapeWidth: CGFloat = 370
+    static let gridMinimum: CGFloat = 220
+    static let gridMaximum: CGFloat = 300
+    static let gridSpacing: CGFloat = 32
+    #else
+    static let pageInset: CGFloat = 32
+    static let posterWidth: CGFloat = 190
+    static let landscapeWidth: CGFloat = 280
+    static let gridMinimum: CGFloat = 180
+    static let gridMaximum: CGFloat = 280
+    static let gridSpacing: CGFloat = 24
+    #endif
+}
+
 // The page graph is shared; only the navigation chrome differs by input device.
 enum NativeAppPage: String, CaseIterable, Identifiable {
     case home, sources, search, settings
@@ -63,7 +81,8 @@ struct NativeMediaEntry: Identifiable, Sendable {
     var title: String { remote?.name ?? plex?.title ?? local?.catalogDisplayTitle ?? "" }
     var overview: String { remote?.overview ?? local?.metadata?.summary ?? "" }
     var rating: Double? { remote?.communityRating ?? local?.metadata?.rating }
-    var year: Int? { remote?.productionYear ?? plex?.year ?? local?.metadata?.year }
+    var year: Int? { remote?.displayYear ?? plex?.year ?? local?.catalogDisplayYear }
+    var yearText: String? { remote?.displayYearText ?? local?.catalogDisplayYearText ?? plex?.year.map(String.init) }
     var position: Double {
         if let local { return local.position }
         if let plex { return (plex.viewOffset ?? 0) / 1000 }
@@ -113,15 +132,17 @@ struct NativeMediaCard: View {
     @EnvironmentObject private var library: LibraryStore
     let entry: NativeMediaEntry
     var landscape = false
+    var showsProgress = true
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             LucentRemoteArtwork(request: entry.artwork(in: library, landscape: landscape), cacheKey: "native|\(entry.id)|\(landscape)", maximumPixels: landscape ? 1280 : 750)
                 .aspectRatio(landscape ? 16.0 / 9 : 2.0 / 3, contentMode: .fit)
-                .overlay(alignment: .bottomTrailing) { if let rating = entry.rating { LucentRatingBadge(rating: rating).padding(.trailing, 4).padding(.bottom, landscape && entry.progress > 0 ? 18 : 4) } }
-                .overlay(alignment: .bottom) { if landscape && entry.progress > 0 { ProgressView(value: entry.progress).tint(.white).padding(10) } }
+                .overlay(alignment: .bottomTrailing) { if let rating = entry.rating { LucentRatingBadge(rating: rating).padding(.trailing, 4).padding(.bottom, landscape ? 44 : 4) } }
+                .overlay(alignment: .bottom) {
+                    if landscape && showsProgress { LucentPlaybackProgressOverlay(position: entry.position, duration: entry.duration, progress: entry.progress) }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
-            LucentPosterCaption(title: entry.title, subtitle: entry.year.map(String.init))
-            if landscape { LucentPlaybackTimeCaption(position: entry.position, duration: entry.duration) }
+            LucentPosterCaption(title: entry.title, subtitle: showsProgress && landscape ? nil : entry.yearText, lines: 1)
         }.contentShape(Rectangle())
     }
 }
@@ -143,52 +164,111 @@ struct NativeShelf: Identifiable, Hashable, Sendable {
     @Published var localProfileID: UUID?
     @Published var loading = false
     @Published var error: String?
-    private struct Snapshot { let date: Date; let shelves: [NativeShelf] }
+    @Published var shelfErrors: [String: String] = [:]
+    private struct Snapshot { let date: Date; let shelves: [NativeShelf]; let errors: [String: String]; let rootError: String? }
     private var snapshots: [String: Snapshot] = [:]
+    private enum RootResult: Sendable {
+        case latest([JellyfinItem]), resume([JellyfinItem]), libraries([JellyfinItem]), failure(String?)
+    }
     private var generation = UUID()
-    func load(catalog: NativeCatalog, library: LibraryStore, force: Bool = false) async {
+    private func contextKey(_ catalog: NativeCatalog, _ library: LibraryStore) -> String {
+        let id = catalog.sourceID
+        let connection: String
+        if let source = library.embySources.first(where: { $0.id == id }) { connection = source.baseAddress + "|" + source.userID }
+        else if let source = library.jellyfinSources.first(where: { $0.id == id }) { connection = source.baseAddress + "|" + source.userID }
+        else if let source = library.plexSources.first(where: { $0.id == id }) { connection = source.baseAddress }
+        else { connection = "" }
+        return catalog.id + "|" + connection + "|" + (library.activeProfile?.id.uuidString ?? "default") + "|" + LocalizationPreferences.current.contentLanguage
+    }
+    func load(catalog: NativeCatalog, library: LibraryStore, force: Bool = false, rootOnly: Bool = false) async {
         let request = UUID(); generation = request
-        error = nil
+        error = nil; shelfErrors = [:]
         guard catalog.id != "library" else { shelves = []; loading = false; return }
-        let cacheKey = catalog.id + "|" + (library.activeProfile?.id.uuidString ?? "default")
+        let cacheKey = contextKey(catalog, library)
         if !force, let saved = snapshots[cacheKey], Date().timeIntervalSince(saved.date) < 86_400 {
-            shelves = saved.shelves; loading = false; return
-        }
-        shelves = []; loading = true
+            shelves = saved.shelves; shelfErrors = saved.errors; error = saved.rootError
+            if saved.rootError == nil && saved.errors.isEmpty && Date().timeIntervalSince(saved.date) < 60 { loading = false; return }
+        } else { shelves = [] }
+        loading = true
+        defer { if generation == request { loading = false } }
         do {
             var result: [NativeShelf] = []
             if let id = catalog.sourceID, let source = library.embySources.first(where: { $0.id == id }) {
                 guard let token = try KeychainPasswordStore.embyToken(for: id), !token.isEmpty else { throw URLError(.userAuthenticationRequired) }
-                if force { try await library.synchronizeServerHome(sourceID: id, emby: true) }
-                async let latest = EmbyClient.latest(source: source, token: token)
-                async let resume = EmbyClient.resume(source: source, token: token)
-                async let views = EmbyClient.browse(source: source, token: token, parentID: nil)
-                let (new, continuing, libraries) = try await (latest, resume, views)
-                result.append(.init(id: "continue", title: "继续观看", entries: continuing.items.map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }, landscape: true))
-                result.append(.init(id: "latest", title: "最近入库", entries: new.filter { $0.type != "Episode" }.map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }))
+                var new: [JellyfinItem] = []
+                var continuing: [JellyfinItem] = []
+                var libraries: [JellyfinItem] = []
+                await withTaskGroup(of: RootResult.self) { group in
+                    group.addTask {
+                        do { return .latest(try await EmbyClient.latest(source: source, token: token)) }
+                        catch { return .failure(Task.isCancelled ? nil : error.localizedDescription) }
+                    }
+                    group.addTask {
+                        do { return .resume(try await EmbyClient.resume(source: source, token: token).items) }
+                        catch { return .failure(Task.isCancelled ? nil : error.localizedDescription) }
+                    }
+                    group.addTask {
+                        do { return .libraries(try await EmbyClient.browse(source: source, token: token, parentID: nil).items) }
+                        catch { return .failure(Task.isCancelled ? nil : error.localizedDescription) }
+                    }
+                    for await value in group {
+                        guard generation == request, !Task.isCancelled else { group.cancelAll(); return }
+                        switch value {
+                        case .latest(let values): new = values
+                        case .resume(let values): continuing = values
+                        case .libraries(let values): libraries = values
+                        case .failure(let message): if let message { error = message }
+                        }
+                        result = [
+                            .init(id: "continue", title: "继续观看", entries: continuing.map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }, landscape: true),
+                            .init(id: "latest", title: "最近入库", entries: new.filter { $0.type != "Episode" }.map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }),
+                            .init(id: "libraries", title: "我的媒体", entries: libraries.map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }, landscape: true)
+                        ]
+                        shelves = result.filter { !$0.entries.isEmpty }
+                    }
+                }
+                try Task.checkCancellation()
+                guard generation == request else { return }
+                if rootOnly { return }
                 // Bound server concurrency and keep the server's library order.
                 var pages: [String: [JellyfinItem]] = [:]
-                for start in stride(from: 0, to: libraries.items.count, by: 4) {
-                    let batch = Array(libraries.items[start..<min(start + 4, libraries.items.count)])
-                    let values = await withTaskGroup(of: (String, [JellyfinItem]).self) { group in
+                let roots = result
+                shelves = roots + libraries.map { .init(id: $0.id, title: $0.name, entries: [], parentID: $0.id) }
+                for start in stride(from: 0, to: libraries.count, by: 4) {
+                    let batch = Array(libraries[start..<min(start + 4, libraries.count)])
+                    let values = await withTaskGroup(of: (String, [JellyfinItem], String?).self) { group in
                         for view in batch {
                             group.addTask {
-                                let page = try? await EmbyClient.featured(source: source, token: token, parentID: view.id, itemTypes: EmbyClient.featuredItemTypes(for: view))
-                                return (view.id, page?.items ?? [])
+                                do {
+                                    let page = try await EmbyClient.featured(source: source, token: token, parentID: view.id, itemTypes: EmbyClient.featuredItemTypes(for: view))
+                                    return (view.id, page.items, nil)
+                                } catch { return (view.id, [], Task.isCancelled ? nil : error.localizedDescription) }
                             }
                         }
                         var values: [String: [JellyfinItem]] = [:]
-                        for await (key, entries) in group { values[key] = entries }
+                        for await (key, entries, message) in group {
+                            values[key] = entries
+                            if generation == request, let message { shelfErrors[key] = message }
+                        }
                         return values
                     }
                     pages.merge(values) { _, new in new }
                     try Task.checkCancellation()
+                    guard generation == request else { return }
+                    shelves = roots + libraries.map { view in
+                        .init(id: view.id, title: view.name,
+                            entries: (pages[view.id] ?? []).map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }, parentID: view.id)
+                    }
                 }
-                result += libraries.items.map { view in .init(id: view.id, title: view.name, entries: (pages[view.id] ?? []).map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }, parentID: view.id) }
+                result += libraries.map { view in .init(id: view.id, title: view.name, entries: (pages[view.id] ?? []).map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) }, parentID: view.id) }
+                if force {
+                    do { try await library.synchronizeServerHome(sourceID: id, emby: true, displayedItems: result.flatMap { $0.entries.compactMap(\.remote) }) }
+                    catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+                }
             } else if let id = catalog.sourceID, let source = library.jellyfinSources.first(where: { $0.id == id }) {
                 guard let token = try KeychainPasswordStore.jellyfinToken(for: id), !token.isEmpty else { throw URLError(.userAuthenticationRequired) }
-                if force { try await library.synchronizeServerHome(sourceID: id, emby: false) }
                 let items = try await JellyfinClient.browsePage(source: source, token: token, start: 0)
+                if force { try await library.synchronizeServerHome(sourceID: id, emby: false, displayedItems: items) }
                 result = [.init(id: "latest", title: "最近入库", entries: items.filter { $0.type != "Episode" }.map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) })]
             } else if let id = catalog.sourceID, let source = library.plexSources.first(where: { $0.id == id }) {
                 guard let token = try KeychainPasswordStore.plexToken(for: id), !token.isEmpty else { throw URLError(.userAuthenticationRequired) }
@@ -198,13 +278,13 @@ struct NativeShelf: Identifiable, Hashable, Sendable {
             }
             try Task.checkCancellation()
             guard generation == request else { return }
-            shelves = result.filter { !$0.entries.isEmpty }
+            shelves = result.filter { !$0.entries.isEmpty || shelfErrors[$0.id] != nil }
             let active = Set(NativeCatalog.all(in: library).map(\.id))
             snapshots = snapshots.filter { key, value in Date().timeIntervalSince(value.date) < 86_400 && active.contains(String(key.split(separator: "|").first ?? "")) }
             if snapshots.count >= 8, let oldest = snapshots.min(by: { $0.value.date < $1.value.date })?.key { snapshots[oldest] = nil }
-            snapshots[cacheKey] = .init(date: Date(), shelves: shelves)
+            snapshots[cacheKey] = .init(date: Date(), shelves: shelves, errors: shelfErrors, rootError: error)
         } catch is CancellationError { return }
-        catch { if generation == request { self.error = error.localizedDescription } }
+        catch { if generation == request && !Task.isCancelled { self.error = error.localizedDescription } }
         if generation == request { loading = false }
     }
 }
@@ -216,7 +296,6 @@ struct NativeHomeView: View {
     @State private var selected: NativeEntryRoute?
     @SceneStorage("lucent.home.nativeHeroIndex") private var heroIndex = 0
     @State private var allShelf: NativeShelf?
-    @AppStorage("lucent.home.autoplay") private var autoplay = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.contentLocalizationID) private var contentLocalizationID
     @State private var heroArtwork: TMDBService.DetailArtwork?
@@ -263,7 +342,11 @@ struct NativeHomeView: View {
                 if model.loading { LucentLoadingView(title: "正在读取内容").frame(maxWidth: .infinity).padding(50) }
                 if let error = model.error { LucentStateView(title: "读取失败", symbol: "wifi.exclamationmark", message: error, actionTitle: "重试") { refresh() } }
                 if !model.loading && model.error == nil && shelves.isEmpty {
-                    LucentStateView(title: "暂无影片", symbol: "film", actionTitle: "添加片源", action: showSources)
+                    LucentStateView(title: catalog.id == "library" ? "空空如也" : "暂无影片", symbol: "film",
+                        actionTitle: catalog.id == "library" ? "配置聚合媒体库" : "添加片源") {
+                        if catalog.id == "library" { UserDefaults.standard.set(0, forKey: "lucent.sources.selectedKind") }
+                        showSources()
+                    }
                 }
                 ForEach(shelves) { shelf in
                     VStack(alignment: .leading, spacing: 16) {
@@ -272,19 +355,29 @@ struct NativeHomeView: View {
                             Spacer()
                             Button("查看全部") { allShelf = shelf }
                         }
+                        if let message = model.shelfErrors[shelf.id] {
+                            LucentStateView(title: "读取失败", message: message, actionTitle: "重试") { refresh() }
+                        } else if shelf.entries.isEmpty && model.loading {
+                            ProgressView().frame(maxWidth: .infinity).padding(30)
+                        }
                         ScrollView(.horizontal) {
                             LazyHStack(alignment: .top, spacing: 22) {
                                 ForEach(shelf.entries.prefix(24)) { entry in
-                                    Button { selected = entry.destination(in: library) } label: { NativeMediaCard(entry: entry, landscape: shelf.landscape).frame(width: cardWidth(shelf.landscape)) }
+                                    Button { selected = entry.destination(in: library) } label: { NativeMediaCard(entry: entry, landscape: shelf.landscape, showsProgress: shelf.id == "continue").frame(width: cardWidth(shelf.landscape)) }
                                         .buttonStyle(.bordered).buttonBorderShape(.roundedRectangle)
                                 }
-                            }.padding(12)
-                        }
+                            }.padding(20)
+                        }.focusSection()
                     }
                 }
             }.padding(contentInset)
         }.background(LucentUI.page).navigationTitle(catalog.name)
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink { LucentFavoritesView().environmentObject(library) } label: {
+                    Label("收藏", systemImage: "heart")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Picker("首页内容", selection: Binding(get: { catalog.id }, set: { selection = $0 })) {
@@ -300,19 +393,16 @@ struct NativeHomeView: View {
         .task(id: "\(catalog.id)|\(localRebuild)") { await rebuildLocalShelves() }
         .onReceive(library.$catalogStructureRevision.debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in localRebuild = UUID() }
         .onReceive(library.$items.debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in localRebuild = UUID() }
-        .task(id: catalog.id + "|" + (library.activeProfile?.id.uuidString ?? "default")) { await model.load(catalog: catalog, library: library) }
-        .task(id: "\(catalog.id)|\(autoplay)") {
-            guard autoplay else { return }
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(7)) } catch { return }
-                guard heroes.count > 1 else { continue }
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) { heroIndex = (heroIndex + 1) % heroes.count }
-            }
-        }
+        .task(id: catalog.id + "|" + (library.activeProfile?.id.uuidString ?? "default") + "|" + contentLocalizationID) { await model.load(catalog: catalog, library: library) }
         .navigationDestination(item: $selected) { NativeEntryPage(route: $0).environmentObject(library) }
         .navigationDestination(item: $allShelf) { shelf in
-            if let catalog = shelf.entries.first?.catalog, catalog.id != "library", shelf.id != "continue" {
-                NativeServerBrowser(catalog: catalog, parentID: shelf.parentID, title: shelf.title).environmentObject(library)
+            if let context = shelf.entries.first?.catalog,
+               let id = context.sourceID, let source = library.embySources.first(where: { $0.id == id }),
+               shelf.parentID != nil || shelf.id == "libraries" {
+                EmbyBrowserView(source: source, parentID: shelf.parentID, title: shelf.title, embedded: true)
+                    .environmentObject(library)
+            } else if let context = shelf.entries.first?.catalog, context.id != "library", !["continue", "favorites"].contains(shelf.id) {
+                NativeServerBrowser(catalog: context, parentID: shelf.parentID, title: shelf.title).environmentObject(library)
             } else if let collection = LocalCatalogCollection(rawValue: shelf.id) {
                 LocalCatalogCollectionView(collection: collection, detailPresented: .constant(false)).environmentObject(library)
             } else { NativeShelfGrid(shelf: shelf).environmentObject(library) }
@@ -340,16 +430,16 @@ struct NativeHomeView: View {
             VStack(alignment: .leading, spacing: 16) {
                 DetailTitleArtwork(url: heroArtwork?.logoURL, title: heroArtwork?.localizedTitle ?? entry.title).frame(maxWidth: 420, alignment: .leading)
                 if let rating = entry.rating { Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill").font(.caption).foregroundStyle(.yellow) }
-                Text(entry.overview).font(.footnote).lineLimit(3).frame(maxWidth: 720, alignment: .leading)
+                Text(entry.overview).font(.footnote).foregroundStyle(.white).lineLimit(3).frame(maxWidth: 720, alignment: .leading)
                 HStack {
                     Button("查看详情", systemImage: "play.fill") { selected = entry.destination(in: library) }.buttonStyle(.borderedProminent)
                     Spacer()
                     Button("上一部", systemImage: "chevron.left") { heroIndex = (heroIndex + heroes.count - 1) % heroes.count }
-                    Text("\(min(heroIndex, heroes.count - 1) + 1) / \(heroes.count)").monospacedDigit()
+                    Text("\(min(heroIndex, heroes.count - 1) + 1) / \(heroes.count)").foregroundStyle(.white).monospacedDigit()
                     Button("下一部", systemImage: "chevron.right") { heroIndex = (heroIndex + 1) % heroes.count }
                 }
-            }.foregroundStyle(.white).padding(32)
-        }.frame(height: 440).clipShape(RoundedRectangle(cornerRadius: 24)).id(entry.id)
+            }.padding(32)
+        }.frame(height: 440).clipShape(RoundedRectangle(cornerRadius: 24)).focusSection()
             .transition(.opacity).animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: heroIndex)
             .task(id: "\(entry.id)|\(contentLocalizationID)") {
                 heroArtwork = nil
@@ -369,12 +459,13 @@ struct NativeShelfGrid: View {
     @State private var selected: NativeEntryRoute?
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 24)], spacing: 28) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: shelf.landscape ? NativeLayout.landscapeWidth : NativeLayout.gridMinimum,
+                                            maximum: shelf.landscape ? NativeLayout.landscapeWidth + 60 : NativeLayout.gridMaximum), spacing: NativeLayout.gridSpacing)], spacing: 28) {
                 ForEach(shelf.entries) { entry in
-                    Button { selected = entry.destination(in: library) } label: { NativeMediaCard(entry: entry) }.buttonStyle(.bordered)
+                    Button { selected = entry.destination(in: library) } label: { NativeMediaCard(entry: entry, landscape: shelf.landscape) }.lucentContentButtonStyle()
                 }
-            }.padding(32)
-        }.navigationTitle(shelf.title).background(LucentUI.page)
+            }.padding(NativeLayout.pageInset)
+        }.navigationTitle(LocalizedStringKey(shelf.title)).background(LucentUI.page)
             .navigationDestination(item: $selected) { NativeEntryPage(route: $0).environmentObject(library) }
     }
 }

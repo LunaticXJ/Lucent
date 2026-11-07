@@ -1732,6 +1732,7 @@ private struct SearchRemotePoster: View {
 }
 
 struct MobileSearchView: View {
+    @State private var searchPresented = false
     @EnvironmentObject private var library: LibraryStore
     let catalog: String
     @Binding var detailPresented: Bool
@@ -1771,27 +1772,47 @@ struct MobileSearchView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            List {
+                searchHistoryContent
+                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 16, trailing: 20))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 VStack(alignment: .leading, spacing: 26) {
-
-                    if !localResults.isEmpty || groups.contains(where: { !$0.entries.isEmpty }) {
+                    if !term.isEmpty && (!localResults.isEmpty || groups.contains(where: { !$0.entries.isEmpty })) {
                         MobileSegmentedTabs(options: [("媒体库", "library"),
                                                       ("影视服务器", "server")],
                                             selection: $scope)
                     }
 
                     if term.isEmpty {
-                        emptySearchContent
+                        recommendationContent
                     } else {
                         searchResultsContent
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 36)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 36, trailing: 20))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(term.isEmpty ? "搜索" : "搜索：\(term)")
+            .navigationTitle("搜索")
             .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $query, isPresented: $searchPresented,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "搜索影片和剧集")
+            .onChange(of: searchPresented) { wasPresented, isPresented in
+                guard wasPresented, !isPresented else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    submittedQuery = ""
+                }
+            }
+            .onSubmit(of: .search) {
+                submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
             .toolbar(.visible, for: .navigationBar)
             .lucentTabRoot()
             .task(id: catalog) { scope = catalog == "library" ? "library" : "server" }
@@ -1806,20 +1827,17 @@ struct MobileSearchView: View {
                 detailPresented = value != nil
             }
         }
-        .searchable(text: $query, prompt: "搜索影片和剧集")
-        .onSubmit(of: .search) {
-            submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
     }
 
-    @ViewBuilder private var emptySearchContent: some View {
+    @ViewBuilder private var searchHistoryContent: some View {
         if !history.isEmpty {
-            VStack(alignment: .leading, spacing: 13) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("最近搜索").font(.headline)
+                    Text("最近搜索").font(.subheadline.weight(.semibold))
                     Spacer()
                     Button("清除") { historyJSON = "[]" }
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .buttonStyle(.borderless)
+                        .font(.subheadline)
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 9) {
@@ -1828,9 +1846,10 @@ struct MobileSearchView: View {
                                 query = value
                                 submittedQuery = value
                             } label: {
-                                Label(value, systemImage: "clock")
+                                Text(value)
                                     .font(.subheadline)
-                                    .padding(.horizontal, 14).padding(.vertical, 10)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
                                     .background(Color(uiColor: .secondarySystemGroupedBackground),
                                                 in: Capsule())
                             }
@@ -1840,7 +1859,6 @@ struct MobileSearchView: View {
                 }
             }
         }
-        recommendationContent
     }
 
     @ViewBuilder private var recommendationContent: some View {
@@ -1856,6 +1874,7 @@ struct MobileSearchView: View {
                         Label("换一批", systemImage: "arrow.clockwise")
                             .font(.subheadline)
                     }
+                    .buttonStyle(.borderless)
                 }
                 if scope == "library" {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {

@@ -24,6 +24,7 @@ enum LucentUI {
     static let detailTitleWidth: CGFloat = 250
     static let detailTitleHeight: CGFloat = 100
     #endif
+    static let catalogPosterRequestWidth = 350
     static let posterAspectRatio: CGFloat = 2.0 / 3.0
     #if os(tvOS)
     static let controlSize: CGFloat = 72
@@ -64,6 +65,18 @@ enum LucentUI {
         Color("AppBackground")
         #endif
     }
+    static var serverCardGradient: LinearGradient {
+        LinearGradient(colors: [Color(red: 0.30, green: 0.64, blue: 0.98).opacity(0.24), .clear],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    static func serverCardBorder(selected: Bool = false) -> LinearGradient {
+        LinearGradient(colors: [
+            Color(red: 0.30, green: 0.64, blue: 0.98).opacity(selected ? 0.48 : 0.32),
+            Color.primary.opacity(selected ? 0.14 : 0.06)
+        ], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
     static var panel: Color {
         #if os(iOS)
         Color(uiColor: .secondarySystemGroupedBackground)
@@ -182,6 +195,31 @@ struct LucentSettingsPageStyle: ViewModifier {
     }
 }
 
+/// tvOS menu pickers show only the selected value. Let LabeledContent own the
+/// field label while the system menu continues to own selection and focus.
+struct LucentSettingsPicker<Selection: Hashable, Options: View>: View {
+    let title: LocalizedStringKey
+    @Binding var selection: Selection
+    @ViewBuilder let options: () -> Options
+
+    init(_ title: LocalizedStringKey, selection: Binding<Selection>, @ViewBuilder content: @escaping () -> Options) {
+        self.title = title
+        _selection = selection
+        options = content
+    }
+
+    var body: some View {
+        #if os(tvOS)
+        LabeledContent(title) {
+            Picker(title, selection: $selection, content: options)
+                .labelsHidden().pickerStyle(.menu)
+        }
+        #else
+        Picker(title, selection: $selection, content: options)
+        #endif
+    }
+}
+
 struct LucentSettingsRow: View {
     let title: String
     let icon: String
@@ -280,7 +318,7 @@ struct LucentSynopsisSheet: View {
             ScrollView {
                 Text(text).font(.body).lineSpacing(6).lucentSelectableText()
                     .frame(maxWidth: .infinity, alignment: .leading).padding(24)
-            }.navigationTitle(title).lucentNavigationTitleStyle()
+            }.lucentPageTitle(title).lucentNavigationTitleStyle()
                 .toolbar { LucentSheetToolbar(close: close, actionTitle: "复制") { LucentClipboard.copy(text) } }
         }.modifier(LucentSheetStyle(role: .reader))
     }
@@ -315,7 +353,8 @@ struct LucentRemoteArtwork: View {
             }.frame(width: geometry.size.width, height: geometry.size.height)
         }.clipped().accessibilityHidden(true)
             .task(id: "\(cacheKey)|\(request?.url?.absoluteString ?? "")") {
-                image = nil
+                image = ArtworkImageDecoder.cachedImage(key: cacheKey, maximumPixelSize: maximumPixels)
+                if image != nil { return }
                 guard let request, let url = request.url else { return }
                 let data: Data?
                 if url.isFileURL {
@@ -339,6 +378,7 @@ struct LucentPlayButton: View {
     var resumeTime: String? = nil
     var episodeLabel: String? = nil
     var enabled = true
+    var isLoading = false
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -364,7 +404,16 @@ struct LucentPlayButton: View {
             }
         }.lucentNativeGlassButton(expands: true)
             .frame(maxWidth: LucentUI.controlSize == 72 ? 560 : 330, minHeight: LucentUI.controlSize == 72 ? 88 : 54)
-            .disabled(!enabled).opacity(enabled ? 1 : 0.45)
+            .disabled(!enabled || isLoading)
+            .opacity(isLoading ? 0 : enabled ? 1 : 0.45)
+            .accessibilityHidden(isLoading)
+            .overlay {
+                if isLoading {
+                    LucentSkeleton(radius: LucentUI.controlSize == 72 ? 44 : 27)
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
+                }
+            }
     }
 }
 
@@ -440,14 +489,14 @@ private struct LucentCollectionChrome<Trailing: View>: ViewModifier {
     let trailing: Trailing
     @ViewBuilder func body(content: Content) -> some View {
         #if os(iOS)
-        content.navigationTitle(LocalizedStringKey(title))
+        content.lucentPageTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(false)
             .toolbar(.visible, for: .navigationBar)
             .toolbarRole(.navigationStack)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { trailing } }
         #else
-        content.navigationTitle(LocalizedStringKey(title))
+        content.lucentPageTitle(title)
             .toolbar { ToolbarItem(placement: .primaryAction) { trailing } }
         #endif
     }
@@ -535,37 +584,9 @@ struct LucentCircularMenu<Content: View>: View {
 struct LucentCatalogCaption: View {
     let title: String
     let yearText: String?
-    var source: EmbySource? = nil
-    var item: JellyfinItem? = nil
-    @State private var detail: JellyfinItem?
     var body: some View {
-        LucentPosterCaption(title: title, subtitle: detail?.displayYearText ?? yearText ?? " ", lines: 1)
-            .task(id: "\(source?.id.uuidString ?? "")|\(item?.id ?? "")") {
-                guard let source, let item, ["Movie", "Series", "Episode"].contains(item.type),
-                      item.displayYear == nil,
-                      let token = try? KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty else { return }
-                let key = "\(source.id)|\(source.baseAddress)|\(source.userID)|\(item.id)"
-                if let cached = CatalogCaptionCache.entries[key], Date().timeIntervalSince(cached.0) < 300 {
-                    detail = cached.1
-                    return
-                }
-                let loaded = try? await ServerDetailClient.item(baseAddress: source.baseAddress,
-                    userID: source.userID, itemID: item.id, token: token)
-                guard !Task.isCancelled else { return }
-                detail = loaded
-                if let loaded {
-                    if CatalogCaptionCache.entries.count >= 256 {
-                        CatalogCaptionCache.entries = CatalogCaptionCache.entries.filter { Date().timeIntervalSince($0.value.0) < 300 }
-                        if CatalogCaptionCache.entries.count >= 256 { CatalogCaptionCache.entries.removeAll() }
-                    }
-                    CatalogCaptionCache.entries[key] = (Date(), loaded)
-                }
-            }
+        LucentPosterCaption(title: title, subtitle: yearText ?? " ", lines: 1)
     }
-}
-
-@MainActor private enum CatalogCaptionCache {
-    static var entries: [String: (Date, JellyfinItem)] = [:]
 }
 
 enum DetailPosterPalette {
@@ -630,5 +651,22 @@ struct LucentArtworkSizing: ViewModifier {
     var stretches = false
     @ViewBuilder func body(content: Content) -> some View {
         if stretches { content } else { content.scaledToFill() }
+    }
+}
+
+struct LucentSourceLabel: View {
+    let title: String
+    let asset: String?
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            if let asset {
+                Image(asset).resizable().scaledToFit().frame(width: 20, height: 20)
+            } else {
+                Image(systemName: "rectangle.stack")
+            }
+        }
     }
 }

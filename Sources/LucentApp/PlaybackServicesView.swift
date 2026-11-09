@@ -24,6 +24,7 @@ enum PlaybackServiceScope { case subtitles, danmaku }
 
 struct PlaybackServicesView: View {
     let scope: PlaybackServiceScope
+    @AppStorage("lucent.danmaku.blocked") private var blockedDanmakuWords = ""
     @State private var key = ""
     @State private var username = ""
     @State private var password = ""
@@ -60,6 +61,18 @@ struct PlaybackServicesView: View {
                     }
                 }
                 Section {
+                    #if os(tvOS)
+                    TextField("屏蔽词", text: $blockedDanmakuWords)
+                    #else
+                    TextField("屏蔽词", text: $blockedDanmakuWords, axis: .vertical)
+                        .lineLimit(3...8)
+                    #endif
+                } header: {
+                    Text("弹幕屏蔽词")
+                } footer: {
+                    Text("每行输入一个屏蔽词，适用于所有影片。")
+                }
+                Section {
                     TextField("App ID", text: $appID)
                     SecureField("App Secret", text: $secret)
                     Link("弹弹play 开发者中心", destination: URL(string: "https://dev.dandanplay.com/")!)
@@ -86,7 +99,7 @@ struct PlaybackServicesView: View {
                 if let status { Text(LocalizedStringKey(status)).font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle(LocalizedStringKey(scope == .subtitles ? "字幕服务配置" : "弹幕服务")).lucentNavigationTitleStyle()
+        .lucentPageTitle(scope == .subtitles ? "字幕服务配置" : "弹幕服务").lucentNavigationTitleStyle()
         .lucentTextInput().autocorrectionDisabled()
         .modifier(LucentSettingsPageStyle())
         .task {
@@ -150,7 +163,7 @@ struct CustomDanmakuServersView: View {
                 Text("支持兼容弹弹play协议的 API。可填写服务器根地址或以 /api/v2 结尾的地址，并保留服务提供的鉴权路径。")
             }
         }
-        .navigationTitle("自定义弹幕 API").lucentNavigationTitleStyle()
+        .lucentPageTitle("自定义弹幕 API").lucentNavigationTitleStyle()
         .modifier(LucentSettingsPageStyle())
         .navigationDestination(item: $editing) { server in
             CustomDanmakuServerEditor(server: server,
@@ -211,7 +224,7 @@ private struct CustomDanmakuServerEditor: View {
                 }
             }
         }
-        .navigationTitle("弹幕服务器").lucentNavigationTitleStyle()
+        .lucentPageTitle("弹幕服务器").lucentNavigationTitleStyle()
         .modifier(LucentSettingsPageStyle())
         .autocorrectionDisabled()
         .onChange(of: server) { _, _ in status = nil }
@@ -242,7 +255,6 @@ struct SubtitleSearchView: View {
     let item: MediaItem
     var onInstalled: (Data, String) -> Void = { _, _ in }
     @State private var query = ""
-    @State private var language = LocalizationPreferences.current.subtitleSearchLanguage
     @State private var results: [OpenSubtitlesClient.Result] = []
     @State private var busy = false
     @State private var status: String?
@@ -256,16 +268,6 @@ struct SubtitleSearchView: View {
             List {
                 Section {
                     TextField("影片或剧集名称", text: $query).submitLabel(.search).onSubmit { search() }.disabled(busy)
-                    Picker("字幕语言", selection: $language) {
-                        Text("简体与繁体中文").tag("zh-cn,zh-tw")
-                        Text("简体中文").tag("zh-cn")
-                        Text("繁体中文").tag("zh-tw")
-                        Text("英语").tag("en")
-                        Text("日语").tag("ja")
-                        ForEach(["ko", "fr", "de", "es", "pt", "ru", "it", "ar", "hi", "th"], id: \.self) { code in
-                            Text(LocalizationPreferences.current.displayLocale.localizedString(forLanguageCode: code) ?? code).tag(code)
-                        }
-                    }.disabled(busy)
                     Button("搜索 OpenSubtitles", systemImage: "magnifyingglass") { search() }
                         .disabled(busy || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     #if !os(tvOS)
@@ -280,28 +282,24 @@ struct SubtitleSearchView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: "captions.bubble").font(.title2).foregroundStyle(.secondary)
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(result.release).font(.subheadline).foregroundStyle(.primary).lineLimit(2)
+                                    Text(result.displayRelease).font(.subheadline).foregroundStyle(.primary).lineLimit(2)
                                     Text("\(result.language.uppercased()) · \(result.downloads) 次下载" + (result.hearingImpaired ? " · 听障字幕" : ""))
                                         .font(.caption).foregroundStyle(.secondary)
-                                    Text(result.filename).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(result.displayFilename).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
                                 Image(systemName: "arrow.down.circle").foregroundStyle(.secondary)
                             }.padding(.vertical, 4)
                         }.disabled(busy)
                     }
-                    if hasSearched && !busy && results.isEmpty { Text("未找到字幕，试试原文片名或其他语言。 ").foregroundStyle(.secondary) }
+                    if hasSearched && !busy && results.isEmpty { Text("未找到字幕，试试原文片名。").foregroundStyle(.secondary) }
                     if hasMore && !busy { Button("加载更多") { search(more: true) } }
                 } header: { if !results.isEmpty { Text("搜索结果") } }
-                Section {
-                    NavigationLink("字幕服务配置") { PlaybackServicesView(scope: .subtitles).lucentSecondaryPage() }
-                }
             }
-            .navigationTitle("添加字幕").lucentNavigationTitleStyle()
+            .lucentPageTitle("添加字幕").lucentNavigationTitleStyle()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .task { query = item.identity?.seriesName ?? item.metadata?.localizedTitle ?? item.title }
             .onChange(of: query) { _, _ in resetResults() }
-            .onChange(of: language) { _, _ in resetResults() }
             #if !os(tvOS)
             .fileImporter(isPresented: $importer, allowedContentTypes: SubtitleParser.supportedExtensions.compactMap { UTType(filenameExtension: $0) }) { result in
                 do {
@@ -331,6 +329,7 @@ struct SubtitleSearchView: View {
                 guard let key = try KeychainPasswordStore.openSubtitlesAPIKey(), !key.isEmpty else {
                     status = "请先在字幕服务配置中填写 OpenSubtitles API Key。"; return
                 }
+                let language = LocalizationPreferences.current.subtitleSearchLanguage
                 let response = try await OpenSubtitlesClient.search(item: item, language: language, apiKey: key,
                     query: query, page: next, session: PlaybackServiceConfiguration.subtitleSession())
                 let ids = Set(results.map(\.id))

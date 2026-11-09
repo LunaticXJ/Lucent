@@ -46,7 +46,7 @@ struct NativeSearchView: View {
                     NativeSearchShelf(entries: recommendations)
                 }
             }.padding(NativeLayout.pageInset)
-        }.background(LucentUI.page).navigationTitle(submitted.isEmpty ? "搜索" : "搜索：\(submitted)")
+        }.background(LucentUI.page).lucentPageTitle(submitted.isEmpty ? "搜索" : "搜索：\(submitted)")
             .task {
                 if submitted.isEmpty {
                     scope = NativeCatalog.all(in: library).contains(where: { $0.id != "library" }) ? 1 : 0

@@ -144,6 +144,84 @@ enum DandanplayClient {
         }
         let animes: [Anime]
     }
+    static func exactMatch(for item: MediaItem, server: Server, preferredTitle: String?) async throws -> Episode? {
+        func normalized(_ title: String) -> String {
+            title.folding(options: [.caseInsensitive, .widthInsensitive], locale: nil)
+                .filter { $0.isLetter || $0.isNumber }
+        }
+        let suffix = #"\s*[（(][0-9]{4}[）)]\s*(?:【[^】]+】\s*)?(?:from\s+[a-z0-9_-]+)?\s*$"#
+        let title = item.metadata?.localizedTitle ?? item.title
+        if case .episode(let series, let season, let number, let name) = item.identity {
+            guard season >= 0, number > 0 else { return nil }
+            let formatter = NumberFormatter()
+            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.numberStyle = .spellOut
+            let spelledSeason = formatter.string(from: NSNumber(value: season)) ?? String(season)
+            var seasonTitles = ["\(series) 第\(spelledSeason)季", "\(series) 第\(season)季", "\(series) Season \(season)", "\(series) S\(season)", "\(series) S\(String(format: "%02d", season))"]
+            if season == 0 {
+                seasonTitles.insert(contentsOf: ["\(series) 特别篇", "\(series) 特別篇", "\(series) Specials", "\(series) Special", "\(series) SP"], at: 0)
+            }
+            let titles = Set((seasonTitles + (season == 1 ? [series] : [])).map(normalized))
+            let episodeName = name.map(normalized)
+            func matchesEpisode(_ candidate: Episode) -> Bool {
+                let label = candidate.title.folding(options: [.caseInsensitive, .widthInsensitive], locale: nil)
+                    .replacingOccurrences(of: #"^\s*(?:【[^】]+】\s*|\[[^\]]+\]\s*)+"#, with: "", options: .regularExpression)
+                let seriesPrefix = normalized(candidate.anime.replacingOccurrences(of: suffix, with: "", options: [.regularExpression, .caseInsensitive]))
+                let compactLabel = normalized(label)
+                if titles.contains(seriesPrefix) {
+                    for prefix in [seriesPrefix, normalized(series)] where compactLabel.hasPrefix(prefix) {
+                        if compactLabel.dropFirst(prefix.count).range(of: #"^第0*\#(number)[集话話回]"#, options: .regularExpression) != nil {
+                            return true
+                        }
+                    }
+                }
+                let pattern = #"^\s*(?:第\s*0*\#(number)\s*[集话話回]|s0*\#(season)e0*\#(number)|(?:(?:episode|ep|e)[ ._-]*)?0*\#(number))(?=$|[^0-9a-z.]|\.(?![0-9]))"#
+                if label.range(of: pattern, options: .regularExpression) != nil { return true }
+                // Accept a title-only result when the episode name matches exactly.
+                return episodeName == normalized(label) && episodeName?.isEmpty == false
+            }
+            let query = season == 1 ? series : seasonTitles[0]
+            var results = try await search(query, episode: number, server: server)
+            if results.isEmpty, season != 1 {
+                results = try await search(season == 0 ? series : seasonTitles[1], episode: number, server: server)
+            }
+            let episodes = results.filter(matchesEpisode)
+            if let preferredTitle,
+               let preferred = episodes.first(where: { normalized($0.anime) == normalized(preferredTitle) }) {
+                return preferred
+            }
+            let exact = episodes.filter { titles.contains(normalized($0.anime)) }
+            if exact.count == 1 { return exact.first }
+            guard exact.isEmpty else { return nil }
+
+            // Aggregators append release year, category and upstream provider to the series title.
+            return episodes.first { candidate in
+                let name = candidate.anime.replacingOccurrences(of: suffix, with: "", options: [.regularExpression, .caseInsensitive])
+                return titles.contains(normalized(name))
+            }
+        }
+        guard case .movie(let releaseYear) = item.identity, !normalized(title).isEmpty else { return nil }
+        let results = try await search(title, tmdbID: item.metadata?.providerID, movie: true, server: server)
+        let matches = results.filter { normalized($0.anime) == normalized(title) }
+        if matches.count == 1 { return matches.first }
+        let year = item.metadata?.year ?? releaseYear
+        let qualified = results.filter { candidate in
+            guard let range = candidate.anime.range(of: suffix, options: [.regularExpression, .caseInsensitive]),
+                  normalized(String(candidate.anime[..<range.lowerBound])) == normalized(title) else { return false }
+            let qualifier = candidate.anime[range]
+            let resultYear = qualifier.range(of: "[0-9]{4}", options: .regularExpression).flatMap { Int(qualifier[$0]) }
+            return year == nil || resultYear == year
+        }
+        let features = qualified.filter { candidate in
+            let label = normalized(candidate.title)
+            let filmEntry = candidate.anime.range(of: #"【[^】]*(?:电影|劇場版|剧场版)】"#, options: .regularExpression) != nil
+                && label.range(of: #"^[a-z0-9]*第0*1[集话話]$"#, options: .regularExpression) != nil
+            return !["普通话", "国语", "配音版", "预告", "花絮", "片段"].contains(where: label.contains)
+                && (label.contains(normalized(title)) || label.hasSuffix("正片") || filmEntry)
+        }
+        return features.first { normalized($0.title).contains("原声版") } ?? features.first
+    }
+
     static func signature(appID: String, secret: String, timestamp: String, path: String) -> String {
         Data(SHA256.hash(data: Data((appID + timestamp + path + secret).utf8))).base64EncodedString()
     }
@@ -154,15 +232,15 @@ enum DandanplayClient {
         } else { parameters.append(.init(name: "anime", value: query)) }
         if let episode, episode > 0 { parameters.append(.init(name: "episode", value: String(episode))) }
         let data = try await fetch(path: "search/episodes", parameters: parameters, server: server)
-        return try decodeSearch(data, query: query, server: server)
+        return try decodeSearch(data, server: server)
     }
-    static func decodeSearch(_ data: Data, query: String, server: Server) throws -> [Episode] {
+    static func decodeSearch(_ data: Data, server: Server) throws -> [Episode] {
         guard let response = try? JSONDecoder().decode(SearchResponse.self, from: data) else { throw DanmakuError.invalidResponse }
         var seen = Set<Int64>()
         return response.animes.flatMap { anime in
             (anime.episodes ?? []).compactMap { value -> Episode? in
                 guard value.episodeId > 0, seen.insert(value.episodeId).inserted else { return nil }
-                return Episode(id: value.episodeId, anime: anime.animeTitle ?? query, title: value.episodeTitle ?? "未命名剧集", server: server)
+                return Episode(id: value.episodeId, anime: anime.animeTitle ?? "", title: value.episodeTitle ?? "未命名剧集", server: server)
             }
         }
     }

@@ -261,7 +261,9 @@ struct LibraryView: View {
                     library.refreshFolders()
                     Task { await library.syncNow() }
                 } else {
+                    #if !os(iOS)
                     ArtworkImageDecoder.clear()
+                    #endif
                     Task { await library.flushPersistence() }
                     #if !os(tvOS)
                     if showBrowserUpload { showBrowserUpload = false; stopBrowserUpload() }
@@ -460,11 +462,39 @@ struct LibraryView: View {
             #endif
     }
 
+    private var hasConfiguredMediaServer: Bool {
+        !library.embySources.isEmpty || !library.jellyfinSources.isEmpty || !library.plexSources.isEmpty
+    }
+
+    private var isAggregateHomeEmpty: Bool {
+        library.fileSources.isEmpty || library.localLibraryItems.allSatisfy { $0.missingSince != nil }
+    }
+
     private var mobileHomeTab: some View {
         NavigationStack {
             Group {
                 let catalog = effectiveHomeCatalog
-                if catalog == "library" {
+                if catalog == "library" && isAggregateHomeEmpty {
+                    VStack(spacing: 20) {
+                        Image(systemName: "rectangle.stack")
+                            .font(.system(size: 64, weight: .light))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        Text(hasConfiguredMediaServer ? "配置聚合媒体库" : "配置媒体库或连接影音服务器")
+                            .font(.title3.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                        Button("前往片源") {
+                            mobileSourceKind = hasConfiguredMediaServer || !library.fileSources.isEmpty ? 0 : 1
+                            mobileTab = .sources
+                        }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(LucentUI.page.ignoresSafeArea())
+                    .navigationTitle("首页")
+                    .navigationBarTitleDisplayMode(.large)
+                } else if catalog == "library" {
                     MobileHomeView(showSources: { mobileSourceKind = 0; mobileTab = .sources }, localLibrary: true,
                                    onCollectionChange: { mobileLibraryCollectionPresented = $0 },
                                    refreshID: homeRefreshID, detailPresented: $mobileDetailPresented)
@@ -486,7 +516,7 @@ struct LibraryView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar(mobileDetailPresented || mobileLibraryCollectionPresented ? .hidden : .visible, for: .tabBar)
             .toolbar {
-                if mobileTab == .home {
+                if mobileTab == .home && (hasConfiguredMediaServer || !isAggregateHomeEmpty) {
                     ToolbarItem(placement: .topBarTrailing) {
                         NavigationLink {
                             LucentFavoritesView().environmentObject(library)
@@ -542,7 +572,7 @@ struct LibraryView: View {
     }
 
     private var mobileSearchTab: some View {
-        MobileSearchView(catalog: effectiveHomeCatalog,
+        MobileSearchView(isSelected: mobileTab == .search,
                          detailPresented: $mobileDetailPresented,
                          query: $mobileSearchText,
                          submittedQuery: $mobileSubmittedSearchText)
@@ -833,8 +863,15 @@ struct LibraryView: View {
                 }
             }
             if library.embySources.isEmpty && library.jellyfinSources.isEmpty && library.plexSources.isEmpty {
-                ContentUnavailableView("尚无影视服务器", systemImage: "server.rack",
-                                       description: Text("点击右上角的加号连接 Emby、Jellyfin 或 Plex"))
+                ContentUnavailableView {
+                    Label {
+                        Text("尚无影视服务器").font(.subheadline.weight(.semibold))
+                    } icon: {
+                        Image(systemName: "server.rack")
+                    }
+                } description: {
+                    Text("点击右上角的加号连接 Emby、Jellyfin 或 Plex").font(.footnote)
+                }
             }
         }
     }
@@ -842,7 +879,7 @@ struct LibraryView: View {
     private func serverCard(id: UUID, name: String, address: String, kind: String, username: String,
                             counts: (movies: Int, series: Int)?, brandAsset: String? = nil,
                             action: @escaping () -> Void) -> some View {
-        let brand: Color = kind == "plex" ? .orange : kind == "jellyfin" ? .purple : .green
+        let asset = brandAsset ?? (kind == "emby" ? "EmbyBrand" : kind == "jellyfin" ? "JellyfinBrand" : "PlexBrand")
         return Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 4) {
@@ -851,35 +888,34 @@ struct LibraryView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
-                    Image(brandAsset ?? (kind == "emby" ? "EmbyBrand" : kind == "jellyfin" ? "JellyfinBrand" : "PlexBrand"))
+                    Image(asset)
                         .resizable().scaledToFit().frame(width: 34, height: 34)
                 }
                 Text("电影 \(counts.map { String($0.movies) } ?? "—") · 剧集 \(counts.map { String($0.series) } ?? "—")")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.76))
+                    .foregroundStyle(.secondary)
                     .padding(.top, 5)
                 Spacer(minLength: 12)
                 HStack(spacing: 5) {
-                    if checkingServers.contains(id) { ProgressView().controlSize(.mini).tint(.white) }
+                    if checkingServers.contains(id) { ProgressView().controlSize(.mini) }
                     else { Circle().fill(serverChecks[id].map { $0.connected ? Color.green : Color.orange } ?? Color.gray).frame(width: 5, height: 5) }
                     Text(checkingServers.contains(id) ? "正在连接" : serverChecks[id].map { $0.connected ? "连接正常" : "暂不可用 · 长按重试" } ?? "尚未检测")
                     Spacer(minLength: 0)
                     if selectedHomeCatalog == "\(kind):\(id.uuidString)" { Image(systemName: "checkmark.circle.fill") }
-                }.font(.system(size: 11)).foregroundStyle(.white.opacity(0.8))
+                }.font(.system(size: 11)).foregroundStyle(.secondary)
                 .padding(.bottom, 7)
                 Text("\(URL(string: address)?.host ?? address) · \(username)")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
             .padding(15)
             .frame(maxWidth: .infinity, minHeight: 154, alignment: .leading)
-            .background(LinearGradient(colors: [Color(white: 0.13), brand.opacity(0.35)],
-                                       startPoint: .leading, endPoint: .trailing),
+            .background(LucentUI.serverCardGradient,
                         in: RoundedRectangle(cornerRadius: 22))
             .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(
-                .white.opacity(selectedHomeCatalog == "\(kind):\(id.uuidString)" ? 0.5 : 0.08), lineWidth: 1))
+                LucentUI.serverCardBorder(selected: selectedHomeCatalog == "\(kind):\(id.uuidString)"), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityHint("打开此服务器首页，长按可编辑、刷新或移除")
@@ -1562,7 +1598,7 @@ struct LibraryView: View {
             return 0
         }
         return ForEach(seasons.keys.sorted(), id: \.self) { season in
-            Text("第\(season)季").font(.headline).padding(.top, 8)
+            Text(MediaIdentity.seasonTitle(season)).font(.headline).padding(.top, 8)
             ForEach((seasons[season] ?? []).sorted { ($0.identity?.episodeLabel ?? "") < ($1.identity?.episodeLabel ?? "") }) { item in
                 itemRow(item)
             }

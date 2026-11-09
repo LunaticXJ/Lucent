@@ -1,27 +1,133 @@
 import SwiftUI
 
+private struct DiscTransitionLayout {
+    let width: CGFloat
+    let top: CGFloat
+
+    var trayWidth: CGFloat { min(width * 0.30, 126) }
+    var trayHeight: CGFloat { trayWidth + 12 }
+    var diameter: CGFloat { trayWidth * 0.88 }
+    var trayCenter: CGFloat { top + trayHeight * 0.53 }
+    var discCenter: CGFloat { trayCenter + trayWidth * 1.15 }
+}
+
+private enum DiscMotion {
+    static let handoff: CGFloat = 0.55
+
+    static func page(_ progress: CGFloat) -> CGFloat {
+        min(1, progress / handoff)
+    }
+
+    static func landing(_ progress: CGFloat) -> CGFloat {
+        max(0, (progress - handoff) / (1 - handoff))
+    }
+}
+
+nonisolated private struct DiscBackdrop: View, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        Color.black
+            .opacity(Double(DiscMotion.page(progress)))
+            .ignoresSafeArea()
+    }
+}
+
+nonisolated private struct DiscTravel: AnimatableModifier {
+    var progress: CGFloat
+    let centerX: CGFloat
+    let layout: DiscTransitionLayout
+    var drawerOpen: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(progress, drawerOpen) }
+        set {
+            progress = newValue.first
+            drawerOpen = newValue.second
+        }
+    }
+
+    func body(content: Content) -> some View {
+        let landing = DiscMotion.landing(progress)
+        let retreat = (1 - drawerOpen) * layout.trayHeight
+        return content
+            .rotationEffect(.degrees((1 - landing) * -32))
+            .scaleEffect((1.12 - landing * 0.12) * (0.45 + drawerOpen * 0.55))
+            .opacity(Double(DiscMotion.page(progress)))
+            .position(x: centerX,
+                      y: layout.discCenter + (layout.trayCenter - layout.discCenter) * landing - retreat)
+    }
+}
+
+private struct DiscPageMask: Shape {
+    var progress: CGFloat
+    let topOverflow: CGFloat
+
+    func path(in bounds: CGRect) -> Path {
+        guard progress > 0 else { return Path(bounds.insetBy(dx: -10_000, dy: -10_000)) }
+        // The hero draws above its layout bounds, under the transparent navigation bar.
+        let rect = CGRect(x: bounds.minX, y: bounds.minY - topOverflow,
+                          width: bounds.width, height: bounds.height + topOverflow)
+        let side = min(rect.width, rect.height)
+        let width = rect.width + (side - rect.width) * progress
+        let height = rect.height + (side - rect.height) * progress
+        let bounds = CGRect(x: rect.midX - width / 2, y: rect.midY - height / 2, width: width, height: height)
+        return RoundedRectangle(cornerRadius: side * progress / 2).path(in: bounds)
+    }
+}
+
+nonisolated private struct DiscPageMorph: AnimatableModifier {
+    var progress: CGFloat
+    let canvas: CGRect
+    let pageFrame: CGRect
+    let layout: DiscTransitionLayout
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let progress = DiscMotion.page(progress)
+        let topOverflow = pageFrame.isEmpty ? 0 : max(0, pageFrame.minY - canvas.minY)
+        let pageCenter = CGPoint(x: pageFrame.midX, y: pageFrame.midY - topOverflow / 2)
+        let discCenter = CGPoint(x: canvas.midX, y: canvas.minY + layout.discCenter)
+        let side = max(1, min(pageFrame.width, pageFrame.height + topOverflow))
+        let scale = 1 + (layout.diameter * 1.12 / side - 1) * progress
+        return content
+            .clipShape(DiscPageMask(progress: progress, topOverflow: topOverflow))
+            .scaleEffect(scale)
+            .offset(x: (discCenter.x - pageCenter.x) * progress,
+                    y: (discCenter.y - pageCenter.y) * progress + (scale - 1) * topOverflow / 2)
+            .opacity(1 - Double(progress))
+    }
+}
+
 /// A lightweight optical-disc vignette. Does not snapshot or transform the video layer,
 /// so HDR/Dolby Vision surfaces remain under their existing native presentation owner.
 struct PlaybackDiscTransition: View {
     let item: MediaItem
     let inserting: Bool
-    var movementStarted: () -> Void = {}
+    @Binding var progress: CGFloat
     let completed: () -> Void
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var drawerOpen = 0.0
-    @State private var landing = 0.0
+    @State private var drawerOpen: CGFloat = 0
     @State private var visibility = 0.0
     @State private var artwork: LucentPlatformImage?
 
     var body: some View {
         GeometryReader { geometry in
-            let trayWidth = min(geometry.size.width * 0.30, 126)
-            let trayHeight = trayWidth + 12
-            let diameter = trayWidth * 0.88
-            let top = islandBottom(fallback: geometry.safeAreaInsets.top)
-            let trayCenter = top + trayHeight * 0.53
-            let startY = trayCenter + trayWidth * 1.15
+            let top = Self.islandBottom(fallback: geometry.safeAreaInsets.top)
+            let layout = DiscTransitionLayout(width: geometry.size.width, top: top)
+            let trayWidth = layout.trayWidth
+            let trayHeight = layout.trayHeight
+            let diameter = layout.diameter
             let retreat = (1 - drawerOpen) * trayHeight
             if reduceMotion {
                 disc.frame(width: diameter, height: diameter)
@@ -47,11 +153,8 @@ struct PlaybackDiscTransition: View {
                         .scaleEffect(x: 0.45 + drawerOpen * 0.55, y: 1, anchor: .top)
                         .position(x: geometry.size.width / 2, y: top + trayHeight / 2 - retreat)
                     disc.frame(width: diameter, height: diameter)
-                        .rotationEffect(.degrees((1 - landing) * -32))
-                        .scaleEffect((1.12 - landing * 0.12) * (0.45 + drawerOpen * 0.55))
-                        .opacity(visibility)
-                        .position(x: geometry.size.width / 2,
-                                  y: startY + (trayCenter - startY) * landing - retreat)
+                        .modifier(DiscTravel(progress: progress, centerX: geometry.size.width / 2,
+                                             layout: layout, drawerOpen: drawerOpen))
                 }
                 .mask(alignment: .top) {
                     Rectangle().padding(.top, top)
@@ -59,41 +162,31 @@ struct PlaybackDiscTransition: View {
             }
         }
         .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+        .task { await loadArtwork() }
         .task {
-            await loadArtwork()
-            guard !Task.isCancelled else { return }
-            if reduceMotion {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    if inserting { movementStarted() }
-                    visibility = 1
+            do {
+                if reduceMotion {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        progress = inserting ? 1 : 0
+                        visibility = 1
+                    }
+                    try await Task.sleep(for: .milliseconds(160))
+                    withAnimation(.easeInOut(duration: 0.15)) { visibility = 0 }
+                    try await Task.sleep(for: .milliseconds(160))
+                } else {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) { drawerOpen = 1 }
+                    try await Task.sleep(for: .milliseconds(420))
+                    withAnimation(.easeInOut(duration: 0.62)) { progress = inserting ? 1 : 0 }
+                    try await Task.sleep(for: .milliseconds(620))
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) { drawerOpen = 0 }
+                    try await Task.sleep(for: .milliseconds(420))
                 }
-                do { try await Task.sleep(for: .milliseconds(160)) } catch { return }
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    if !inserting { movementStarted() }
-                    visibility = 0
-                }
-                do { try await Task.sleep(for: .milliseconds(160)) } catch { return }
-            } else {
-                landing = inserting ? 0 : 1
-                visibility = inserting ? 0 : 1
-                // Entry opens briskly and flows straight into landing; exit keeps
-                // its longer ejection beat so the loaded disc remains perceptible.
-                withAnimation(.spring(response: inserting ? 0.30 : 0.44,
-                                      dampingFraction: inserting ? 0.74 : 0.68)) { drawerOpen = 1 }
-                do { try await Task.sleep(for: .milliseconds(inserting ? 340 : 580)) } catch { return }
-                withAnimation(.easeInOut(duration: 0.42)) {
-                    movementStarted()
-                    landing = inserting ? 1 : 0
-                    visibility = inserting ? 1 : 0
-                }
-                do { try await Task.sleep(for: .milliseconds(420)) } catch { return }
-                withAnimation(.spring(response: 0.36, dampingFraction: 0.74)) { drawerOpen = 0 }
-                do { try await Task.sleep(for: .milliseconds(480)) } catch { return }
-            }
-            guard !Task.isCancelled else { return }
-            completed()
+                try Task.checkCancellation()
+                completed()
+            } catch { return }
         }
     }
+
     private func loadArtwork() async {
         let current = library.items.first { $0.id == item.id } ?? item
         if let url = library.posterURL(for: current), let image = LucentPlatformImage(contentsOf: url) {
@@ -144,7 +237,7 @@ struct PlaybackDiscTransition: View {
         artwork = await ArtworkImageDecoder.image(data: data, key: key, maximumPixelSize: 400)
     }
 
-    private func islandBottom(fallback: CGFloat) -> CGFloat {
+    fileprivate static func islandBottom(fallback: CGFloat) -> CGFloat {
         #if os(iOS)
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .first { $0.activationState == .foregroundActive }?.windows.first { $0.isKeyWindow }
@@ -176,6 +269,29 @@ struct PlaybackDiscTransition: View {
     }
 }
 
+private struct DiscPageMorphKey: EnvironmentKey {
+    static let defaultValue: DiscPageMorph? = nil
+}
+
+private extension EnvironmentValues {
+    var discPageMorph: DiscPageMorph? {
+        get { self[DiscPageMorphKey.self] }
+        set { self[DiscPageMorphKey.self] = newValue }
+    }
+}
+
+private struct DetailDiscPageSurface: ViewModifier {
+    @Environment(\.discPageMorph) private var morph
+    @State private var frame = CGRect.zero
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(DiscPageMorph(progress: morph?.progress ?? 0, canvas: morph?.canvas ?? .zero,
+                                    pageFrame: frame, layout: morph?.layout ?? DiscTransitionLayout(width: 0, top: 0)))
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { frame = $0 }
+    }
+}
+
 private struct DiscPlaybackControlsHiddenKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -190,20 +306,36 @@ extension EnvironmentValues {
 private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
     @Binding var requested: MediaItem?
     let destination: (MediaItem) -> Destination
+    let usesDetailSurface: Bool
     @AppStorage("lucent.playback.discTransition") private var enabled = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var presented: MediaItem?
+    @State private var playbackCoverVisible = false
     @State private var disc: MediaItem?
     @State private var inserting = true
-    @State private var pageOpacity = 1.0
+    @State private var pageProgress: CGFloat = 0
+    @State private var canvas = CGRect.zero
+    @State private var pageFrame = CGRect.zero
     @State private var lastItem: MediaItem?
     @State private var revealTask: Task<Void, Never>?
     @State private var portraitLayoutReady = false
 
     func body(content: Content) -> some View {
+        let layout = DiscTransitionLayout(width: canvas.width, top: PlaybackDiscTransition.islandBottom(fallback: 0))
+        let morph = DiscPageMorph(progress: reduceMotion ? 0 : pageProgress, canvas: canvas,
+                                  pageFrame: pageFrame, layout: layout)
         ZStack {
-            Color.black.ignoresSafeArea()
-            content.opacity(pageOpacity)
+            if controlsHidden { DiscBackdrop(progress: pageProgress) }
+            Group {
+                if usesDetailSurface {
+                    content
+                } else {
+                    content.modifier(morph)
+                }
+            }
+                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { pageFrame = $0 }
+                .opacity(reduceMotion ? 1 - Double(pageProgress) : 1)
+                .environment(\.discPageMorph, usesDetailSurface ? morph : nil)
                 .environment(\.discPlaybackControlsHidden, controlsHidden)
                 .allowsHitTesting(disc == nil)
         }
@@ -212,23 +344,30 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
             #endif
             .background {
                 GeometryReader { geometry in
-                    Color.clear.onChange(of: geometry.size, initial: true) { _, size in
-                        portraitLayoutReady = size.width > 0 && size.height > size.width
+                    Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { _, frame in
+                        canvas = frame
+                        portraitLayoutReady = frame.width > 0 && frame.height > frame.width
                     }
                 }
+                .ignoresSafeArea()
             }
             .overlay {
                 if let disc {
-                    PlaybackDiscTransition(item: disc, inserting: inserting, movementStarted: {
-                        // Shares the disc movement's animation transaction and exact duration.
-                        pageOpacity = inserting ? 0 : 1
-                    }) {
+                    PlaybackDiscTransition(item: disc, inserting: inserting, progress: $pageProgress) {
                         self.disc = nil
                         if inserting, let requested { present(requested) }
                     }.id(inserting ? "disc-in" : "disc-out")
                 }
             }
-            .lucentPlaybackPresentation(item: $presented, onDismiss: reveal) { item in destination(item) }
+            .lucentPlaybackPresentation(isPresented: $playbackCoverVisible, onDismiss: reveal) {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    if let presented { destination(presented).id(presented.id) }
+                }
+                #if os(iOS)
+                .onAppear { LucentOrientationDelegate.setPlaybackPresented(true) }
+                #endif
+            }
             .onChange(of: requested?.id, initial: true) { _, id in
                 guard id != nil, let requested else { return }
                 revealTask?.cancel()
@@ -245,14 +384,14 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
         enabled
         #endif
     }
-    private var controlsHidden: Bool { disc != nil || presented != nil || pageOpacity < 1 }
+    private var controlsHidden: Bool { disc != nil || presented != nil || pageProgress > 0 }
 
     private func present(_ item: MediaItem) {
-        #if os(iOS)
-        LucentOrientationDelegate.setPlaybackPresented(true)
-        #endif
         var transaction = Transaction(animation: nil); transaction.disablesAnimations = true
-        withTransaction(transaction) { presented = item }
+        withTransaction(transaction) {
+            presented = item
+            playbackCoverVisible = true
+        }
     }
     #if os(iOS)
     private func portraitSceneIsSettled() -> Bool {
@@ -275,10 +414,11 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
 
     private func reveal() {
         requested = nil
+        presented = nil
         #if os(iOS)
-        LucentOrientationDelegate.setPlaybackPresented(false, forceUpdate: true)
+        LucentOrientationDelegate.setPlaybackPresented(false)
         #endif
-        guard animatesDisc, let lastItem else { pageOpacity = 1; return }
+        guard animatesDisc, let lastItem else { pageProgress = 0; return }
         revealTask?.cancel()
         revealTask = Task { @MainActor in
             #if os(iOS)
@@ -297,7 +437,7 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
             var transaction = Transaction(animation: nil)
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                pageOpacity = 0
+                pageProgress = 1
                 inserting = false
                 disc = lastItem
             }
@@ -306,8 +446,12 @@ private struct DiscPlaybackPresentation<Destination: View>: ViewModifier {
 }
 
 extension View {
-    func discPlaybackCover<Destination: View>(item: Binding<MediaItem?>,
+    func discPlaybackCover<Destination: View>(item: Binding<MediaItem?>, usesDetailSurface: Bool = false,
         @ViewBuilder content: @escaping (MediaItem) -> Destination) -> some View {
-        modifier(DiscPlaybackPresentation(requested: item, destination: content))
+        modifier(DiscPlaybackPresentation(requested: item, destination: content, usesDetailSurface: usesDetailSurface))
+    }
+
+    func detailDiscPageSurface() -> some View {
+        modifier(DetailDiscPageSurface())
     }
 }

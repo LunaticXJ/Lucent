@@ -90,7 +90,7 @@ struct AppSettingsView: View {
             }
         }
         .modifier(LucentSettingsPageStyle())
-        .navigationTitle("设置")
+        .lucentPageTitle("设置")
         .lucentTabRoot()
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
@@ -110,13 +110,13 @@ struct AppSettingsView: View {
     private func settingsPage<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         Form(content: content)
             .modifier(LucentSettingsPageStyle())
-            .navigationTitle(LocalizedStringKey(title)).lucentNavigationTitleStyle()
+            .lucentPageTitle(title).lucentNavigationTitleStyle()
     }
 
     private var appearancePage: some View {
         settingsPage("外观与首页") {
             Section {
-                Picker("主题", selection: $appearance) {
+                LucentSettingsPicker("主题", selection: $appearance) {
                     Text("跟随系统").tag("system")
                     Text("深色").tag("dark")
                     Text("浅色").tag("light")
@@ -146,14 +146,14 @@ struct AppSettingsView: View {
                 #endif
                 NavigationLink("进度记忆") { PlaybackProgressSettings().lucentSecondaryPage() }
                 Toggle("拖动进度预览", isOn: $seekPreviewEnabled)
-                Picker("自动隐藏控制栏", selection: $controlsAutoHideDelay) {
+                LucentSettingsPicker("自动隐藏控制栏", selection: $controlsAutoHideDelay) {
                     Text("3 秒").tag(3.0)
                     Text("5 秒").tag(5.0)
                     Text("8 秒").tag(8.0)
                     Text("不自动隐藏").tag(0.0)
                 }
                 .pickerStyle(.menu)
-                Picker("快进 / 快退间隔", selection: $seekInterval) {
+                LucentSettingsPicker("快进 / 快退间隔", selection: $seekInterval) {
                     ForEach([5.0, 10.0, 15.0, 30.0], id: \.self) { seconds in
                         Text("\(Int(seconds)) 秒").tag(seconds)
                     }
@@ -162,7 +162,7 @@ struct AppSettingsView: View {
                 Toggle("显示剩余时长", isOn: $showRemainingTime)
             }
             Section {
-                Picker("画面缩放", selection: $videoScaleMode) {
+                LucentSettingsPicker("画面缩放", selection: $videoScaleMode) {
                     ForEach(VideoScaleMode.allCases, id: \.rawValue) { mode in
                         Text(LocalizedStringKey(mode.title)).tag(mode.rawValue)
                     }
@@ -173,7 +173,7 @@ struct AppSettingsView: View {
                 Toggle("自动跳过片头片尾", isOn: $autoSkipSegments)
             }
             Section {
-                Picker("扬声器布局", selection: $atmosLayout) {
+                LucentSettingsPicker("扬声器布局", selection: $atmosLayout) {
                     ForEach(["5.1.2", "5.1.4", "7.1.2", "7.1.4", "9.1.6"], id: \.self) { layout in
                         Text(layout).tag(layout)
                     }
@@ -268,12 +268,12 @@ struct AppSettingsView: View {
     private var libraryPage: some View {
         settingsPage("聚合媒体库") {
             Section("浏览") {
-                Picker("默认排序", selection: $sortSelection) {
+                LucentSettingsPicker("默认排序", selection: $sortSelection) {
                     Text("最近添加").tag("newest")
                     Text("标题").tag("title")
                 }
                 .pickerStyle(.menu)
-                Picker("默认筛选", selection: $filterSelection) {
+                LucentSettingsPicker("默认筛选", selection: $filterSelection) {
                     Text("全部").tag("all")
                     Text("未看完").tag("unwatched")
                     Text("收藏").tag("favorites")
@@ -288,7 +288,7 @@ struct AppSettingsView: View {
                     Text("在片源中连接存储并导入目录。停用不删除记录。")
                 }
                 Section("扫描与影片资料") {
-                    Picker("自动扫描", selection: $autoScanInterval) {
+                    LucentSettingsPicker("自动扫描", selection: $autoScanInterval) {
                         Text("仅手动").tag(0.0)
                         Text("每天").tag(86_400.0)
                         Text("每周").tag(604_800.0)

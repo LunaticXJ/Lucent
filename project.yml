@@ -24,6 +24,7 @@ targets:
     type: application
     platform: iOS
     sources:
+      - path: Generated/LaunchScreen.storyboard
       - path: Sources/LucentApp
         excludes: [Resources/SubtitleFonts]
       - path: Sources/LucentApp/Resources/SubtitleFonts
@@ -43,8 +44,7 @@ targets:
       properties:
         CFBundleDisplayName: Lucent
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen:
-          UIColorName: AppBackground
+        UILaunchStoryboardName: LaunchScreen
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

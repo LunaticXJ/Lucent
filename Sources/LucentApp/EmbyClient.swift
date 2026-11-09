@@ -306,7 +306,12 @@ enum EmbyClient {
         ]
         request.url = components.url
         let page = try JSONDecoder().decode(Page.self, from: await fetch(request))
-        return BrowsePage(items: page.items, totalCount: page.totalRecordCount)
+        var seenSeries = Set<String>()
+        let items = page.items.filter { item in
+            guard item.type == "Episode", let seriesID = item.seriesId, !seriesID.isEmpty else { return true }
+            return seenSeries.insert(seriesID).inserted
+        }
+        return BrowsePage(items: items, totalCount: page.totalRecordCount)
     }
 
     static func mediaCounts(source: EmbySource, token: String) async throws -> (movies: Int, series: Int) {
@@ -357,6 +362,7 @@ enum EmbyClient {
             URLQueryItem(name: "Recursive", value: "true"),
             URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
             URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "Fields", value: "ProductionYear,CommunityRating"),
             URLQueryItem(name: "EnableUserData", value: "true")
         ]
         request.url = components.url
@@ -433,15 +439,22 @@ enum EmbyClient {
 
     static func updateUserData(source: EmbySource, token: String, itemID: String,
                                position: Double? = nil, played: Bool? = nil,
-                               favorite: Bool? = nil) async throws {
+                               favorite: Bool? = nil, lastPlayedAt: Date? = nil) async throws {
         var request = try makeRequest(baseAddress: source.baseAddress,
                                       path: "Users/\(source.userID)/Items/\(itemID)/UserData", token: token)
         request.allowsCellularAccess = NetworkUsagePolicy.allowsSync
-        let current = try await fetch(request)
-        var fields = (try JSONSerialization.jsonObject(with: current)) as? [String: Any] ?? [:]
+        var itemRequest = try makeRequest(baseAddress: source.baseAddress,
+                                          path: "Users/\(source.userID)/Items/\(itemID)", token: token)
+        itemRequest.allowsCellularAccess = request.allowsCellularAccess
+        let current = try await fetch(itemRequest)
+        guard let item = try JSONSerialization.jsonObject(with: current) as? [String: Any],
+              var fields = item["UserData"] as? [String: Any] else {
+            throw EmbyError.invalidResponse
+        }
         if let position { fields["PlaybackPositionTicks"] = Int64(max(0, position) * 10_000_000) }
         if let played { fields["Played"] = played }
         if let favorite { fields["IsFavorite"] = favorite }
+        if let lastPlayedAt { fields["LastPlayedDate"] = ISO8601DateFormatter().string(from: lastPlayedAt) }
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: fields)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -658,7 +671,7 @@ enum ServerEpisodeClient {
                 URLQueryItem(name: "UserId", value: userID),
                 URLQueryItem(name: "StartIndex", value: String(episodes.count)),
                 URLQueryItem(name: "Limit", value: "200"),
-                URLQueryItem(name: "Fields", value: "Overview,MediaSources"),
+                URLQueryItem(name: "Fields", value: "Overview,MediaSources,Path"),
                 URLQueryItem(name: "EnableUserData", value: "true")
             ]
             var request = URLRequest(url: components.url!)

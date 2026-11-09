@@ -45,21 +45,21 @@ struct LocalizationSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Picker("界面语言", selection: $interface) {
+                LucentSettingsPicker("界面语言", selection: $interface) {
                     Text("跟随系统").tag("system")
                     Text("简体中文").tag("zh-Hans")
                     Text("繁体中文").tag("zh-Hant")
                     Text("English").tag("en")
                 }
-                Picker("海报与元数据", selection: $content) {
+                LucentSettingsPicker("海报与元数据", selection: $content) {
                     Text("自动").tag("auto")
                     languageOptions
                 }
-                Picker("字幕首选语言", selection: $subtitles) {
+                LucentSettingsPicker("字幕首选语言", selection: $subtitles) {
                     Text("自动").tag("auto")
                     languageOptions
                 }
-                Picker("音轨首选语言", selection: $audio) {
+                LucentSettingsPicker("音轨首选语言", selection: $audio) {
                     Text("保留片源默认").tag("original")
                     Text("自动").tag("auto")
                     languageOptions
@@ -71,13 +71,13 @@ struct LocalizationSettingsView: View {
                         LocaleChoiceList(title: "地区", selection: $region, automatic: "system", options: Locale.Region.isoRegions.map { ($0.identifier, locale.localizedString(forRegionCode: $0.identifier) ?? $0.identifier) })
                     }.lucentSecondaryPage()
                 } label: { LabeledContent("地区", value: region == "system" ? String(localized: "跟随系统", locale: locale) : locale.localizedString(forRegionCode: region) ?? region) }
-                Picker("日期格式", selection: $dateOrder) {
+                LucentSettingsPicker("日期格式", selection: $dateOrder) {
                     Text("跟随地区").tag("system")
                     Text("年 / 月 / 日").tag("ymd")
                     Text("日 / 月 / 年").tag("dmy")
                     Text("月 / 日 / 年").tag("mdy")
                 }
-                Picker("时间格式", selection: $clock) {
+                LucentSettingsPicker("时间格式", selection: $clock) {
                     Text("跟随地区").tag("system")
                     Text("12 小时制").tag("12")
                     Text("24 小时制").tag("24")
@@ -95,7 +95,7 @@ struct LocalizationSettingsView: View {
             } footer: { Text("按已匹配的 TMDB 编号更新聚合媒体库，不重新识别文件。影视服务器资料由服务器提供。") }
         }
             .modifier(LucentSettingsPageStyle())
-        .navigationTitle("语言与地区").lucentNavigationTitleStyle()
+        .lucentPageTitle("语言与地区").lucentNavigationTitleStyle()
         .tint(.gray)
     }
     private var languageOptions: some View {
@@ -115,7 +115,7 @@ private struct LocaleChoiceList: View {
             ForEach(options.filter { query.isEmpty || $0.1.localizedStandardContains(query) || $0.0.localizedStandardContains(query) }.sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }, id: \.0) { id, title in
                 choice(id, title: title)
             }
-        }.navigationTitle(LocalizedStringKey(title)).lucentNavigationTitleStyle().searchable(text: $query)
+        }.lucentPageTitle(title).lucentNavigationTitleStyle().searchable(text: $query)
     }
     private func choice(_ id: String, title: String) -> some View {
         Button { selection = id } label: {

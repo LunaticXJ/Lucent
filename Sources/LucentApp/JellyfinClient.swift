@@ -39,13 +39,14 @@ struct JellyfinItem: Codable, Sendable {
         }
         let id: String?
         let name: String?
+        var path: String? = nil
         let container: String?
         let bitrate: Int?
         let size: Int64?
         let mediaStreams: [Stream]?
         enum CodingKeys: String, CodingKey {
             case id = "Id", name = "Name", container = "Container", bitrate = "Bitrate", size = "Size"
-            case mediaStreams = "MediaStreams"
+            case mediaStreams = "MediaStreams", path = "Path"
         }
     }
     struct ImageTags: Codable, Sendable {
@@ -342,7 +343,8 @@ enum JellyfinClient {
             URLQueryItem(name: "SearchTerm", value: term),
             URLQueryItem(name: "Recursive", value: "true"),
             URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
-            URLQueryItem(name: "Limit", value: "50")
+            URLQueryItem(name: "Limit", value: "50"),
+            URLQueryItem(name: "Fields", value: "ProductionYear,CommunityRating")
         ]
         request.url = components.url
         return try JSONDecoder().decode(Page.self, from: await fetch(request)).items

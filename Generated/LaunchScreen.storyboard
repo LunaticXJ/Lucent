@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="23504" targetRuntime="iOS.CocoaTouch" useAutolayout="YES" launchScreen="YES" initialViewController="launch-controller">
+    <device id="retina6_12" orientation="portrait" appearance="dark"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="23506"/>
+    </dependencies>
+    <scenes>
+        <scene sceneID="launch-scene">
+            <objects>
+                <viewController id="launch-controller" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="launch-view">
+                        <rect key="frame" x="0" y="0" width="393" height="852"/>
+                        <subviews>
+                            <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" image="LaunchIconGradientPlayTransparent" translatesAutoresizingMaskIntoConstraints="NO" id="launch-icon">
+                                <rect key="frame" x="116.5" y="346" width="160" height="160"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" constant="160" id="icon-width"/>
+                                    <constraint firstAttribute="height" constant="160" id="icon-height"/>
+                                </constraints>
+                            </imageView>
+                        </subviews>
+                        <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                        <constraints>
+                            <constraint firstItem="launch-icon" firstAttribute="centerX" secondItem="launch-view" secondAttribute="centerX" id="icon-center-x"/>
+                            <constraint firstItem="launch-icon" firstAttribute="centerY" secondItem="launch-view" secondAttribute="centerY" id="icon-center-y"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="launch-responder" sceneMemberID="firstResponder"/>
+            </objects>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="LaunchIconGradientPlayTransparent" width="160" height="160"/>
+    </resources>
+</document>

@@ -63,7 +63,7 @@ struct MovieDetailView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    StretchyHeroHeader(height: max(620, geometry.size.height * 0.76)) { height, pull in
+                    StretchyHeroHeader(height: (max(620, geometry.size.height * 0.76) * posterDisplayScale).rounded(.up) / posterDisplayScale) { height, pull in
                         hero(width: geometry.size.width, height: height, pull: pull)
                     }
                     VStack(alignment: .leading, spacing: 26) {
@@ -94,6 +94,7 @@ struct MovieDetailView: View {
                                     DetailSkeletonBlock().frame(width: LucentUI.detailSize(88), height: LucentUI.detailSize(112))
                                 }
                             }
+                            DetailMediaSkeleton()
                         } else {
                             castSection
                             mediaSection
@@ -107,11 +108,11 @@ struct MovieDetailView: View {
                     .padding(.bottom, 54)
                     .frame(maxWidth: LucentUI.detailContentWidth)
                     .frame(maxWidth: .infinity)
-                    .background(background)
                 }
                 .frame(width: geometry.size.width, alignment: .leading)
             }
             .background(background)
+            .detailDiscPageSurface()
             .ignoresSafeArea(edges: .top)
             .lucentHideTopScrollEdge()
             .coordinateSpace(name: "lucentHeroScroll")
@@ -188,28 +189,31 @@ struct MovieDetailView: View {
 
     private func hero(width: CGFloat, height: CGFloat, pull: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
-            Group {
-            if artworkResolved {
-                SeriesArtwork(baseAddress: server?.base, token: server?.token,
-                              itemID: server?.itemID, backdrop: artwork?.posterURL == nil,
-                              fallback: item.metadata?.backdropPath.flatMap { URL(string: "https://image.tmdb.org/t/p/original\($0)") },
-                              preferredURL: artwork?.posterURL,
-                              maximumWidth: min(4096, Int((max(width, (height - pull) * 16 / 9) * posterDisplayScale).rounded(.up))), fallbackToBackdrop: true,
-                              targetPixelSize: CGSize(width: (width * posterDisplayScale).rounded(), height: ((height - pull) * posterDisplayScale).rounded()),
-                              onImage: { posterLightColor = DetailPosterPalette.lightColor(from: $0) })
-            } else { DetailSkeletonBlock(cornerRadius: 0) }
+            ZStack {
+                Group {
+                    if artworkResolved {
+                        SeriesArtwork(baseAddress: server?.base, token: server?.token,
+                                      itemID: server?.itemID, backdrop: artwork?.posterURL == nil,
+                                      fallback: item.metadata?.backdropPath.flatMap { URL(string: "https://image.tmdb.org/t/p/original\($0)") },
+                                      preferredURL: artwork?.posterURL,
+                                      maximumWidth: min(4096, Int((max(width, (height - pull) * 16 / 9) * posterDisplayScale).rounded(.up))), fallbackToBackdrop: true,
+                                      targetPixelSize: CGSize(width: (width * posterDisplayScale).rounded(), height: ((height - pull) * posterDisplayScale).rounded()),
+                                      onImage: { posterLightColor = DetailPosterPalette.lightColor(from: $0) })
+                    } else { DetailSkeletonBlock(cornerRadius: 0) }
+                }
+                .frame(width: width, height: height)
+                .scaleEffect(1 + min(pull / max(height - pull, 1), 0.4), anchor: .top)
+                .clipped()
+                #if os(iOS)
+                .visualEffect { effect, geometry in
+                    effect.offset(y: max(0, -geometry.frame(in: .scrollView(axis: .vertical)).minY))
+                }
+                #endif
+                LinearGradient(colors: [.black.opacity(0.28), .clear],
+                               startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.30))
             }
-                    .frame(width: width, height: height)
-                    .scaleEffect(1 + min(pull / max(height - pull, 1), 0.4), anchor: .top)
-                    .clipped()
-                    #if os(iOS)
-                    .visualEffect { effect, geometry in
-                        effect.offset(y: max(0, -geometry.frame(in: .scrollView(axis: .vertical)).minY))
-                    }
-                    #endif
-            LinearGradient(colors: [.black.opacity(0.28), .clear,
-                                    background.opacity(0.15), background.opacity(0.72), background],
-                           startPoint: .top, endPoint: .bottom)
+            .frame(width: width, height: height)
+            .mask { HeroArtworkFade() }
             VStack(spacing: 12) {
                 Group {
                 if artworkResolved {
@@ -221,37 +225,50 @@ struct MovieDetailView: View {
                     Color.clear.frame(height: 100)
                 }
                 }
-                HStack(spacing: 7) {
-                    if let rating = detail?.communityRating ?? item.metadata?.rating {
-                        Image(systemName: "star.fill").foregroundStyle(LucentUI.ratingTint)
-                        Text(rating.formatted(.number.precision(.fractionLength(1))))
+                if detail == nil && loadError == nil {
+                    DetailSkeletonBlock().frame(width: 150, height: 14).accessibilityHidden(true)
+                    DetailSkeletonBlock().frame(width: 112, height: 14).accessibilityHidden(true)
+                } else {
+                    let rating = detail?.communityRating ?? item.metadata?.rating
+                    HStack(spacing: 7) {
+                        if let rating, rating > 0 {
+                            Image(systemName: "star.fill").foregroundStyle(.orange)
+                            Text(rating.formatted(.number.precision(.fractionLength(1))))
+                        }
+                        if let date = displayDate { Text((rating.map { $0 > 0 } == true ? "·  " : "") + date) }
+                        if let genres = detail?.genres, !genres.isEmpty {
+                            Text((rating.map { $0 > 0 } == true || displayDate != nil ? "·  " : "") + genres.prefix(2).joined(separator: "、")).lineLimit(1)
+                        }
                     }
-                    if let date = displayDate { Text("·  " + date) }
-                    if let genres = detail?.genres, !genres.isEmpty {
-                        Text("·  " + genres.prefix(2).joined(separator: "、")).lineLimit(1)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(detailInk)
+                    if (detail != nil || loadError != nil), !technicalSummary.isEmpty {
+                        Text(technicalSummary)
+                            .font(.caption)
+                            .foregroundStyle(detailInk.opacity(0.8))
                     }
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(detailInk)
-                Text(technicalSummary)
-                    .font(.caption)
-                    .foregroundStyle(detailInk.opacity(0.8))
-                LucentPlayButton(resumeTime: isInProgress ? clock(progressSeconds) : nil) { play() }
+                LucentPlayButton(resumeTime: isInProgress ? clock(progressSeconds) : nil,
+                                 isLoading: detail == nil && loadError == nil) { play() }
                 #if os(tvOS)
                 .prefersDefaultFocus(true, in: detailFocusScope)
                 #endif
-                HStack(spacing: 42) {
-                    Button { library.toggleFavorite(id: item.id) } label: {
-                        Image(systemName: item.isFavorite ? "heart.fill" : "heart")
+                if detail == nil && loadError == nil {
+                    DetailActionSkeleton()
+                } else {
+                    HStack(spacing: 42) {
+                        Button { library.toggleFavorite(id: item.id) } label: {
+                            Image(systemName: item.isFavorite ? "heart.fill" : "heart")
+                        }
+                        Button {
+                            if item.watched { library.markUnwatched(id: item.id) }
+                            else { library.markWatched(id: item.id) }
+                        } label: { Image(systemName: "flag") }
                     }
-                    Button {
-                        if item.watched { library.markUnwatched(id: item.id) }
-                        else { library.markWatched(id: item.id) }
-                    } label: { Image(systemName: "flag") }
+                    .font(.title3)
+                    .lucentContentButtonStyle()
+                    .padding(.top, 7)
                 }
-                .font(.title3)
-                .lucentContentButtonStyle()
-                .padding(.top, 7)
             }
             .frame(maxWidth: LucentUI.detailHeroContentWidth)
             .padding(.horizontal, 28)
@@ -329,6 +346,7 @@ struct MovieDetailView: View {
 
     private func clock(_ seconds: Double) -> String {
         let time = Int(max(0, seconds))
+        if time >= 3600 { return String(format: "%d:%02d:%02d", time / 3600, time / 60 % 60, time % 60) }
         return String(format: "%02d:%02d", time / 60, time % 60)
     }
 
@@ -350,8 +368,16 @@ struct MovieDetailView: View {
             return
         }
         do {
-            detail = try await ServerDetailClient.item(baseAddress: server.base,
+            let requestedAt = Date()
+            let loaded = try await ServerDetailClient.item(baseAddress: server.base,
                 userID: server.user, itemID: server.itemID, token: server.token)
+            try Task.checkCancellation()
+            detail = loaded
+            switch item.location {
+            case .embyItem(let source, _), .jellyfinItem(let source, _):
+                library.mergeServerCards([loaded], sourceID: source, requestedAt: requestedAt)
+            default: break
+            }
         } catch {
             loadError = error.localizedDescription
         }

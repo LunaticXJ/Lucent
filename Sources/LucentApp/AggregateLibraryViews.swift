@@ -71,7 +71,12 @@ struct AggregateLibraryOverview: View {
                 metric("电影", movies); metric("剧集", series); metric("视频文件", items.count)
             }
             .padding(.horizontal, 16).padding(.vertical, 14)
-            Divider().padding(.horizontal, 16)
+            Rectangle()
+                .fill(LinearGradient(colors: [Color(red: 0.30, green: 0.64, blue: 0.98).opacity(0.30), .clear],
+                                     startPoint: .leading, endPoint: .trailing))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
+                .accessibilityHidden(true)
             Button(action: manageStorage) {
                 HStack(spacing: 11) {
                     Image(systemName: "externaldrive.connected.to.line.below")
@@ -85,13 +90,21 @@ struct AggregateLibraryOverview: View {
                 .padding(.horizontal, 18).frame(minHeight: 50)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
-        }.modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius)))
+        }
+        .foregroundStyle(.primary)
+        .background(LucentUI.serverCardGradient,
+                    in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: LucentUI.sectionRadius)
+                .strokeBorder(LucentUI.serverCardBorder(), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
     }
     private func metric(_ title: String, _ value: Int) -> some View {
-        VStack(alignment: .center, spacing: 5) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(value.formatted(.number.locale(LocalizationPreferences.current.displayLocale))).font(.title2.bold()).monospacedDigit()
             Text(LocalizedStringKey(title)).font(.caption).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, alignment: .center)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func sourceRow(_ source: LibraryFileSource) -> some View {
         let storage = library.libraryStorages.first { $0.id == source.storageID }
@@ -167,7 +180,7 @@ struct StorageManagementView: View {
             }
         }
         #else
-        .navigationTitle("存储").lucentNavigationTitleStyle()
+        .lucentPageTitle("存储").lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
             ToolbarItem(placement: .primaryAction) { Button(action: add) { Image(systemName: "plus") }.accessibilityLabel("添加存储") }
@@ -263,6 +276,14 @@ struct StorageDirectoryBrowser: View {
                 LucentStateView(title: "无法读取目录", symbol: "wifi.exclamationmark", message: message, actionTitle: "重试") { Task { await load() } }
             } else {
                 List {
+                    #if os(tvOS)
+                    Section {
+                        Button(selectionMode ? "取消选择" : "选择目录", systemImage: selectionMode ? "xmark" : "checkmark.circle") {
+                            selectionMode.toggle()
+                            if !selectionMode { selected = [] }
+                        }
+                    }
+                    #endif
                     if selectionMode {
                         Section { directoryRow(current, currentRow: true) }
                     }
@@ -281,13 +302,15 @@ struct StorageDirectoryBrowser: View {
         .background(LucentUI.page)
         #if !os(macOS)
         .lucentCollectionChrome(title: trail.isEmpty ? (root.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "存储") : root.name) : current.name) {
+            #if !os(tvOS)
             if child == nil { Button(selectionMode ? "取消选择" : "选择目录") {
                 selectionMode.toggle()
                 if !selectionMode { selected = [] }
             }.font(.subheadline) }
+            #endif
         }
         #else
-        .navigationTitle(trail.isEmpty ? (root.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "存储") : root.name) : current.name)
+        .lucentPageTitle(trail.isEmpty ? (root.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "存储") : root.name) : current.name)
         .lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
@@ -338,7 +361,9 @@ struct StorageDirectoryBrowser: View {
     private var breadcrumbs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                #if !os(macOS)
+                #if os(tvOS)
+                Text((ancestors.map(\.title) + [root.path.isEmpty ? "根目录" : root.name]).joined(separator: " › "))
+                #elseif !os(macOS)
                 ForEach(Array(ancestors.enumerated()), id: \.offset) { _, ancestor in
                     Button(ancestor.title, action: ancestor.goBack)
                     Image(systemName: "chevron.right").font(.caption2)
@@ -354,10 +379,32 @@ struct StorageDirectoryBrowser: View {
             }.font(.subheadline).foregroundStyle(.secondary).padding(16)
         }
     }
-    private func directoryRow(_ entry: StorageDirectory, currentRow: Bool = false) -> some View {
-        let existing = library.scopeOverlap(storageID: storageID, directory: entry)
+    @ViewBuilder private func directoryRow(_ entry: StorageDirectory, currentRow: Bool = false) -> some View {
+        let overlaps = library.overlappingScopes(storageID: storageID, directory: entry)
+        let existing = overlaps.first
+        let importedLabel: LocalizedStringKey? = existing.map { source in
+            overlaps.count > 1 ? "已导入：\(source.name) 等" : "已导入：\(source.name)"
+        }
         let covered = selected.contains { LibraryScopePath.contains($0.path, entry.path) }
-        return HStack(spacing: 12) {
+        #if os(tvOS)
+        Button {
+            if selectionMode { toggle(entry) }
+            else if !currentRow { child = entry }
+        } label: {
+            HStack(spacing: 12) {
+                if selectionMode { Image(systemName: covered ? "checkmark.circle.fill" : "circle") }
+                Label(LocalizedStringKey(currentRow ? "选择当前目录" : entry.name), systemImage: "folder")
+                Spacer()
+                if let importedLabel { Text(importedLabel).font(.caption).foregroundStyle(.secondary) }
+                if !selectionMode && !currentRow { Image(systemName: "chevron.right") }
+            }
+        }
+        .disabled(selectionMode && existing != nil)
+        .contextMenu {
+            if !currentRow { Button("浏览目录", systemImage: "folder") { child = entry } }
+        }
+        #else
+        HStack(spacing: 12) {
             if selectionMode {
                 Button { toggle(entry) } label: {
                     Image(systemName: covered ? "checkmark.circle.fill" : "circle").font(.title3)
@@ -380,13 +427,14 @@ struct StorageDirectoryBrowser: View {
                     Image(systemName: "folder").font(.title3)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(LocalizedStringKey(currentRow ? "选择当前目录" : entry.name)).foregroundStyle(.primary)
-                        if let existing { Text("已导入：\(existing.name)").font(.caption).foregroundStyle(.secondary) }
+                        if let importedLabel { Text(importedLabel).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
                     if !currentRow { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
                 }.contentShape(Rectangle())
             }.lucentFormActionStyle()
         }
+        #endif
     }
     private func toggle(_ entry: StorageDirectory) {
         guard library.scopeOverlap(storageID: storageID, directory: entry) == nil else { return }
@@ -438,7 +486,7 @@ private struct DirectoryImportReview: View {
             Section { Toggle("导入后立即扫描", isOn: $scanImmediately) } footer: { Text("扫描在后台任务中进行，你可以继续浏览。仅扫描选中的目录及其子目录。") }
             if let message { Section { Text(LocalizedStringKey(message)).foregroundStyle(.red) } }
         }
-        .navigationTitle("导入文件源").lucentNavigationTitleStyle()
+        .lucentPageTitle("导入文件源").lucentNavigationTitleStyle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("返回") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {

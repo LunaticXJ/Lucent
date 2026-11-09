@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 @MainActor final class DanmakuModel: ObservableObject {
     @Published private(set) var comments: [DanmakuComment] = []
@@ -7,6 +6,67 @@ import UniformTypeIdentifiers
     @Published private(set) var revision = UUID()
     @Published var status: String?
     private var generation = UUID()
+    private var activeItemID: UUID?
+
+    private func seriesKeys(for item: MediaItem) -> [String] {
+        guard case .episode(let series, let season, _, _) = item.identity else { return [] }
+        let key = "lucent.danmaku.series.\(series).\(season)"
+        guard let id = item.metadata?.providerID, id > 0 else { return [key] }
+        return [key, "lucent.danmaku.series.\(id).\(season)"]
+    }
+
+    func load(for item: MediaItem, enabled: Bool, servers: [DandanplayClient.Server]) async {
+        if activeItemID != item.id {
+            activeItemID = item.id
+            comments = []
+            source = "未选择弹幕"
+            revision = UUID()
+        }
+        if comments.isEmpty { await restore(for: item.id) }
+        guard enabled, !Task.isCancelled else { return }
+        let keys = seriesKeys(for: item)
+        if !comments.isEmpty {
+            // Promote older preferences indexed by metadata to the series/season key.
+            if let key = keys.first, UserDefaults.standard.object(forKey: key) == nil {
+                let existing = keys.dropFirst().compactMap { UserDefaults.standard.stringArray(forKey: $0) }.first
+                let sourceParts = source.components(separatedBy: " · ")
+                let server = servers.first { $0.name == sourceParts.first }
+                if let existing {
+                    UserDefaults.standard.set(existing, forKey: key)
+                } else if let server, sourceParts.count == 3 {
+                    UserDefaults.standard.set([server.id, sourceParts[1]], forKey: key)
+                }
+            }
+            return
+        }
+        let request = generation
+        let preference = keys.compactMap { UserDefaults.standard.stringArray(forKey: $0) }.first
+        var ordered = servers
+        if let preferredID = preference?.first, let index = ordered.firstIndex(where: { $0.id == preferredID }) {
+            ordered.insert(ordered.remove(at: index), at: 0)
+        }
+        for server in ordered {
+            guard !Task.isCancelled, generation == request else { return }
+            do {
+                let preferredTitle = preference?.first == server.id ? preference?.last : nil
+                guard let match = try await DandanplayClient.exactMatch(for: item, server: server, preferredTitle: preferredTitle) else { continue }
+                let data = try await DandanplayClient.comments(episodeID: match.id, server: server)
+                guard !Task.isCancelled, generation == request else { return }
+                try await installMatch(match, data: data, item: item)
+                return
+            } catch {
+                guard generation == request else { return }
+            }
+        }
+    }
+
+    func installMatch(_ match: DandanplayClient.Episode, data: Data, item: MediaItem) async throws {
+        guard activeItemID == item.id else { throw CancellationError() }
+        try await install(data: data, source: "\(match.server.name) · \(match.anime) · \(match.title)", itemID: item.id)
+        for key in seriesKeys(for: item) {
+            UserDefaults.standard.set([match.server.id, match.anime], forKey: key)
+        }
+    }
     private struct Saved: Codable, Sendable { let comments: [DanmakuComment]; let source: String }
     private static func url(_ id: UUID) -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -33,7 +93,7 @@ import UniformTypeIdentifiers
             try encoded.write(to: url, options: .atomic)
             return values
         }.value
-        guard generation == request, !Task.isCancelled else { return }
+        guard generation == request, !Task.isCancelled else { throw CancellationError() }
         comments = values; self.source = source; revision = UUID(); status = nil
     }
     func clear(for id: UUID) {
@@ -93,26 +153,38 @@ struct DanmakuOverlay: View {
     let playing: Bool
     let rate: Double
     @AppStorage("lucent.danmaku.opacity") private var opacity = 0.8
-    @AppStorage("lucent.danmaku.fontSize") private var fontSize = 22.0
+    @AppStorage("lucent.danmaku.fontSize") private var fontSize = 17.0
     @AppStorage("lucent.danmaku.area") private var area = 0.5
-    @AppStorage("lucent.danmaku.duration") private var duration = 8.0
+    @AppStorage("lucent.danmaku.duration") private var duration = 12.0
     @AppStorage("lucent.danmaku.offset") private var offset = 0.0
     @AppStorage("lucent.danmaku.blocked") private var blocked = ""
     @State private var layout: DanmakuLayout?
     @State private var anchorDate = Date()
+    @State private var anchorTime: Double?
+
+    private func displayTime(at date: Date) -> Double {
+        guard playing else { return time }
+        return (anchorTime ?? time) + max(0, date.timeIntervalSince(anchorDate)) * rate
+    }
+
+    private func syncClock(force: Bool = false) {
+        let now = Date()
+        guard force || anchorTime == nil || abs(displayTime(at: now) - time) > 0.12 else { return }
+        anchorDate = now
+        anchorTime = time
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !playing)) { frame in
+            TimelineView(.animation(paused: !playing)) { frame in
                 Canvas { context, size in
                     guard let layout else { return }
-                    let advance = playing ? min(0.5, max(0, frame.date.timeIntervalSince(anchorDate))) * rate : 0
-                    let clock = time + advance - offset
+                    let clock = displayTime(at: frame.date) - offset
                     for entry in layout.active(at: clock) {
                         let comment = entry.comment
                         let progress = min(1, max(0, (clock - comment.time) / layout.duration))
                         let x = comment.mode == .scroll ? size.width - progress * (size.width + entry.width) : (size.width - entry.width) / 2
-                        let top = 36.0 + Double(entry.lane) * (fontSize + 9)
+                        let top = 12.0 + Double(entry.lane) * (fontSize + 9)
                         let y = comment.mode == .bottom ? size.height - 100 - Double(entry.lane) * (fontSize + 9) : top
                         let color = Color(red: Double((comment.color >> 16) & 255) / 255,
                                           green: Double((comment.color >> 8) & 255) / 255,
@@ -135,8 +207,9 @@ struct DanmakuOverlay: View {
                 guard !Task.isCancelled else { return }; layout = value
             }
         }
-        .onChange(of: time) { _, _ in anchorDate = Date() }
-        .onChange(of: playing) { _, _ in anchorDate = Date() }
+        .onChange(of: time, initial: true) { _, _ in syncClock() }
+        .onChange(of: playing) { _, _ in syncClock(force: true) }
+        .onChange(of: rate) { _, _ in syncClock(force: true) }
         .opacity(opacity).allowsHitTesting(false).accessibilityHidden(true)
     }
 }
@@ -147,11 +220,10 @@ struct DanmakuSettingsView: View {
     let close: () -> Void
     @AppStorage("lucent.danmaku.enabled") private var enabled = false
     @AppStorage("lucent.danmaku.opacity") private var opacity = 0.8
-    @AppStorage("lucent.danmaku.fontSize") private var fontSize = 22.0
+    @AppStorage("lucent.danmaku.fontSize") private var fontSize = 17.0
     @AppStorage("lucent.danmaku.area") private var area = 0.5
-    @AppStorage("lucent.danmaku.duration") private var duration = 8.0
+    @AppStorage("lucent.danmaku.duration") private var duration = 12.0
     @AppStorage("lucent.danmaku.offset") private var offset = 0.0
-    @AppStorage("lucent.danmaku.blocked") private var blocked = ""
     @AppStorage(CustomDanmakuServers.key) private var customServersData = Data()
     @AppStorage("lucent.danmaku.selectedServer") private var selectedServerID = "official"
     @State private var query = ""
@@ -163,24 +235,25 @@ struct DanmakuSettingsView: View {
     @State private var busy = false
     @State private var searched = false
     @State private var status: String?
-    @State private var importer = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                settingsSection(nil) {
+                settingsSection("弹幕状态") {
                     Toggle("显示弹幕", isOn: $enabled)
+                        .tint(.gray)
                     LabeledContent("当前来源", value: model.source)
-                    #if !os(tvOS)
-                    Button("从文件导入", systemImage: "folder.badge.plus") { importer = true }.disabled(busy)
-                    #endif
                     if !model.comments.isEmpty { Button("移除此影片弹幕", role: .destructive) { model.clear(for: item.id) } }
                 }
-                settingsSection("在线匹配") {
-                    Picker("弹幕服务器", selection: $selectedServerID) {
-                        ForEach(servers) { server in Text(server.name).tag(server.id) }
+                settingsSection("手动匹配") {
+                    LabeledContent("来源") {
+                        Picker("来源", selection: $selectedServerID) {
+                            ForEach(servers) { server in Text(server.name).tag(server.id) }
+                        }.labelsHidden().pickerStyle(.menu)
                     }.disabled(busy)
-                    TextField("影片或剧集名称", text: $query).submitLabel(.search).onSubmit { search() }
-                    Button("搜索匹配的剧集", systemImage: "magnifyingglass") { search() }.disabled(query.count < 2 || busy)
+                    TextField("影片或剧集名称", text: $query)
+                        .submitLabel(.search)
+                        .onSubmit { if query.count >= 2 && !busy { search() } }
+                    Button("搜索弹幕", systemImage: "magnifyingglass") { search() }.disabled(query.count < 2 || busy)
                     if item.metadata != nil {
                         Button("按影片资料匹配当前集", systemImage: "sparkles") { search(precise: true) }.disabled(busy)
                     }
@@ -194,7 +267,7 @@ struct DanmakuSettingsView: View {
                                 defer { busy = false }
                                 do {
                                     let data = try await DandanplayClient.comments(episodeID: match.id, server: match.server)
-                                    try await model.install(data: data, source: "\(match.server.name) · \(match.anime) · \(match.title)", itemID: item.id)
+                                    try await model.installMatch(match, data: data, item: item)
                                     enabled = true; close()
                                 } catch { status = DanmakuError.message(for: error) }
                             }
@@ -208,27 +281,43 @@ struct DanmakuSettingsView: View {
 
                 }
                 settingsSection("显示") {
-                    slider("不透明度", value: $opacity, range: 0.2...1, formatted: "\(Int(opacity * 100))%")
-                    slider("字号", value: $fontSize, range: 14...36, formatted: "\(Int(fontSize))")
-                    Picker("显示区域", selection: $area) {
-                        Text("上方四分之一").tag(0.25); Text("上半屏").tag(0.5); Text("全屏").tag(1.0)
+                    displayPicker("不透明度", selection: $opacity, values: [0.2, 0.4, 0.6, 0.8, 1]) {
+                        $0.formatted(.percent.precision(.fractionLength(0)))
                     }
-                    slider("滚动时长", value: $duration, range: 4...14, formatted: "\(Int(duration)) 秒")
-                    LucentValueSlider(value: $offset, range: -120...120, step: 0.5)
-                    Text("时间偏移：\(offset.formatted(.number.precision(.fractionLength(1)))) 秒")
-                    Text("正值延后，负值提前。 ").font(.caption).foregroundStyle(.secondary)
+                    displayPicker("字号", selection: $fontSize, values: [14, 17, 20, 24, 28, 32, 36]) {
+                        $0.formatted(.number.precision(.fractionLength(0...2)))
+                    }
+                    displayPicker("显示区域", selection: $area, values: [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1]) {
+                        $0.formatted(.percent.precision(.fractionLength(0)))
+                    }
+                    displayPicker("滚动时长", selection: $duration, values: [4, 6, 8, 10, 12, 14]) {
+                        $0.formatted(.number.precision(.fractionLength(0...2))) + " s"
+                    }
                 }
-                settingsSection("屏蔽词 · 每行一个") {
-                    #if os(tvOS)
-                    TextField("屏蔽词", text: $blocked)
-                    #else
-                    TextEditor(text: $blocked).scrollContentBackground(.hidden).frame(minHeight: 80)
-                    #endif
+                settingsSection("时间同步") {
+                    LabeledContent("时间偏移") {
+                        HStack {
+                            Button { offset = max(-120, offset - 0.5) } label: {
+                                Image(systemName: "minus")
+                            }
+                            .accessibilityLabel("提前半秒")
+                            .disabled(offset <= -120)
+                            Text("\(offset.formatted(.number.precision(.fractionLength(1)))) 秒")
+                                .monospacedDigit()
+                            Button { offset = min(120, offset + 0.5) } label: {
+                                Image(systemName: "plus")
+                            }
+                            .accessibilityLabel("延后半秒")
+                            .disabled(offset >= 120)
+                        }
+                    }
+                    Text("正值延后，负值提前。").font(.caption).foregroundStyle(.secondary)
+                    Button("重置偏移") { offset = 0 }.disabled(offset == 0)
                 }
             }
             .font(.system(size: PlayerControlStyle.scaled(14)))
             .padding(16)
-            }
+        }
             .task {
                 query = item.identity?.seriesName ?? item.metadata?.localizedTitle ?? item.title
                 selectedServerID = selectedServer.id
@@ -237,22 +326,8 @@ struct DanmakuSettingsView: View {
             .onChange(of: customServersData) { _, _ in
                 selectedServerID = selectedServer.id; matches = []; searched = false; status = nil
             }
-            #if !os(tvOS)
-            .fileImporter(isPresented: $importer, allowedContentTypes: [.xml, .json]) { result in
-                Task {
-                    do {
-                        let url = try result.get(), scoped = url.startAccessingSecurityScopedResource()
-                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                        guard size > 0, size <= DanmakuParser.maximumBytes else { throw DanmakuError.invalidFile }
-                        let data = try Data(contentsOf: url)
-                        try await model.install(data: data, source: url.lastPathComponent, itemID: item.id)
-                        enabled = true; close()
-                    } catch { status = error.localizedDescription }
-                }
-            }
-            #endif
     }
+
     private func settingsSection<Content: View>(_ title: String?, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if let title { Text(LocalizedStringKey(title)).font(.system(size: PlayerControlStyle.scaled(12), weight: .semibold)).foregroundStyle(.secondary) }
@@ -281,10 +356,16 @@ struct DanmakuSettingsView: View {
             catch { status = DanmakuError.message(for: error) }
         }
     }
-    private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, formatted: String) -> some View {
-        VStack {
-            HStack { Text(title); Spacer(); Text(formatted).foregroundStyle(.secondary) }
-            LucentValueSlider(value: value, range: range, step: 0.05)
-        }.padding(.vertical, 3)
+    private func displayPicker(_ title: LocalizedStringKey, selection: Binding<Double>,
+                               values: [Double], format: @escaping (Double) -> String) -> some View {
+        let current = selection.wrappedValue
+        let options = values.contains(current) ? values : (values + [current]).sorted()
+        return LabeledContent(title) {
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.self) { value in
+                    Text(format(value)).tag(value)
+                }
+            }.labelsHidden().pickerStyle(.menu)
+        }
     }
 }

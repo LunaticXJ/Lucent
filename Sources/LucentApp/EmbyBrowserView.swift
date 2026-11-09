@@ -199,7 +199,7 @@ private struct EmbyBrowserPageView: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down")
+            Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 19, weight: .medium))
         }
         .buttonStyle(.automatic)
@@ -368,6 +368,7 @@ private struct EmbyBrowserPageView: View {
     }
 
     private func loadNextPage() async {
+        let requestedAt = Date()
         guard !loading, !loaded || nextStartIndex < totalCount else { return }
         let generation = loadGeneration
         let key = queryKey
@@ -427,6 +428,7 @@ private struct EmbyBrowserPageView: View {
             if firstPage { entries = page.items }
             else {
                 let existing = Set(entries.map(\.id))
+                library.mergeServerCards(page.items, sourceID: source.id, requestedAt: requestedAt)
                 entries.append(contentsOf: page.items.filter { !existing.contains($0.id) })
             }
             let count = fetchedCount ?? page.items.count
@@ -451,6 +453,7 @@ private struct EmbyBrowserPageView: View {
 }
 
 private struct SeriesPosterTile: View {
+    @EnvironmentObject private var library: LibraryStore
     let source: EmbySource
     let entry: JellyfinItem
     var folder = false
@@ -460,6 +463,10 @@ private struct SeriesPosterTile: View {
     @State private var artwork: PosterImage?
     private var artworkKey: String { "\(source.id)|\(entry.id)|false" }
     private var displayedArtwork: PosterImage? { artwork ?? ArtworkImageDecoder.cachedImage(key: artworkKey, maximumPixelSize: 525) }
+
+    private var metadata: LibraryStore.CardMetadata? {
+        library.cardMetadata[LibraryStore.cardKey(sourceID: source.id, itemID: entry.id)]
+    }
 
     var body: some View {
         LucentCatalogPosterLayout {
@@ -479,7 +486,7 @@ private struct SeriesPosterTile: View {
                             .clipped()
                         #endif
                     }
-                    if !folder, let rating = entry.communityRating, rating > 0 {
+                    if !folder, let rating = metadata?.rating ?? entry.communityRating, rating > 0 {
                         LucentRatingBadge(rating: rating)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             .padding(3)
@@ -489,8 +496,7 @@ private struct SeriesPosterTile: View {
             }
             .aspectRatio(aspectRatio, contentMode: .fit)
         } caption: {
-            LucentCatalogCaption(title: entry.name, yearText: folder ? nil : entry.displayYearText,
-                                 source: folder ? nil : source, item: entry)
+            LucentCatalogCaption(title: metadata?.title ?? entry.name, yearText: folder ? nil : metadata?.year ?? entry.displayYearText)
         }
         .task(id: "\(source.id)|\(entry.id)") {
             if let cached = displayedArtwork { artwork = cached; return }

@@ -29,6 +29,23 @@ enum LucentClipboard {
 }
 
 extension View {
+    /// tvOS's large navigation title can inherit a low-contrast bar treatment
+    /// over our content background. Keep the title in the native toolbar, with
+    /// semantic text styling independent of interactive controls.
+    @ViewBuilder func lucentPageTitle(_ title: String) -> some View {
+        #if os(tvOS)
+        navigationTitle(LocalizedStringKey(title))
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(LocalizedStringKey(title)).font(.title2.weight(.bold))
+                        .foregroundStyle(.primary).lineLimit(1).minimumScaleFactor(0.8)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
+        #else
+        navigationTitle(LocalizedStringKey(title))
+        #endif
+    }
     @ViewBuilder func lucentHideTopScrollEdge() -> some View {
         #if os(iOS)
         if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .top) }
@@ -187,12 +204,12 @@ extension View {
 }
 
 extension View {
-    @ViewBuilder func lucentPlaybackPresentation<Destination: View>(item: Binding<MediaItem?>,
-        onDismiss: @escaping () -> Void, @ViewBuilder content: @escaping (MediaItem) -> Destination) -> some View {
+    @ViewBuilder func lucentPlaybackPresentation<Destination: View>(isPresented: Binding<Bool>,
+        onDismiss: @escaping () -> Void, @ViewBuilder content: @escaping () -> Destination) -> some View {
         #if os(macOS)
-        sheet(item: item, onDismiss: onDismiss) { content($0).frame(minWidth: 1000, minHeight: 600) }
+        sheet(isPresented: isPresented, onDismiss: onDismiss) { content().frame(minWidth: 1000, minHeight: 600) }
         #else
-        fullScreenCover(item: item, onDismiss: onDismiss, content: content)
+        fullScreenCover(isPresented: isPresented, onDismiss: onDismiss, content: content)
         #endif
     }
 }

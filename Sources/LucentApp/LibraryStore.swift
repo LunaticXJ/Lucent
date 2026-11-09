@@ -3,6 +3,77 @@ import Foundation
 
 @MainActor
 final class LibraryStore: ObservableObject {
+    struct CardMetadata: Codable, Equatable, Sendable {
+        let title: String
+        let year: String?
+        let rating: Double?
+        let updatedAt: Date
+    }
+
+    private static let cardMetadataWriteQueue = DispatchQueue(label: "lucent.catalog.metadata", qos: .utility)
+    private var cardMetadataSaveTask: Task<Void, Never>?
+    private static let cardMetadataKey = "lucent.catalog.cardMetadata.v1"
+    @Published private(set) var cardMetadata: [String: CardMetadata] = {
+        guard let data = UserDefaults.standard.data(forKey: "lucent.catalog.cardMetadata.v1") else { return [:] }
+        return (try? JSONDecoder().decode([String: CardMetadata].self, from: data)) ?? [:]
+    }()
+
+    func mergeCardMetadata(_ values: [String: CardMetadata]) {
+        var records = cardMetadata
+        for (key, incoming) in values {
+            let existing = records[key]
+            let newer = existing.flatMap { $0.updatedAt > incoming.updatedAt ? $0 : nil } ?? incoming
+            let older = newer == incoming ? existing : incoming
+            records[key] = CardMetadata(title: newer.title.isEmpty ? older?.title ?? "" : newer.title,
+                                       year: newer.year ?? older?.year, rating: newer.rating ?? older?.rating,
+                                       updatedAt: newer.updatedAt)
+        }
+        if records.count > 2000 {
+            records = Dictionary(uniqueKeysWithValues: records.sorted { $0.value.updatedAt > $1.value.updatedAt }
+                .prefix(2000).map { ($0.key, $0.value) })
+        }
+        guard records != cardMetadata else { return }
+        cardMetadata = records
+        cardMetadataSaveTask?.cancel()
+        let cacheKey = Self.cardMetadataKey
+        let snapshot = records
+        cardMetadataSaveTask = Task {
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+            Self.cardMetadataWriteQueue.async {
+                if let data = try? JSONEncoder().encode(snapshot) {
+                    UserDefaults.standard.set(data, forKey: cacheKey)
+                }
+            }
+        }
+    }
+
+    nonisolated static func cardKey(sourceID: UUID, itemID: String) -> String { "\(sourceID)|\(itemID)" }
+
+    func mergeServerCards(_ items: [JellyfinItem], sourceID: UUID, requestedAt: Date) {
+        mergeCardMetadata(Dictionary(items.map {
+            (Self.cardKey(sourceID: sourceID, itemID: $0.id),
+             CardMetadata(title: $0.name, year: $0.displayYearText, rating: $0.communityRating, updatedAt: requestedAt))
+        }, uniquingKeysWith: { _, latest in latest }))
+    }
+
+    @Published private(set) var embyContinuingPages: [UUID: EmbyClient.BrowsePage] = [:]
+    private var embyContinuingRequestDates: [UUID: Date] = [:]
+
+    func refreshEmbyContinuing(source: EmbySource, token: String) async throws -> EmbyClient.BrowsePage {
+        let startedAt = Date()
+        let page = try await EmbyClient.resume(source: source, token: token)
+        try Task.checkCancellation()
+        guard embySources.contains(where: { $0.id == source.id && $0.baseAddress == source.baseAddress && $0.userID == source.userID }) else {
+            throw CancellationError()
+        }
+        if let newer = embyContinuingRequestDates[source.id], newer > startedAt,
+           let existing = embyContinuingPages[source.id] {
+            return existing
+        }
+        embyContinuingRequestDates[source.id] = startedAt
+        embyContinuingPages[source.id] = page
+        return page
+    }
     @Published private(set) var fileSources: [LibraryFileSource] = []
     @Published private(set) var storageConnectionStates: [UUID: String] = [:]
     @Published private(set) var scopeScanStates: [UUID: String] = [:]
@@ -1120,16 +1191,7 @@ final class LibraryStore: ObservableObject {
             }
             return false
         }) { return existing }
-        var item = MediaItem(title: remote.name,
-                             location: .jellyfinItem(sourceID: sourceID, itemID: remote.id),
-                             identity: remote.identity)
-        item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
-        item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
-        item.watched = remote.userData?.played ?? false
-        item.stateUpdatedAt = remote.remoteStateDate ?? Date()
-        item.serverSummary = remote.overview
-        item.serverPosterKey = remote.imageTags?.primary
-        item.serverFileExtension = remote.fileExtension
+        let item = Self.makeServerMediaItem(remote, location: .jellyfinItem(sourceID: sourceID, itemID: remote.id))
         items.insert(item, at: 0)
         save()
         return item
@@ -1226,45 +1288,28 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func synchronizePlexHome(sourceID: UUID) async throws {
-        guard let source = plexSources.first(where: { $0.id == sourceID }),
-              let token = try KeychainPasswordStore.plexToken(for: sourceID) else { throw ServerCatalogSync.Failure.requestFailed }
-        let keys = items.compactMap { value -> String? in
-            if case .plexItem(let id, let key, _) = value.location, id == sourceID { return key }; return nil
-        }
-        guard !keys.isEmpty else { return }
-        var remote: [String: PlexItem] = [:]
-        // Bounded concurrency prevents refresh from flooding a NAS with metadata requests.
-        for start in stride(from: 0, to: keys.count, by: 4) {
-            let batch = Array(keys[start..<min(start + 4, keys.count)])
-            let values = try await withThrowingTaskGroup(of: (String, PlexItem?).self) { group in
-                for key in batch { group.addTask { (key, try await PlexClient.cachedItem(source: source, token: token, ratingKey: key)) } }
-                var result: [String: PlexItem] = [:]
-                for try await (key, item) in group { if let item { result[key] = item } }
-                return result
-            }
-            remote.merge(values) { _, new in new }
-        }
-        try Task.checkCancellation()
-        guard plexSources.contains(where: { $0.id == sourceID && $0.baseAddress == source.baseAddress }) else { return }
-        let requested = Set(keys)
-        var removed = Set<UUID>()
+    func synchronizePlexHome(sourceID: UUID, displayedItems: [PlexItem], requestedAt: Date) {
+        guard !Task.isCancelled, plexSources.contains(where: { $0.id == sourceID }) else { return }
+        let remote = Dictionary(displayedItems.map { ($0.ratingKey, $0) }, uniquingKeysWith: { _, latest in latest })
+        mergeCardMetadata(Dictionary(uniqueKeysWithValues: remote.values.map {
+            (Self.cardKey(sourceID: sourceID, itemID: $0.ratingKey),
+             CardMetadata(title: $0.title, year: $0.year.map(String.init), rating: $0.rating, updatedAt: requestedAt))
+        }))
+        var changed = false
         for index in items.indices {
-            guard case .plexItem(let id, let key, _) = items[index].location, id == sourceID, requested.contains(key) else { continue }
-            guard let value = remote[key] else {
-                if downloadedURL(for: items[index]) == nil { removed.insert(items[index].id) }
-                else { items[index].missingSince = items[index].missingSince ?? Date() }
-                continue
-            }
-            items[index].title = value.title; items[index].identity = value.identity
-            items[index].serverSummary = value.summary; items[index].serverPosterKey = value.thumb
+            guard case .plexItem(let id, let key, _) = items[index].location, id == sourceID,
+                  let value = remote[key] else { continue }
+            let previous = items[index]
+            items[index].title = value.title
+            items[index].identity = value.identity
+            if let summary = value.summary { items[index].serverSummary = summary }
+            if let thumb = value.thumb { items[index].serverPosterKey = thumb }
             items[index].missingSince = nil
             if let part = value.partKey { items[index].location = .plexItem(sourceID: sourceID, ratingKey: key, partKey: part) }
             if let duration = value.duration { items[index].duration = duration / 1000 }
+            changed = changed || items[index] != previous
         }
-        items.removeAll { removed.contains($0.id) }
-        for index in collections.indices { collections[index].itemIDs.removeAll { removed.contains($0) } }
-        save()
+        if changed { save() }
     }
 
     func synchronizeServerHome(sourceID: UUID, emby: Bool, displayedItems: [JellyfinItem]) async throws {
@@ -1314,16 +1359,7 @@ final class LibraryStore: ObservableObject {
         }) {
             return items[index]
         }
-        var item = MediaItem(title: remote.name,
-                             location: .embyItem(sourceID: sourceID, itemID: remote.id),
-                             identity: remote.identity)
-        item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
-        item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
-        item.watched = remote.userData?.played ?? false
-        item.stateUpdatedAt = remote.remoteStateDate ?? Date()
-        item.serverSummary = remote.overview
-        item.serverPosterKey = remote.imageTags?.primary
-        item.serverFileExtension = remote.fileExtension
+        let item = Self.makeServerMediaItem(remote, location: .embyItem(sourceID: sourceID, itemID: remote.id))
         items.insert(item, at: 0)
         save()
         return item
@@ -1906,6 +1942,71 @@ final class LibraryStore: ObservableObject {
         scheduleTraktSync()
     }
 
+    private static func makeServerMediaItem(_ remote: JellyfinItem, location: MediaLocation) -> MediaItem {
+        var item = MediaItem(title: remote.name, location: location, identity: remote.identity)
+        item.duration = remote.runTimeTicks.map { Double($0) / 10_000_000 }
+        item.position = Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000
+        item.watched = remote.userData?.played ?? false
+        item.stateUpdatedAt = remote.remoteStateDate ?? Date()
+        item.serverSummary = remote.overview
+        item.serverPosterKey = remote.imageTags?.primary
+        item.serverFileExtension = remote.fileExtension
+        return item
+    }
+
+    func setSeriesEpisodesWatched(_ episodes: [MediaItem], watched: Bool) {
+        guard !episodes.isEmpty else { return }
+        let replacements = Dictionary(episodes.map { episode in
+            var updated = episode
+            updated.watched = watched
+            updated.position = 0
+            updated.stateUpdatedAt = Date()
+            return (updated.id, updated)
+        }, uniquingKeysWith: { first, _ in first })
+        let existingIDs = Set(items.map(\.id))
+        let updates = Array(replacements.values)
+        items = updates.filter { !existingIDs.contains($0.id) } + items.map { replacements[$0.id] ?? $0 }
+        for updated in updates {
+            if let key = Self.traktKey(for: updated) {
+                if watched { pendingTraktUnwatched.remove(key) }
+                else if isDefaultProfile { pendingTraktUnwatched.insert(key) }
+            }
+        }
+        save()
+        let remote = updates.filter {
+            switch $0.location {
+            case .embyItem, .jellyfinItem: true
+            default: false
+            }
+        }
+        if isDefaultProfile, !remote.isEmpty {
+            let records = remote.enumerated().map { index, item in
+                ServerStateOutbox.Record(item: item, stopped: index == remote.count - 1, revision: Date())
+            }
+            Task {
+                do { try await serverOutbox.submit(records) { [weak self] value in try await self?.deliverServerState(value) } }
+                catch { errorMessage = "无法保存待同步观看状态：\(error.localizedDescription)" }
+            }
+        }
+        scheduleTraktSync()
+    }
+
+    func serverEpisodeForWatchedUpdate(_ remote: JellyfinItem, sourceID: UUID, emby: Bool) -> MediaItem {
+        let location: MediaLocation = emby
+            ? .embyItem(sourceID: sourceID, itemID: remote.id)
+            : .jellyfinItem(sourceID: sourceID, itemID: remote.id)
+        return Self.makeServerMediaItem(remote, location: location)
+    }
+
+    func setLocalSeriesFavorite(groupID: String, anchorID: UUID, favorite: Bool) {
+        let localIDs = Set(localLibraryItems.map(\.id))
+        for index in items.indices where localIDs.contains(items[index].id) &&
+            items[index].catalogGroupID == groupID {
+            items[index].seriesFavorite = favorite && items[index].id == anchorID ? true : nil
+        }
+        save()
+    }
+
     func toggleFavorite(id: UUID) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].favorite = !items[index].isFavorite
@@ -2011,7 +2112,11 @@ final class LibraryStore: ObservableObject {
         case .embyItem(let id, let remoteID):
             guard let source = embySources.first(where: { $0.id == id }) else { return }
             guard let token = try KeychainPasswordStore.embyToken(for: id) else { throw URLError(.userAuthenticationRequired) }
-            try await EmbyClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched)
+            try await EmbyClient.updateUserData(source: source, token: token, itemID: remoteID, position: item.position, played: item.watched,
+                                                lastPlayedAt: item.lastPlayedAt)
+            if record.stopped {
+                Task { [weak self] in _ = try? await self?.refreshEmbyContinuing(source: source, token: token) }
+            }
         case .jellyfinItem(let id, let remoteID):
             guard let source = jellyfinSources.first(where: { $0.id == id }) else { return }
             guard let token = try KeychainPasswordStore.jellyfinToken(for: id) else { throw URLError(.userAuthenticationRequired) }
@@ -3096,8 +3201,15 @@ extension LibraryStore {
         }
     }
 
+    func overlappingScopes(storageID: UUID, directory: StorageDirectory) -> [LibraryFileSource] {
+        fileSources.filter {
+            $0.storageID == storageID &&
+                ($0.directoryID == directory.identifier || LibraryScopePath.overlaps($0.path, directory.path))
+        }
+    }
+
     func scopeOverlap(storageID: UUID, directory: StorageDirectory) -> LibraryFileSource? {
-        fileSources.first { $0.storageID == storageID && ($0.directoryID == directory.identifier || LibraryScopePath.overlaps($0.path, directory.path)) }
+        overlappingScopes(storageID: storageID, directory: directory).first
     }
 
     func importDirectories(storageID: UUID, directories: [(StorageDirectory, String)], scanImmediately: Bool) async throws {

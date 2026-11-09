@@ -23,3 +23,18 @@ struct StretchyHeroHeader<Content: View>: View {
         #endif
     }
 }
+
+/// Finish the fade before the artwork bounds so the shared page background
+/// supplies the pixels on both sides of the scroll content boundary.
+struct HeroArtworkFade: View {
+    var body: some View {
+        LinearGradient(stops: [
+            .init(color: .black, location: 0.30),
+            .init(color: .black.opacity(0.88), location: 0.50),
+            .init(color: .black.opacity(0.42), location: 0.72),
+            .init(color: .black.opacity(0.12), location: 0.88),
+            .init(color: .clear, location: 0.96),
+            .init(color: .clear, location: 1)
+        ], startPoint: .top, endPoint: .bottom)
+    }
+}

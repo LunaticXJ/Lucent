@@ -368,9 +368,17 @@ enum MediaIdentity: Codable, Equatable, Sendable {
         return nil
     }
 
+    static func seasonTitle(_ season: Int) -> String {
+        season == 0 ? "特别篇".lucentLocalized : String(format: "第 %lld 季".lucentLocalized, season)
+    }
+
+    static func specialEpisodeTitle(_ number: Int) -> String {
+        String(format: "%@ · 第 %lld 集".lucentLocalized, seasonTitle(0), number)
+    }
+
     var episodeLabel: String? {
         if case .episode(_, let season, let number, _) = self {
-            return String(format: "S%02dE%02d", season, number)
+            return season == 0 ? Self.specialEpisodeTitle(number) : String(format: "S%02dE%02d", season, number)
         }
         return nil
     }
@@ -386,6 +394,7 @@ struct MediaItem: Codable, Identifiable, Equatable, Sendable {
     var watched: Bool
     var identity: MediaIdentity?
     var favorite: Bool?
+    var seriesFavorite: Bool?
     var lastPlayedAt: Date?
     var metadata: MediaMetadata?
     var downloadFileName: String?

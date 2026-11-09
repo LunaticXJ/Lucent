@@ -63,7 +63,15 @@ struct NativeSourcesView: View {
                                     }.font(.subheadline).foregroundStyle(.secondary)
                                 }
                                 Text(address(server)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                            }.padding(22).frame(maxWidth: .infinity, minHeight: 130, alignment: .leading)
+                            }
+                            .padding(22).frame(maxWidth: .infinity, minHeight: 130, alignment: .leading)
+                            .background(LucentUI.serverCardGradient,
+                                        in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: LucentUI.sectionRadius)
+                                    .strokeBorder(LucentUI.serverCardBorder(), lineWidth: 1)
+                                    .allowsHitTesting(false)
+                            }
                         }.buttonStyle(.bordered)
                         .task(id: "\(server.id)|\(countsRevision)") { await loadCounts(server) }
                         .contextMenu {
@@ -125,7 +133,7 @@ struct NativeSourcesView: View {
                     Button("WebDAV", systemImage: "network") { pendingAddStorageAction = .webDAV; addingStorage = false }
                     Button("网盘", systemImage: "cloud") { pendingAddStorageAction = .cloud; addingStorage = false }
                     Button("DLNA", systemImage: "dot.radiowaves.left.and.right") { pendingAddStorageAction = .dlna; addingStorage = false }
-                }.navigationTitle("添加存储").toolbar { Button("完成") { addingStorage = false } }
+                }.lucentPageTitle("添加存储").toolbar { Button("完成") { addingStorage = false } }
             }.frame(idealWidth: 600, idealHeight: 500)
         }
         .sheet(item: $selectedStorage) { storage in
@@ -224,7 +232,7 @@ struct NativeServerEditor: View {
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 if busy { ProgressView("正在连接") }
             }.modifier(LucentSettingsPageStyle()).lucentTextInput().autocorrectionDisabled()
-                .navigationTitle("\(existingID == nil ? "添加" : "编辑") \(kind.title)")
+                .lucentPageTitle("\(existingID == nil ? "添加" : "编辑") \(kind.title)")
                 .toolbar { LucentEditorToolbar(actionTitle: existingID == nil ? "添加" : "保存", busy: busy, canSave: draft.address != nil, close: { dismiss() }, save: save) }
                 .onChange(of: draft.host) { _, _ in draft.absorbPastedAddress() }
                 .task { load() }

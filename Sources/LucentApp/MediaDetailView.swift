@@ -123,7 +123,7 @@ struct MediaDetailView: View {
             .task(id: advancedDetailItem?.id) {
                 if let selected = advancedDetailItem { await loadServerVersions(for: selected) }
             }
-            .discPlaybackCover(item: $playingItem) { item in
+            .discPlaybackCover(item: $playingItem, usesDetailSurface: true) { item in
                 playbackContent(for: item)
             }
             .task(id: itemID) { await loadServerVersions() }
@@ -525,7 +525,7 @@ struct MediaDetailView: View {
                                 downloadOnlineSubtitle(result)
                             } label: {
                                 VStack(alignment: .leading) {
-                                    Text(result.release).lineLimit(2)
+                                    Text(result.displayRelease).lineLimit(2)
                                     Text("\(result.language) · 下载 \(result.downloads) 次\(result.hearingImpaired ? " · 听障字幕" : "")")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }

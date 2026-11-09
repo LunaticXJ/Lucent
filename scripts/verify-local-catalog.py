@@ -16,6 +16,12 @@ source = '\n'.join([read('PlaybackProgressPolicy.swift').split('import SwiftUI')
     'enum MediaInfoLabels { static func known(_ value: String?) -> String? { value } }',
     read('LocalLibraryCatalog.swift'), read('MediaNameParser.swift'), read('TMDBService.swift').replace('URLSession.shared','FixtureSession.shared')])
 source += r'''
+struct LocalMediaCache: Sendable {
+ static let shared = LocalMediaCache()
+ @MainActor func imageData(key: String, fetch: @escaping @MainActor () async throws -> Data) async throws -> Data {
+  try await fetch()
+ }
+}
 enum FixtureSession {
  static let shared: URLSession = {
   let config = URLSessionConfiguration.ephemeral; config.urlCache = nil; config.protocolClasses = [Fixture.self]

@@ -99,19 +99,29 @@ enum TMDBService {
                               displayWidthPixels: Int = 1200) async throws -> DetailArtwork {
         let locale = language.replacingOccurrences(of: "_", with: "-")
         let lang = locale.split(separator: "-").first.map(String.init) ?? "zh"
-        var components = URLComponents(string: "https://api.themoviedb.org/3/\(television ? "tv" : "movie")/\(id)")!
+        let region = LocalizationPreferences.current.regionCode
+        let mediaType = television ? "tv" : "movie"
+        var components = URLComponents(string: "https://api.themoviedb.org/3/\(mediaType)/\(id)")!
         components.queryItems = [
             URLQueryItem(name: "append_to_response", value: "images"),
             URLQueryItem(name: "language", value: locale),
-            URLQueryItem(name: "region", value: LocalizationPreferences.current.regionCode),
+            URLQueryItem(name: "region", value: region),
             URLQueryItem(name: "include_image_language", value: "\(locale),\(lang),en,null")
         ]
         let authorization = authorize(&components, credential: token)
         var request = URLRequest(url: components.url!)
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
         request.timeoutInterval = 15
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw TMDBError.requestFailed }
+        let cacheKey = "tmdb-artwork-v1|\(mediaType)|\(id)|\(locale)|\(region)"
+        let artworkRequest = request
+        let data = try await LocalMediaCache.shared.imageData(key: cacheKey) {
+            let (data, response) = try await URLSession.shared.data(for: artworkRequest)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw TMDBError.requestFailed
+            }
+            _ = try JSONDecoder().decode(ArtworkResponse.self, from: data)
+            return data
+        }
         let details = try JSONDecoder().decode(ArtworkResponse.self, from: data)
         let images = details.images
         func best(_ candidates: [ArtworkImage]) -> ArtworkImage? {

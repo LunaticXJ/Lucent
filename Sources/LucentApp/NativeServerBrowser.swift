@@ -56,7 +56,7 @@ struct NativeServerBrowser: View {
             if let error { LucentStateView(title: "读取失败", message: error, actionTitle: "重试") { Task { await load() } } }
             if !busy && error == nil && entries.isEmpty { LucentStateView(title: "暂无影片", symbol: "film") }
             if more && !busy && error == nil && !entries.isEmpty { Button("加载更多") { Task { await load() } }.buttonStyle(.bordered).padding(24) }
-        }.background(LucentUI.page).navigationTitle(title)
+        }.background(LucentUI.page).lucentPageTitle(title)
             .toolbar { ToolbarItem(placement: .primaryAction) { Button("刷新", systemImage: "arrow.clockwise") { Task { await load(reset: true) } }.disabled(busy) } }
             .task { if !loaded { await load(reset: true) } }
             .navigationDestination(item: $selected) { NativeEntryPage(route: $0).environmentObject(library) }

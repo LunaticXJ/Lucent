@@ -67,17 +67,18 @@ private struct PlayerOptionRow: View {
     var detail: String? = nil
     var selected = false
     var pending = false
+    var compactText = false
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: PlayerControlStyle.scaled(19), weight: .medium))
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: PlayerControlStyle.scaled(15), weight: selected ? .semibold : .medium))
+                Text(title).font(.system(size: PlayerControlStyle.scaled(compactText ? 13 : 15), weight: selected ? .semibold : .medium))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail {
-                    Text(detail).font(.system(size: PlayerControlStyle.scaled(12)))
+                    Text(detail).font(.system(size: PlayerControlStyle.scaled(compactText ? 11 : 12)))
                         .foregroundStyle(.secondary).lineLimit(2)
                 }
             }
@@ -133,8 +134,8 @@ struct PlaybackView: View {
     @AppStorage("lucent.player.nextEpisodePrompt") private var nextEpisodePrompt = true
     @StateObject private var playerWindow = PlayerWindowController()
     @StateObject private var danmaku = DanmakuModel()
+    @AppStorage(CustomDanmakuServers.key) private var danmakuServersData = Data()
     @AppStorage("lucent.danmaku.enabled") private var danmakuEnabled = false
-    @State private var showSkipSettings = false
     @State private var showSubtitleSearch = false
     @Environment(\.scenePhase) private var scenePhase
     #if os(iOS)
@@ -244,7 +245,6 @@ struct PlaybackView: View {
         #endif
         .onAppear { [session] in
             #if os(iOS)
-            LucentOrientationDelegate.setPlaybackPresented(true)
             if previousIdleTimerDisabled == nil {
                 previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             }
@@ -309,11 +309,13 @@ struct PlaybackView: View {
                 if session.aetherInitialLoadPending {
                     Color.black.zIndex(3).allowsHitTesting(false)
                 }
-                if danmakuEnabled, !danmaku.comments.isEmpty {
+                if danmakuEnabled, !session.isPreparing, !session.aetherInitialLoadPending,
+                   session.message == nil, !danmaku.comments.isEmpty {
                     DanmakuOverlay(comments: danmaku.comments, time: session.currentTime,
                         playing: playbackIsActive && !session.isPreparing && !session.isBuffering && !session.isSeekingPlayback && scenePhase == .active,
                         rate: Double(session.playbackRate))
                         .id(danmaku.revision)
+                        .zIndex(3.5)
                 }
                 if !session.subtitleText.isEmpty {
                     Text(session.subtitleText)
@@ -452,17 +454,15 @@ struct PlaybackView: View {
         .tint(.white)
         #endif
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showSkipSettings) {
-            PlaybackSkipSettingsView(item: item, duration: session.duration, currentTime: session.currentTime) { intro, credits in
-                session.setManualSkipTimes(intro: intro, credits: credits)
-            }.environmentObject(library)
-        }
         .sheet(isPresented: $showSubtitleSearch) {
             SubtitleSearchView(item: library.items.first { $0.id == item.id } ?? item) { data, filename in
                 session.installExternalSubtitle(data, filename: filename)
             }.environmentObject(library)
         }
-        .task(id: item.id) { await danmaku.restore(for: item.id) }
+        .task(id: "\(item.id)|\(danmakuEnabled)") {
+            await danmaku.load(for: item, enabled: danmakuEnabled,
+                servers: [.official] + CustomDanmakuServers.available(danmakuServersData))
+        }
         .task {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
@@ -513,8 +513,6 @@ struct PlaybackView: View {
             if let previousIdleTimerDisabled {
                 UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
             }
-            // The landscape player must leave the hierarchy before portrait is requested.
-            LucentOrientationDelegate.setPlaybackPresented(false)
             #endif
         }
         #if os(tvOS)
@@ -620,13 +618,13 @@ struct PlaybackView: View {
                         Menu {
                             Button("全部剧集") { selectedEpisodeSeason = nil }
                             ForEach(Array(Set(episodeChoices.map(\.season))).sorted(), id: \.self) { season in
-                                Button(season == 0 ? "特别篇" : "第 \(season) 季") {
+                                Button(MediaIdentity.seasonTitle(season)) {
                                     selectedEpisodeSeason = season
                                 }
                             }
                         } label: {
                             HStack(spacing: 5) {
-                                Text(selectedEpisodeSeason.map { $0 == 0 ? "特别篇" : "第 \($0) 季" } ?? "全部剧集")
+                                Text(selectedEpisodeSeason.map { MediaIdentity.seasonTitle($0) } ?? "全部剧集")
                                 Image(systemName: "chevron.down").font(.caption2)
                             }
                             .font(.system(size: PlayerControlStyle.scaled(13), weight: .medium))
@@ -751,6 +749,13 @@ struct PlaybackView: View {
         }
     }
 
+    private func adjacentEpisode(forward: Bool) -> EpisodeChoice? {
+        guard case .episode(_, let season, let number, _) = item.identity else { return nil }
+        let current = (season, number)
+        if forward { return episodeChoices.first { ($0.season, $0.number) > current } }
+        return episodeChoices.last { ($0.season, $0.number) < current }
+    }
+
     private func selectEpisode(_ choice: EpisodeChoice) {
         if choice.id == currentEpisodeID || choice.item?.id == item.id {
             showEpisodeList = false
@@ -866,7 +871,7 @@ struct PlaybackView: View {
                     .font(.system(size: PlayerControlStyle.scaled(16), weight: .semibold))
                     .lineLimit(1)
                 if case .episode(_, let season, let episode, _) = item.identity {
-                    Text("第 \(season) 季 · 第 \(episode) 集")
+                    Text(season == 0 ? MediaIdentity.specialEpisodeTitle(episode) : String(format: "第 %lld 季 · 第 %lld 集".lucentLocalized, season, episode))
                         .font(.system(size: PlayerControlStyle.scaled(12), weight: .medium))
                         .foregroundStyle(PlayerControlStyle.secondary)
                 }
@@ -972,6 +977,13 @@ struct PlaybackView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 14) {
+                    if onSelectEpisode != nil, item.identity?.seriesName != nil {
+                        let previous = adjacentEpisode(forward: false)
+                        toolButton(previous.map { "上一集，\($0.title)" } ?? "上一集", symbol: "backward.end.fill") {
+                            if let previous { selectEpisode(previous) }
+                        }
+                        .disabled(previous == nil)
+                    }
                     toolButton("后退 \(Int(seekInterval)) 秒", symbol: "gobackward.\(Int(seekInterval))") {
                         session.skip(by: -seekInterval)
                     }
@@ -988,6 +1000,13 @@ struct PlaybackView: View {
                     .lucentVideoGlass()
                     toolButton("前进 \(Int(seekInterval)) 秒", symbol: "goforward.\(Int(seekInterval))") {
                         session.skip(by: seekInterval)
+                    }
+                    if onSelectEpisode != nil, item.identity?.seriesName != nil {
+                        let next = adjacentEpisode(forward: true)
+                        toolButton(next.map { "下一集，\($0.title)" } ?? "下一集", symbol: "forward.end.fill") {
+                            if let next { selectEpisode(next) }
+                        }
+                        .disabled(next == nil)
                     }
                 }
 
@@ -1013,16 +1032,10 @@ struct PlaybackView: View {
 
     @ViewBuilder private var playbackPrompts: some View {
         let activeSegment = session.autoSkipSegments ? nil : session.activeSkipSegment
-        if activeSegment != nil || nextItem != nil {
-            HStack(spacing: 8) {
-                if let segment = activeSegment {
-                    skipButton("跳过\(segment.title)") { session.skipSegment(segment) }
-                }
+        if let segment = activeSegment {
+            HStack {
+                skipButton("跳过\(segment.title)") { session.skipSegment(segment) }
                 Spacer(minLength: 8)
-                if let nextItem {
-                    skipButton("下一集") { onContinue?() }
-                        .accessibilityLabel("下一集，\(nextItem.title)")
-                }
             }
             .frame(minHeight: 36)
         }
@@ -1127,7 +1140,8 @@ struct PlaybackView: View {
                     }
                 }
                 .frame(width: PlayerControlStyle.panelWidth(geometry.size.width),
-                       height: max(180, geometry.size.height - PlayerControlStyle.outerInset * 2))
+                       height: max(0, geometry.size.height - PlayerControlStyle.outerInset * 2))
+                .clipShape(RoundedRectangle(cornerRadius: PlayerControlStyle.panelRadius))
                 .lucentVideoGlass(radius: PlayerControlStyle.panelRadius)
                 .padding(.trailing, PlayerControlStyle.outerInset).padding(.vertical, PlayerControlStyle.outerInset)
                 .lucentPlayerButtonStyle()
@@ -1174,7 +1188,7 @@ struct PlaybackView: View {
             }
             .padding(.horizontal, 12)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                ForEach([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { rate in
                     let selected = abs(Double(session.playbackRate) - rate) < 0.01
                     Button {
                         session.setPlaybackRate(Float(rate))
@@ -1228,7 +1242,7 @@ struct PlaybackView: View {
     }
     private var playbackGestureSurface: some View {
         PlaybackGestureSurface(
-            enabled: !controlsLocked && secondaryPanel == nil && !showEpisodeList && !showSubtitleSearch && !showSkipSettings &&
+            enabled: !controlsLocked && secondaryPanel == nil && !showEpisodeList && !showSubtitleSearch &&
                 scenePhase == .active && session.engineSwitchTarget == nil && !session.isPreparing &&
                 !session.isSeekingPlayback && !session.currentEngineHasFailed && playbackStarted && !networkSuspended,
             singleTap: {
@@ -1441,7 +1455,8 @@ struct PlaybackView: View {
             PlayerOptionRow(title: title,
                             detail: selected ? "当前使用" : index.map { "字幕 \($0 + 1)" },
                             selected: selected,
-                            pending: index != nil && session.pendingSubtitleIndex == index)
+                            pending: index != nil && session.pendingSubtitleIndex == index,
+                            compactText: true)
         }
         .accessibilityValue(selected ? "当前已选" : "未选中")
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -1504,23 +1519,19 @@ struct PlaybackView: View {
             if transcodeBitrate != nil, !session.serverTracks.subtitles.isEmpty {
                 panelSection("服务器字幕") {
                     Button { closePanel(); session.switchServerSubtitle(0) } label: {
-                        PlayerOptionRow(title: "关闭字幕", selected: session.selectedServerSubtitleID == 0)
+                        PlayerOptionRow(title: "关闭字幕", selected: session.selectedServerSubtitleID == 0, compactText: true)
                     }
                     ForEach(session.serverTracks.subtitles) { track in
                         Button { closePanel(); session.switchServerSubtitle(track.id) } label: {
-                            PlayerOptionRow(title: SubtitleLanguageDisplay.title(track.title), selected: session.selectedServerSubtitleID == track.id)
+                            PlayerOptionRow(title: SubtitleLanguageDisplay.title(track.title), selected: session.selectedServerSubtitleID == track.id, compactText: true)
                         }
                     }
                 }
             }
-            if session.subtitleOptions.isEmpty && !session.hasSidecarSubtitle && session.serverTracks.subtitles.isEmpty {
-                emptyTrackState("captions.bubble", title: session.isPreparing ? "正在读取字幕" : "没有可用字幕",
-                                detail: session.isPreparing ? "片源准备就绪后将在这里显示。" : "此片源尚未提供可选择的字幕轨道。")
-            }
             if !session.subtitleOptions.isEmpty || session.hasSidecarSubtitle {
                 subtitleTimingControls
             }
-            if session.hasSidecarSubtitle { subtitleAppearanceControls }
+            subtitleAppearanceControls
         }
     }
 
@@ -1572,26 +1583,30 @@ struct PlaybackView: View {
                 .background(.black.opacity(subtitleBackgroundOpacity), in: RoundedRectangle(cornerRadius: 6))
                 .frame(maxWidth: .infinity, minHeight: 76)
                 .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 15))
-            HStack {
-                Text("字号").font(.system(size: PlayerControlStyle.scaled(14)))
-                LucentValueSlider(value: $subtitleFontScale, range: 0.75...1.5, step: 0.05).tint(.white)
-                    .accessibilityLabel("字幕字号")
-                Text("\(Int((subtitleFontScale * 100).rounded()))%")
-                    .font(.system(size: PlayerControlStyle.scaled(12))).monospacedDigit().frame(width: 42)
-            }
-            .padding(.horizontal, 12)
-            HStack {
-                Text("底色").font(.system(size: PlayerControlStyle.scaled(14)))
-                LucentValueSlider(value: $subtitleBackgroundOpacity, range: 0...0.85, step: 0.05).tint(.white)
-                    .accessibilityLabel("字幕底色不透明度")
-                Text("\(Int((subtitleBackgroundOpacity * 100).rounded()))%")
-                    .font(.system(size: PlayerControlStyle.scaled(12))).monospacedDigit().frame(width: 42)
-            }
-            .padding(.horizontal, 12)
+            subtitleAppearancePicker("字幕字号", selection: $subtitleFontScale, percentages: [75, 90, 100, 110, 125, 150])
+            subtitleAppearancePicker("字幕底色不透明度", selection: $subtitleBackgroundOpacity, percentages: [0, 20, 40, 60, 75, 85])
             Text("外观用于 Lucent 显示的文本字幕，特效字幕保留片源样式。")
                 .font(.system(size: PlayerControlStyle.scaled(11))).foregroundStyle(PlayerControlStyle.secondary)
                 .padding(.horizontal, 12).padding(.top, 5)
         }
+    }
+
+    private func subtitleAppearancePicker(_ title: LocalizedStringKey, selection: Binding<Double>,
+                                          percentages: [Int]) -> some View {
+        let presets = percentages.map { Double($0) / 100 }
+        let current = selection.wrappedValue
+        let options = presets.contains(current) ? presets : (presets + [current]).sorted()
+        return LabeledContent(title) {
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.self) { value in
+                    Text(value.formatted(.percent.precision(.fractionLength(0)))).tag(value)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+        }
+        .font(.system(size: PlayerControlStyle.scaled(14)))
+        .padding(.horizontal, 12)
     }
 
     private func panelRow(_ title: String, symbol: String, value: String? = nil) -> some View {
@@ -1627,14 +1642,20 @@ struct PlaybackView: View {
                 .padding(.horizontal, 12).padding(.vertical, 6)
         }
         panelSection("片头片尾") {
-            Button { closePanel(); showSkipSettings = true } label: {
-                panelRow("片头片尾", symbol: "forward.end", value: "设置跳过时间")
-            }
             Toggle(isOn: $session.autoSkipSegments) {
                 Label("自动跳过片头片尾", systemImage: "forward.end")
                     .font(.system(size: PlayerControlStyle.scaled(14), weight: .medium))
             }
             .tint(.gray).padding(14)
+            .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 14))
+            DisclosureGroup("设置跳过时间") {
+                PlaybackSkipSettingsView(item: item, duration: session.duration, currentTime: session.currentTime) { intro, credits in
+                    session.setManualSkipTimes(intro: intro, credits: credits)
+                }
+                .id(item.id)
+            }
+            .font(.system(size: PlayerControlStyle.scaled(14), weight: .medium))
+            .padding(14)
             .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 14))
         }
         Button { openPanel(.diagnostics) } label: {

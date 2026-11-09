@@ -142,13 +142,14 @@ struct MobileServerCatalogView: View {
                 if reset { try await library.synchronizeServerHome(sourceID: sourceID, emby: false, displayedItems: jellyfinItems) }
             } else if let source = library.plexSources.first(where: { $0.id == sourceID }),
                       let token = try KeychainPasswordStore.plexToken(for: sourceID) {
+                let requestedAt = Date()
                 let page = try await PlexClient.browsePage(source: source, token: token,
                                                            start: nextStart)
                 let known = Set(plexItems.map(\.ratingKey))
                 plexItems += page.filter { !known.contains($0.ratingKey) }
                 nextStart += 40
                 hasMore = !page.isEmpty
-                if reset { try await library.synchronizePlexHome(sourceID: sourceID) }
+                library.synchronizePlexHome(sourceID: sourceID, displayedItems: page, requestedAt: requestedAt)
             } else {
                 errorMessage = "无法读取服务器授权，请在片源页面更新登录凭据。"
             }

@@ -1,6 +1,72 @@
 {
   "sourceLanguage": "zh-Hans",
   "strings": {
+    "来源": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来源"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來源"
+          }
+        }
+      }
+    },
+    "提前半秒": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提前半秒"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show half a second earlier"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提前半秒"
+          }
+        }
+      }
+    },
+    "延后半秒": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "延后半秒"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show half a second later"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "延後半秒"
+          }
+        }
+      }
+    },
     "你的私人影院": {
       "localizations": {
         "zh-Hans": {
@@ -881,24 +947,24 @@
         }
       }
     },
-    "未找到字幕，试试原文片名或其他语言。 ": {
+    "未找到字幕，试试原文片名。": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未找到字幕，试试原文片名或其他语言。 "
+            "value": "未找到字幕，试试原文片名。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No subtitles found. Try the original title or another language."
+            "value": "No subtitles found. Try the original title."
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "未找到字幕，試試原文片名或其他語言。 "
+            "value": "未找到字幕，試試原文片名。"
           }
         }
       }
@@ -15375,6 +15441,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "更多"
+          }
+        }
+      }
+    },
+    "已导入：%@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已导入：%@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported: %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已匯入：%@"
+          }
+        }
+      }
+    },
+    "已导入：%@ 等": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已导入：%@ 等"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported: %@ and others"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已匯入：%@ 等"
           }
         }
       }

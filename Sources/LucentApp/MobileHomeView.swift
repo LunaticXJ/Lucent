@@ -119,7 +119,7 @@ private enum HomePalette {
     static let sectionSpacing: CGFloat = isPad ? 38 : 30
 }
 
-private struct EmbyArtwork: View {
+struct EmbyArtwork: View {
     let source: EmbySource
     let itemID: String
     let backdrop: Bool
@@ -138,17 +138,18 @@ private struct EmbyArtwork: View {
     @State private var softenedImage: UIImage?
     @State private var softenedIdentity: ObjectIdentifier?
     var loadsImage = true
+    var allowsPortraitFallback = true
     private var identity: String { "\(source.id)|\(itemID)" }
     private var pixelSize: Int { targetPixelSize == nil ? (backdrop ? width : Int(Double(width) * 1.5)) : 4096 }
     private var resolvedURL: URL? {
         let local = HomeSnapshotCache.localItems[itemID]
-        let path = backdrop ? (local?.metadata?.backdropPath ?? local?.metadata?.posterPath) : local?.metadata?.posterPath
+        let path = backdrop ? (local?.metadata?.backdropPath ?? (allowsPortraitFallback ? local?.metadata?.posterPath : nil)) : local?.metadata?.posterPath
         return preferredURL ?? path.flatMap { URL(string: "https://image.tmdb.org/t/p/\(targetPixelSize == nil ? "w780" : "original")\($0)") }
     }
     private var displayedImage: UIImage? {
         if imageIdentity == identity, let image { return image }
         if let url = resolvedURL, let cached = ArtworkImageDecoder.cachedImage(key: url.absoluteString, maximumPixelSize: pixelSize, targetPixelSize: targetPixelSize, maximumDecodedPixels: maximumDecodedPixels) { return cached }
-        for useBackdrop in backdrop ? [true, false] : [false] {
+        for useBackdrop in backdrop && allowsPortraitFallback ? [true, false] : [backdrop] {
             if let cached = ArtworkImageDecoder.cachedImage(key: "\(source.id)|\(itemID)|\(useBackdrop)", maximumPixelSize: pixelSize, targetPixelSize: targetPixelSize, maximumDecodedPixels: maximumDecodedPixels) { return cached }
         }
         return nil
@@ -225,7 +226,7 @@ private struct EmbyArtwork: View {
                 await install(loaded)
                 return
             }
-            for useBackdrop in backdrop ? [true, false] : [false] {
+            for useBackdrop in backdrop && allowsPortraitFallback ? [true, false] : [backdrop] {
                 guard let data = try? await LocalMediaCache.shared.imageData(
                     key: "emby|\(source.id)|\(itemID)|\(useBackdrop)|\(width)", fetch: {
                         guard let token = try KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty else { throw URLError(.userAuthenticationRequired) }
@@ -244,17 +245,13 @@ private struct EmbyArtwork: View {
 /// Prepare only visible resume covers from disk, without requests or credentials.
 @MainActor private func prepareContinuingCovers(_ items: [MediaCard], source: EmbySource) async {
     let count = min(6, max(1, Int(ceil(UIScreen.main.bounds.width / HomePalette.continueWidth)) + 1))
-    cards: for item in items.prefix(count) {
-        for backdrop in [true, false] {
-            guard !Task.isCancelled else { return }
-            let decodedKey = "\(source.id)|\(item.id)|\(backdrop)"
-            if ArtworkImageDecoder.cachedImage(key: decodedKey, maximumPixelSize: 600) != nil { continue cards }
-            // Disk access and thumbnail preparation remain off the UI thread.
-            for width in [600, 500] {
-                guard let data = await ArtworkDiskStore.shared.read("emby|\(source.id)|\(item.id)|\(backdrop)|\(width)") else { continue }
-                if await ArtworkImageDecoder.image(data: data, key: decodedKey, maximumPixelSize: 600) != nil { continue cards }
-            }
-        }
+    for item in items.prefix(count) {
+        guard !Task.isCancelled else { return }
+        let artworkID = item.legacyPresentation.seriesId ?? item.id
+        let decodedKey = "\(source.id)|\(artworkID)|true"
+        guard ArtworkImageDecoder.cachedImage(key: decodedKey, maximumPixelSize: 600) == nil,
+              let data = await ArtworkDiskStore.shared.read("emby|\(source.id)|\(artworkID)|true|600") else { continue }
+        _ = await ArtworkImageDecoder.image(data: data, key: decodedKey, maximumPixelSize: 600)
     }
 }
 
@@ -262,13 +259,6 @@ private struct HomeShelf: Identifiable, Sendable {
     let view: MediaCard
     let items: [MediaCard]
     var id: String { view.id }
-}
-
-/// Rows loaded while scrolling are merged here, then flushed together once scrolling settles.
-private struct DeferredShelfResults {
-    var context: String
-    var displayedItems: [String: JellyfinItem] = [:]
-    var shelves: [String: HomeShelf] = [:]
 }
 
 private final class HeroThemeImage {
@@ -281,11 +271,12 @@ private struct HeroColors: Equatable { let dark: Color; let light: Color }
 @MainActor private enum HomeSnapshotCache {
     struct Snapshot {
         let refreshID: UUID
+        var context: String? = nil
         let loadedAt: Date
         let views: [MediaCard]
         let latest: [MediaCard]
-        let continuing: [MediaCard]
-        let continuingTotal: Int
+        var continuing: [MediaCard]
+        var continuingTotal: Int
         let shelves: [HomeShelf]
     }
     static var entries: [UUID: Snapshot] = [:]
@@ -503,13 +494,36 @@ struct MobileHomeView: View {
 
     @State private var views: [MediaCard] = []
     @State private var latest: [MediaCard] = []
-    @State private var continuing: [MediaCard] = []
-    @State private var continuingTotal = 0
+    // Temporary comparison build for isolating scrolling from home refresh work.
+    private let pausesHomeRefreshForComparison = true
+    @State private var observedRefreshID: UUID?
+    @State private var displayedHomeContext: String?
+    private var homeContext: String {
+        source.map { HomeStartupCache.context(source: $0, language: contentLocalizationID) } ?? "no-source"
+    }
+    @State private var manualRefreshSourceID: UUID?
+
+    private var canRefreshServerShelves: Bool {
+        !pausesHomeRefreshForComparison || (manualRefreshSourceID != nil && manualRefreshSourceID == source?.id)
+    }
+    @State private var cachedContinuing: [MediaCard] = []
+    @State private var cachedContinuingTotal = 0
+
+    private var continuing: [MediaCard] {
+        guard !localLibrary, let source,
+              let page = library.embyContinuingPages[source.id] else { return cachedContinuing }
+        return page.items.map { remote in
+            let card = MediaCard(server: remote)
+            let metadata = HomeSnapshotCache.details[source.id]?[card.id]
+            return metadata.map { card.preservingMetadata(from: $0) } ?? card
+        }.filter(isResumeCandidate)
+    }
+
+    private var continuingTotal: Int {
+        guard !localLibrary, let source else { return cachedContinuingTotal }
+        return library.embyContinuingPages[source.id]?.totalCount ?? cachedContinuingTotal
+    }
     @State private var shelves: [HomeShelf] = []
-    @State private var shelfEpoch = UUID()
-    @State private var shelfSourceID: UUID?
-    @State private var loadedShelfIDs: Set<String> = []
-    @State private var loadingShelfIDs: Set<String> = []
     @State private var shelfErrors: [String: String] = [:]
     @State private var isLoading = false
     @State private var hasLoadedHome = false
@@ -543,8 +557,7 @@ struct MobileHomeView: View {
     @State private var heroSettleTask: Task<Void, Never>?
     @State private var heroDragTarget: Int?
     @State private var dockGestureHandled = false
-    @State private var pendingShelfResults: [UUID: DeferredShelfResults] = [:]
-    @State private var shelfFlushTask: Task<Void, Never>?
+    @State private var homeScrollIsActive = false
     private var darkMode: Bool { appTheme.isDark(system: systemColorScheme) }
     private var fallbackTheme: Color {
         darkMode ? HomePalette.background : Color(red: 0.94, green: 0.95, blue: 0.96)
@@ -591,7 +604,7 @@ struct MobileHomeView: View {
                 if !latest.isEmpty {
                     StretchyHeroHeader(height: heroHeight) { height, pull in
                         if latest.indices.contains(heroIndex) {
-                            transitionSource(hero(height: height, pull: pull, baseHeight: heroHeight), key: "hero:\(latest[heroIndex].id)")
+                            hero(height: height, pull: pull, baseHeight: heroHeight)
                         }
                     }
                     .frame(width: viewport.size.width)
@@ -623,6 +636,9 @@ struct MobileHomeView: View {
             }
             .frame(width: viewport.size.width, alignment: .leading)
             }
+        }
+        .onScrollPhaseChange { _, phase in
+            homeScrollIsActive = phase != .idle
         }
         .lucentHideTopScrollEdge()
         .simultaneousGesture(DragGesture(minimumDistance: 24)
@@ -663,19 +679,21 @@ struct MobileHomeView: View {
                   let token = try? KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty else { return }
             heroLogoConnection = (source.id, token)
         }
-        .task(id: "\(source?.id.uuidString ?? "")|\(refreshID.uuidString)") { await loadHome() }
+        .task(id: "\(homeContext)|\(refreshID.uuidString)") {
+            let manual = observedRefreshID.map { $0 != refreshID } ?? false
+            observedRefreshID = refreshID
+            if manual { manualRefreshSourceID = source?.id }
+            else if manualRefreshSourceID != source?.id { manualRefreshSourceID = nil }
+            await loadHome(manualRefresh: manual)
+        }
         .onChange(of: minimumResumePercent) { _, _ in Task { await loadHome() } }
         .onChange(of: completedPercent) { _, _ in Task { await loadHome() } }
-        .task(id: contentLocalizationID) {
+        .task(id: "\(homeContext)|\(heroIndex)|\(latest.map(\.id).joined(separator: ","))") {
             if HomeSnapshotCache.artworkLanguage != contentLocalizationID {
                 HomeSnapshotCache.artworks.removeAll()
                 HomeSnapshotCache.artworkLanguage = contentLocalizationID
                 heroArtworks.removeAll()
             }
-            await loadHeroArtwork(at: heroIndex)
-            if latest.count > 1 { await loadHeroArtwork(at: (heroIndex + 1) % latest.count) }
-        }
-        .task(id: "\(source?.id.uuidString ?? "")|\(heroIndex)|\(latest.map(\.id).joined(separator: ","))") {
             guard !latest.isEmpty else { return }
             await loadHeroArtwork(at: heroIndex)
             if latest.count > 1 { await loadHeroArtwork(at: (heroIndex + 1) % latest.count) }
@@ -688,15 +706,15 @@ struct MobileHomeView: View {
             HomeSnapshotCache.trim(validSources: Set(ids).union([HomeSnapshotCache.localContext.id]))
         }
         .onReceive(library.$items.dropFirst().throttle(for: .milliseconds(750), scheduler: RunLoop.main, latest: true)) { _ in
-            guard localLibrary else { return }
+            guard !pausesHomeRefreshForComparison, localLibrary else { return }
             Task { @MainActor in await refreshLocalContinuing() }
         }
         .onReceive(library.$catalogStructureRevision.dropFirst().debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in
-            guard localLibrary else { return }
+            guard !pausesHomeRefreshForComparison, localLibrary else { return }
             Task { @MainActor in await loadLocalHome() }
         }
         .onReceive(library.$fileSources.dropFirst().debounce(for: .milliseconds(200), scheduler: RunLoop.main)) { _ in
-            guard localLibrary else { return }
+            guard !pausesHomeRefreshForComparison, localLibrary else { return }
             Task { @MainActor in await Task.yield(); await loadLocalHome() }
         }
         .navigationDestination(item: $localCollection) { collection in
@@ -787,7 +805,7 @@ struct MobileHomeView: View {
                     }
                 }, onTap: {
                         if heroDragTarget == nil, !heroTransitioning, latest.indices.contains(heroIndex) {
-                            open(latest[heroIndex], transitionKey: "hero:\(latest[heroIndex].id)")
+                            open(latest[heroIndex], transitionKey: nil)
                         }
                     })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -825,8 +843,6 @@ struct MobileHomeView: View {
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
-            .background(themeColor)
-            .clipped()
         }
         .frame(height: height)
     }
@@ -844,7 +860,7 @@ struct MobileHomeView: View {
         return ZStack {
             heroArtwork(item, source: source, size: size, pull: pull, baseHeight: baseHeight, loadsImage: visible || nearby)
                 .mask(alignment: outgoing ? (heroForward ? .leading : .trailing) : (heroDragX < 0 ? .leading : .trailing)) {
-                    Rectangle().frame(width: size.width * max(0, coverage))
+                    Rectangle().frame(width: size.width * max(0, coverage), height: size.height)
                 }
             if visible {
                 heroContent(item, size: size)
@@ -863,10 +879,10 @@ struct MobileHomeView: View {
             EmbyArtwork(source: source, itemID: item.id,
                         // Decode once off the scroll offset: rubber-band stretch stays a cheap scaleEffect.
                         backdrop: heroArtworks[item.id]?.posterURL == nil,
-                        width: min(4096, Int((max(size.width, baseHeight * 16 / 9) * displayScale * (latest.indices.contains(heroIndex) && latest[heroIndex].id == item.id ? 1 : 0.5)).rounded(.up))),
+                        width: min(4096, Int((max(size.width, baseHeight * 16 / 9) * displayScale).rounded(.up))),
                         preferredURL: heroArtworks[item.id]?.posterURL,
                         targetPixelSize: CGSize(width: (size.width * displayScale).rounded(), height: (baseHeight * displayScale).rounded()),
-                        maximumDecodedPixels: latest.indices.contains(heroIndex) && latest[heroIndex].id == item.id ? 8_000_000 : 2_000_000,
+                        maximumDecodedPixels: 8_000_000,
                         softenBottom: true,
                         placeholderColor: themeColor,
                         onImage: { image in
@@ -889,17 +905,11 @@ struct MobileHomeView: View {
                     // Cancel only upward page movement for the image; the overlay stays in the scroll flow.
                     effect.offset(y: max(0, -geometry.frame(in: .scrollView(axis: .vertical)).minY))
                 }
-            LinearGradient(stops: [
-                .init(color: .black.opacity(0.30), location: 0),
-                .init(color: .clear, location: 0.30),
-                .init(color: themeColor.opacity(0.12), location: 0.50),
-                .init(color: themeColor.opacity(0.58), location: 0.72),
-                .init(color: themeColor.opacity(0.88), location: 0.88),
-                .init(color: themeColor, location: 0.96),
-                .init(color: themeColor, location: 1)
-            ], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.black.opacity(0.30), .clear],
+                           startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.30))
         }
         .frame(width: size.width, height: size.height)
+        .mask { HeroArtworkFade() }
     }
 
     private func heroLogoRequest(_ item: MediaCard) -> URLRequest? {
@@ -977,31 +987,28 @@ struct MobileHomeView: View {
     }
 
     private func isResumeCandidate(_ remote: MediaCard) -> Bool {
-        homeResumeCandidate(remote.legacyPresentation, sourceID: source?.id, library: library)
+        homeResumeCandidate(remote.legacyPresentation, sourceID: source?.id, localItems: library.items)
     }
 
     private func loadHeroArtwork(at index: Int) async {
-        guard latest.indices.contains(index), heroArtworks[latest[index].id] == nil else { return }
+        guard localLibrary || canRefreshServerShelves,
+              !Task.isCancelled, let source, latest.indices.contains(index) else { return }
         let item = latest[index]
-        guard let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else {
-            return
-        }
+        guard heroArtworks[item.id] == nil,
+              let token = try? KeychainPasswordStore.metadataToken(), !token.isEmpty else { return }
+        let context = homeContext
         let requestedLanguage = LocalizationPreferences.current.contentID
         let result = try? await TMDBService.detailArtwork(remote: (heroDetails[item.id] ?? item).legacyPresentation, metadata: nil,
             title: item.name, television: item.type == "Series",
             language: TMDBService.deviceLanguage, token: token,
             displayWidthPixels: Int(UIScreen.main.bounds.width * UIScreen.main.scale))
-        guard !Task.isCancelled else { return }
-        guard requestedLanguage == LocalizationPreferences.current.contentID else { return }
         // A transient request failure must remain retryable on the next selection.
-        guard let result else { return }
+        guard let result, !Task.isCancelled, context == homeContext,
+              requestedLanguage == LocalizationPreferences.current.contentID else { return }
         heroArtworks[item.id] = result
-        if let source {
-            HomeSnapshotCache.artworks[source.id] = heroArtworks
-            if !localLibrary {
-                let context = HomeStartupCache.context(source: source, language: contentLocalizationID)
-                await HomeStartupCache.shared.update(id: source.id, context: context, artworkID: item.id, artwork: result)
-            }
+        HomeSnapshotCache.artworks[source.id] = heroArtworks
+        if !localLibrary {
+            await HomeStartupCache.shared.update(id: source.id, context: context, artworkID: item.id, artwork: result)
         }
     }
 
@@ -1053,18 +1060,14 @@ struct MobileHomeView: View {
                 LazyHStack(alignment: .top, spacing: 14) {
                     if let source {
                         ForEach(continuing, id: \.id) { item in
-                            Button { open(item) } label: {
+                            let key = "continuing:\(source.id):\(item.id)"
+                            Button { open(item, transitionKey: key) } label: {
                                 VStack(alignment: .leading, spacing: 7) {
                                     ZStack(alignment: .bottom) {
-                                        EmbyArtwork(source: source, itemID: item.id,
-                                                    backdrop: true, width: 600)
+                                        EmbyArtwork(source: source, itemID: item.legacyPresentation.seriesId ?? item.id,
+                                                    backdrop: true, width: 600, allowsPortraitFallback: false)
                                         LinearGradient(colors: [.clear, .black.opacity(0.55)],
                                                        startPoint: .center, endPoint: .bottom)
-                                        if let rating = item.communityRating, rating > 0 {
-                                            LucentRatingBadge(rating: rating)
-                                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                                                .padding(4)
-                                        }
                                         LucentPlaybackProgressOverlay(
                                             position: Double(item.userData?.playbackPositionTicks ?? 0) / 10_000_000,
                                             duration: item.runTimeTicks.map { Double($0) / 10_000_000 }, progress: progress(item))
@@ -1072,11 +1075,8 @@ struct MobileHomeView: View {
                                     .frame(width: HomePalette.continueWidth,
                                            height: HomePalette.isPad ? 160 : 110)
                                     .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    LucentPosterCaption(title: item.name, lines: 1)
-                                    if let label = item.identity.episodeLabel {
-                                        Text(label).font(.caption).foregroundStyle(HomePalette.muted)
-                                            .lineLimit(1)
-                                    }
+                                    .modifier(HomeMatchedSource(key: key, namespace: detailTransition, sourceBackground: themeColor))
+                                    HomeContinuingCaption(item: item)
                                 }
                                 .frame(width: HomePalette.continueWidth, alignment: .leading)
                             }
@@ -1100,8 +1100,9 @@ struct MobileHomeView: View {
                 LazyHStack(spacing: 14) {
                     if let source {
                         ForEach(views, id: \.id) { view in
+                            let key = "media:\(source.id):\(view.id)"
                             Button {
-                                collectionTransitionKey = nil
+                                collectionTransitionKey = key
                                 if localLibrary { localCollection = LocalCatalogCollection(rawValue: view.id) }
                                 else { browserRoute = HomeBrowserRoute(source: source, parentID: view.id, title: view.name, collectionType: view.legacyPresentation.collectionType) }
                             } label: {
@@ -1112,9 +1113,9 @@ struct MobileHomeView: View {
                                             .frame(width: HomePalette.categoryWidth,
                                                    height: HomePalette.categoryHeight)
                                             .clipped()
-                                    } else if let first = shelves.first(where: { $0.id == view.id })?.items.first {
-                                        EmbyArtwork(source: source, itemID: first.id,
-                                                    backdrop: true, width: 500)
+                                    } else if let first = shelves.first(where: { $0.id == view.id })?.items.first,
+                                              let item = HomeSnapshotCache.localItems[first.id] {
+                                        LocalCatalogArtwork(item: item, landscape: true, backdropOnly: true)
                                             .frame(width: HomePalette.categoryWidth,
                                                    height: HomePalette.categoryHeight)
                                             .clipped()
@@ -1144,6 +1145,7 @@ struct MobileHomeView: View {
                                 .frame(width: HomePalette.categoryWidth,
                                        height: HomePalette.categoryHeight)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .modifier(HomeMatchedSource(key: key, namespace: detailTransition, sourceBackground: themeColor))
                             }
                             .buttonStyle(.plain)
                         }
@@ -1167,12 +1169,9 @@ struct MobileHomeView: View {
             }
             .buttonStyle(.plain)
             if let error = shelfErrors[shelf.id] {
-                HStack {
-                    Text(error).font(.caption).foregroundStyle(.secondary)
-                    Button("重试") { Task { await loadShelf(shelf) } }
-                }.padding(.horizontal, HomePalette.inset)
+                Text(error).font(.caption).foregroundStyle(.secondary).padding(.horizontal, HomePalette.inset)
             }
-            if shelf.items.isEmpty && (localLibrary || loadedShelfIDs.contains(shelf.id)) {
+            if shelf.items.isEmpty && shelfErrors[shelf.id] == nil {
                 Text("打开媒体库查看全部")
                     .font(.subheadline)
                     .foregroundStyle(HomePalette.muted)
@@ -1180,25 +1179,15 @@ struct MobileHomeView: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    if shelf.items.isEmpty && !localLibrary && !loadedShelfIDs.contains(shelf.id) {
-                        ForEach(0..<4, id: \.self) { _ in
-                            VStack(alignment: .leading, spacing: 7) {
-                                LucentSkeleton(radius: 15).frame(width: HomePalette.posterWidth, height: HomePalette.isPad ? 240 : 158)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(" ").font(.footnote.weight(.medium)).lineLimit(1, reservesSpace: true)
-                                    Text(" ").font(.caption).lineLimit(1, reservesSpace: true)
-                                }
-                            }.frame(width: HomePalette.posterWidth, alignment: .leading)
-                        }
-                    }
                     if let source {
                         ForEach(shelf.items, id: \.id) { item in
+                            let metadata = library.cardMetadata[LibraryStore.cardKey(sourceID: source.id, itemID: item.id)]
                             Button { open(item, transitionKey: "shelf:\(shelf.id):\(item.id)") } label: {
                                 VStack(alignment: .leading, spacing: 7) {
                                     ZStack(alignment: .bottomTrailing) {
                                         EmbyArtwork(source: source, itemID: item.id,
-                                                    backdrop: false, width: 350)
-                                        if let rating = item.communityRating ?? heroDetails[item.id]?.communityRating, rating > 0 {
+                                                    backdrop: false, width: LucentUI.catalogPosterRequestWidth)
+                                        if let rating = metadata?.rating ?? item.communityRating ?? heroDetails[item.id]?.communityRating, rating > 0 {
                                             LucentRatingBadge(rating: rating)
                                                 .padding(4)
                                         }
@@ -1209,10 +1198,10 @@ struct MobileHomeView: View {
                                     .modifier(HomeMatchedSource(key: "shelf:\(shelf.id):\(item.id)",
                                                                 namespace: detailTransition))
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(item.name).font(.footnote.weight(.medium))
+                                        Text(metadata?.title ?? item.name).font(.footnote.weight(.medium))
                                             .foregroundStyle(HomePalette.ink)
                                             .lineLimit(1, reservesSpace: true)
-                                        Text(item.yearText ?? " ").font(.caption)
+                                        Text(metadata?.year ?? item.yearText ?? " ").font(.caption)
                                             .foregroundStyle(HomePalette.muted)
                                             .lineLimit(1, reservesSpace: true)
                                     }
@@ -1226,91 +1215,6 @@ struct MobileHomeView: View {
                     }
                 }
                 .padding(.horizontal, HomePalette.inset)
-            }
-        }
-        .task(id: "\(shelfEpoch)|\(source?.id.uuidString ?? "")|\(shelfSourceID?.uuidString ?? "")|\(shelf.id)") {
-            await loadShelf(shelf)
-            // One next row of data prefetch; artwork still follows lazy card lifecycle.
-            guard !Task.isCancelled else { return }
-            if let index = views.firstIndex(where: { $0.id == shelf.id }), views.indices.contains(index + 1),
-               let next = shelves.first(where: { $0.id == views[index + 1].id }) {
-                await loadShelf(next)
-            }
-        }
-    }
-
-    private func loadShelf(_ shelf: HomeShelf) async {
-        guard !localLibrary, let source, shelfSourceID == source.id, !loadedShelfIDs.contains(shelf.id), !loadingShelfIDs.contains(shelf.id) else { return }
-        let epoch = shelfEpoch
-        loadingShelfIDs.insert(shelf.id)
-        shelfErrors[shelf.id] = nil
-        defer { if shelfEpoch == epoch { loadingShelfIDs.remove(shelf.id) } }
-        do {
-            try await ArtworkWorkGate.shelves.acquire()
-            defer { Task { await ArtworkWorkGate.shelves.release() } }
-            try Task.checkCancellation()
-            guard let token = try KeychainPasswordStore.embyToken(for: source.id), !token.isEmpty else { throw URLError(.userAuthenticationRequired) }
-            let page = try await EmbyClient.featured(source: source, token: token, parentID: shelf.id,
-                itemTypes: EmbyClient.featuredItemTypes(for: shelf.view.legacyPresentation))
-            try Task.checkCancellation()
-            var items = page.items.map { MediaCard(server: $0) }
-            guard shelfEpoch == epoch, let initialIndex = shelves.firstIndex(where: { $0.id == shelf.id }) else { return }
-            shelves[initialIndex] = HomeShelf(view: shelf.view, items: items)
-            let missing = Array(Set(items.filter { $0.year == nil || $0.rating == nil }.map(\.id))).sorted()
-            if !missing.isEmpty {
-                do {
-                    let batch = try await ServerCatalogSync.cachedItems(base: source.baseAddress, userID: source.userID,
-                        token: token, ids: missing, fields: "Overview,Genres,ProviderIds,PreferredMetadataLanguage,CommunityRating,ProductionYear")
-                    let extras = Dictionary(batch.map { ($0.id, MediaCard(server: $0)) }, uniquingKeysWith: { _, last in last })
-                    items = items.map { card in extras[card.id]?.preservingMetadata(from: card) ?? card }
-                } catch {
-                    if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
-                    // A metadata enrichment failure must not hide a valid shelf response.
-                }
-            }
-            try Task.checkCancellation()
-            guard shelfEpoch == epoch, let index = shelves.firstIndex(where: { $0.id == shelf.id }) else { return }
-            shelves[index] = HomeShelf(view: shelf.view, items: items)
-            loadedShelfIDs.insert(shelf.id)
-            if let old = HomeSnapshotCache.entries[source.id] {
-                HomeSnapshotCache.entries[source.id] = .init(refreshID: old.refreshID, loadedAt: old.loadedAt,
-                    views: old.views, latest: old.latest, continuing: old.continuing, continuingTotal: old.continuingTotal, shelves: shelves)
-            }
-            guard shelfEpoch == epoch, !Task.isCancelled else { return }
-            // Reconcile watch state and persist the row after scrolling settles, once for all rows.
-            deferLoadedShelfResults(source: source,
-                context: HomeStartupCache.context(source: source, language: contentLocalizationID),
-                shelf: HomeShelf(view: shelf.view, items: items),
-                displayedItems: items.map(\.legacyPresentation))
-        } catch {
-            guard shelfEpoch == epoch, !Task.isCancelled, !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return }
-            shelfErrors[shelf.id] = error.localizedDescription
-        }
-    }
-
-    /// Merge one loaded row into the pending flush. A later row re-arms the timer, so a fast
-    /// scroll results in a single reconcile-and-persist pass instead of one per row.
-    private func deferLoadedShelfResults(source: EmbySource, context: String, shelf: HomeShelf, displayedItems: [JellyfinItem]) {
-        shelfFlushTask?.cancel()
-        var batch = pendingShelfResults[source.id] ?? DeferredShelfResults(context: context)
-        batch.context = context
-        for item in displayedItems { batch.displayedItems[item.id] = item }
-        batch.shelves[shelf.id] = shelf
-        pendingShelfResults[source.id] = batch
-        let results = pendingShelfResults
-        pendingShelfResults = [:]
-        shelfFlushTask = Task {
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            for (sourceID, batch) in results {
-                do {
-                    try await library.synchronizeServerHome(sourceID: sourceID, emby: true, displayedItems: Array(batch.displayedItems.values))
-                } catch {
-                    // Keep the fetched rows usable if local watch-state reconciliation fails.
-                }
-                await HomeStartupCache.shared.updateShelves(
-                    id: sourceID, context: batch.context,
-                    shelves: batch.shelves.values.map { HomeStartupSnapshot.Shelf(view: $0.view, items: $0.items) })
             }
         }
     }
@@ -1369,7 +1273,7 @@ struct MobileHomeView: View {
                 .map { MediaCard(local: $0, asSeries: $0.identity?.seriesName != nil) }
         }.value
         guard !Task.isCancelled else { return }
-        continuing = result; continuingTotal = result.count
+        cachedContinuing = result; cachedContinuingTotal = result.count
         HomeSnapshotCache.localItems = Dictionary(files.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { _, last in last })
     }
 
@@ -1401,8 +1305,8 @@ struct MobileHomeView: View {
         guard !Task.isCancelled, localHomeGeneration == generation else { return }
         shelves = result.0
         views = result.0.map(\.view)
-        continuing = result.1
-        continuingTotal = continuing.count
+        cachedContinuing = result.1
+        cachedContinuingTotal = continuing.count
         let available = result.2
         let context = HomeSnapshotCache.localContext.id
         let old = HomeSnapshotCache.entries[context]
@@ -1423,7 +1327,25 @@ struct MobileHomeView: View {
         errorMessage = nil
     }
 
-    private func loadHome() async {
+    private func waitForHomeScrollToSettle() async throws {
+        while homeScrollIsActive {
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        try Task.checkCancellation()
+    }
+
+    private func loadHome(manualRefresh: Bool = false) async {
+        let context = homeContext
+        if displayedHomeContext != context {
+            displayedHomeContext = context
+            views = []; latest = []; cachedContinuing = []; cachedContinuingTotal = 0; shelves = []
+            heroIndex = 0; indicatorIndex = 0; outgoingHeroIndex = nil
+            heroArtworks = [:]; heroDetails = [:]; heroThemes = [:]; heroThemeImages = [:]
+            selectedTheme = nil
+            restoredSnapshotKey = nil
+            hasLoadedHome = false
+            errorMessage = nil
+        }
         let requestID = UUID()
         homeLoadID = requestID
         var wasCancelled = false
@@ -1433,7 +1355,7 @@ struct MobileHomeView: View {
         HomeSnapshotCache.trim(validSources: Set(library.embySources.map(\.id)).union([HomeSnapshotCache.localContext.id]))
         if localLibrary { await loadLocalHome(); return }
         guard let source else {
-            views = []; latest = []; continuing = []; continuingTotal = 0; shelves = []
+            views = []; latest = []; cachedContinuing = []; cachedContinuingTotal = 0; shelves = []
             heroIndex = 0; indicatorIndex = 0
             heroArtworks = [:]; heroDetails = [:]; heroThemes = [:]
             selectedTheme = nil
@@ -1441,7 +1363,7 @@ struct MobileHomeView: View {
             return
         }
         if let snapshot = HomeSnapshotCache.entries[source.id],
-           snapshot.refreshID == refreshID,
+           !manualRefresh, snapshot.context == context, snapshot.refreshID == refreshID,
            Date().timeIntervalSince(snapshot.loadedAt) < HomeSnapshotCache.lifetime {
             isLoading = false
             let snapshotKey = "\(source.id)|\(snapshot.refreshID)|\(snapshot.loadedAt.timeIntervalSinceReferenceDate)|\(minimumResumePercent)|\(completedPercent)"
@@ -1452,10 +1374,9 @@ struct MobileHomeView: View {
             restoredSnapshotKey = snapshotKey
             views = snapshot.views
             latest = snapshot.latest
-            continuing = resumed
-            continuingTotal = snapshot.continuingTotal
+            cachedContinuing = resumed
+            cachedContinuingTotal = snapshot.continuingTotal
             shelves = snapshot.shelves
-            shelfSourceID = source.id
             heroArtworks = HomeSnapshotCache.artworkLanguage == contentLocalizationID ? HomeSnapshotCache.artworks[source.id] ?? [:] : [:]
             heroDetails = HomeSnapshotCache.details[source.id] ?? [:]
             heroThemes = HomeSnapshotCache.themes[source.id] ?? [:]
@@ -1467,24 +1388,19 @@ struct MobileHomeView: View {
             errorMessage = nil
             return
         }
-        shelfEpoch = UUID()
-        shelfSourceID = nil
-        loadedShelfIDs = []
-        loadingShelfIDs = []
         shelfErrors = [:]
         let startupContext = HomeStartupCache.context(source: source, language: contentLocalizationID)
         var restoredStartup = false
-        if !hasLoadedHome, let seed = await HomeStartupCache.shared.read(id: source.id, context: startupContext) {
+        if !manualRefresh, let seed = await HomeStartupCache.shared.read(id: source.id, context: startupContext) {
             guard !Task.isCancelled, homeLoadID == requestID else { return }
             let resumed = seed.continuing.filter(isResumeCandidate)
             await prepareContinuingCovers(resumed, source: source)
             guard !Task.isCancelled, homeLoadID == requestID else { return }
             views = seed.views
             latest = seed.latest
-            continuing = resumed
-            continuingTotal = seed.continuingTotal
+            cachedContinuing = resumed
+            cachedContinuingTotal = seed.continuingTotal
             shelves = seed.shelves.map { HomeShelf(view: $0.view, items: $0.items) }
-            shelfSourceID = source.id
             heroArtworks = seed.artworks
             HomeSnapshotCache.artworks[source.id] = seed.artworks
             heroIndex = seed.selectedHeroID.flatMap { id in latest.firstIndex { $0.id == id } } ?? 0
@@ -1492,6 +1408,13 @@ struct MobileHomeView: View {
             hasLoadedHome = true
             restoredStartup = true
         }
+        if pausesHomeRefreshForComparison && !manualRefresh && restoredStartup {
+            isLoading = false
+            hasLoadedHome = true
+            errorMessage = nil
+            return
+        }
+        if !restoredStartup { manualRefreshSourceID = source.id }
         isLoading = true
         errorMessage = nil
         defer {
@@ -1507,42 +1430,63 @@ struct MobileHomeView: View {
             }
             async let viewsRequest = EmbyClient.browse(source: source, token: token, parentID: nil)
             async let latestRequest = EmbyClient.latest(source: source, token: token)
-            async let resumeRequest = EmbyClient.resume(source: source, token: token)
-            // Publish the hero independently of slower library/resume/enrichment requests.
+            async let resumeRequest = library.refreshEmbyContinuing(source: source, token: token)
             let recentMovies = try await latestRequest
+            let priorIDs = latest.map(\.id)
+            let fetchedLatest = await Task.detached(priority: .utility) {
+                let candidates = recentMovies.map { MediaCard(server: $0) }
+                    .filter { $0.type == "Movie" || $0.type == "Series" }
+                let byID = Dictionary(candidates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                let prior = priorIDs.compactMap { byID[$0] }
+                let retainedIDs = Set(priorIDs)
+                return Array((prior + candidates.filter { !retainedIDs.contains($0.id) }.shuffled()).prefix(8))
+            }.value
             try Task.checkCancellation()
             guard homeLoadID == requestID else { return }
-            let candidates = recentMovies.map { MediaCard(server: $0) }.filter { $0.type == "Movie" || $0.type == "Series" }
-            let priorIDs = restoredStartup ? latest.map(\.id) : []
-            let prior = priorIDs.compactMap { id in candidates.first { $0.id == id } }
-            let fetchedLatest = Array((prior + candidates.filter { !priorIDs.contains($0.id) }.shuffled()).prefix(8))
-            let selectedID = restoredStartup && latest.indices.contains(heroIndex) ? latest[heroIndex].id : nil
-            latest = fetchedLatest
-            heroIndex = selectedID.flatMap { id in latest.firstIndex { $0.id == id } } ?? 0
-            indicatorIndex = heroIndex
-            outgoingHeroIndex = nil
-            if !restoredStartup {
-                heroArtworks = [:]
-                heroDetails = [:]
-                heroThemes = [:]
-                heroThemeImages = [:]
-                selectedTheme = nil
-            }
-            hasLoadedHome = true
             let (viewPage, resumePage) = try await (viewsRequest, resumeRequest)
             try Task.checkCancellation()
             guard homeLoadID == requestID else { return }
-            let fetchedViews = viewPage.items.map { MediaCard(server: $0) }
-            views = fetchedViews
-            continuing = resumePage.items.map { MediaCard(server: $0) }.filter(isResumeCandidate)
-            continuingTotal = resumePage.totalCount
-            // Reserve all rows in server order; LazyVStack row tasks load only nearby shelves.
-            let retained = Dictionary(shelves.map { ($0.id, $0.items) }, uniquingKeysWith: { _, last in last })
-            shelves = fetchedViews.map { HomeShelf(view: $0, items: retained[$0.id] ?? []) }
-            shelfSourceID = source.id
-            let displayed = fetchedLatest + resumePage.items.map { MediaCard(server: $0) }
+            let requestedAt = Date()
+            var results: [String: [MediaCard]] = [:]
+            var errors: [String: String] = [:]
+            for start in stride(from: 0, to: viewPage.items.count, by: 4) {
+                try Task.checkCancellation()
+                let batch = viewPage.items[start..<min(start + 4, viewPage.items.count)]
+                await withTaskGroup(of: (String, [MediaCard]?, String?).self) { group in
+                    for view in batch {
+                        group.addTask {
+                            do {
+                                let page = try await EmbyClient.featured(source: source, token: token, parentID: view.id,
+                                    itemTypes: EmbyClient.featuredItemTypes(for: view))
+                                return (view.id, page.items.map { MediaCard(server: $0) }, nil)
+                            } catch {
+                                return (view.id, nil, error.localizedDescription)
+                            }
+                        }
+                    }
+                    for await (id, cards, error) in group {
+                        results[id] = cards
+                        errors[id] = error
+                    }
+                }
+            }
+            try Task.checkCancellation()
+            let previousShelves = shelves
+            let loadedRows = results
+            let (fetchedViews, fetchedShelves, displayed) = await Task.detached(priority: .utility) {
+                let views = viewPage.items.map { MediaCard(server: $0) }
+                let retained = Dictionary(previousShelves.map { ($0.id, $0.items) }, uniquingKeysWith: { _, last in last })
+                let rows = views.map { HomeShelf(view: $0, items: loadedRows[$0.id] ?? retained[$0.id] ?? []) }
+                let cards = fetchedLatest + resumePage.items.map { MediaCard(server: $0) } + loadedRows.values.flatMap { $0 }
+                return (views, rows, cards)
+            }.value
+            try Task.checkCancellation()
+            guard homeLoadID == requestID else { return }
             // List metadata is authoritative; batch only genuinely missing year or rating.
-            let missingIDs = Array(Set(displayed.filter { $0.year == nil || $0.rating == nil }.map(\.id))).sorted()
+            let missingIDs = Array(Set(displayed.filter { card in
+                let cached = library.cardMetadata[LibraryStore.cardKey(sourceID: source.id, itemID: card.id)]
+                return (card.year == nil && cached?.year == nil) || (card.rating == nil && cached?.rating == nil)
+            }.map(\.id))).sorted()
             var enriched: [String: MediaCard] = [:]
             if !missingIDs.isEmpty {
                 do {
@@ -1562,9 +1506,16 @@ struct MobileHomeView: View {
                 originals[value.id].map { value.preservingMetadata(from: $0) } ?? value
             }
             func resolved(_ card: MediaCard) -> MediaCard { enriched[card.id]?.preservingMetadata(from: card) ?? card }
-            guard homeLoadID == requestID else { return }
-            try Task.checkCancellation()
+            try await waitForHomeScrollToSettle()
+            guard homeLoadID == requestID, homeContext == context else { return }
             views = fetchedViews
+            shelves = fetchedShelves.map { HomeShelf(view: $0.view, items: $0.items.map(resolved)) }
+            shelfErrors = errors
+            let resolvedItems = Dictionary(displayed.map(resolved).map { ($0.id, $0.legacyPresentation) },
+                                           uniquingKeysWith: { _, last in last }).values.map { $0 }
+            library.mergeServerCards(resolvedItems, sourceID: source.id, requestedAt: requestedAt)
+            hasLoadedHome = true
+            outgoingHeroIndex = nil
             let selectedHeroID = latest.indices.contains(heroIndex) ? latest[heroIndex].id : nil
             latest = fetchedLatest.map(resolved)
             heroIndex = selectedHeroID.flatMap { id in latest.firstIndex { $0.id == id } } ?? 0
@@ -1574,10 +1525,10 @@ struct MobileHomeView: View {
             HomeSnapshotCache.artworks[source.id] = heroArtworks
             HomeSnapshotCache.details[source.id] = enriched
             HomeSnapshotCache.themes[source.id] = heroThemes
-            continuing = resumePage.items.map { resolved(MediaCard(server: $0)) }.filter(isResumeCandidate)
-            continuingTotal = resumePage.totalCount
+            cachedContinuing = resumePage.items.map { resolved(MediaCard(server: $0)) }.filter(isResumeCandidate)
+            cachedContinuingTotal = resumePage.totalCount
             do { try await library.synchronizeServerHome(sourceID: source.id, emby: true,
-                displayedItems: Dictionary(displayed.map(resolved).map { ($0.id, $0.legacyPresentation) }, uniquingKeysWith: { _, last in last }).values.map { $0 }) }
+                displayedItems: resolvedItems) }
             catch is CancellationError { wasCancelled = true; return }
             catch {
                 if isCancellation(error) { wasCancelled = true; return }
@@ -1587,7 +1538,7 @@ struct MobileHomeView: View {
             try Task.checkCancellation()
             // A successfully fetched empty library is authoritative too; replace stale snapshots.
             HomeSnapshotCache.entries[source.id] = .init(
-                refreshID: refreshID, loadedAt: Date(), views: views, latest: latest,
+                refreshID: refreshID, context: context, loadedAt: Date(), views: views, latest: latest,
                 continuing: resumePage.items.map { resolved(MediaCard(server: $0)) }, continuingTotal: continuingTotal, shelves: shelves)
             let startup = HomeStartupSnapshot(version: 1, context: startupContext, savedAt: Date(),
                 views: views, latest: latest,
@@ -1607,8 +1558,8 @@ struct MobileHomeView: View {
     }
 }
 
-@MainActor private func homeResumeCandidate(_ remote: JellyfinItem, sourceID: UUID?, library: LibraryStore) -> Bool {
-    if let sourceID, let local = library.items.first(where: { item in
+@MainActor private func homeResumeCandidate(_ remote: JellyfinItem, sourceID: UUID?, localItems: [MediaItem]) -> Bool {
+    if let sourceID, let local = localItems.first(where: { item in
         switch item.location {
         case .embyItem(let id, let remoteID), .jellyfinItem(let id, let remoteID): return id == sourceID && remoteID == remote.id
         default: return false
@@ -1619,6 +1570,27 @@ struct MobileHomeView: View {
     return PlaybackProgressPolicy.current.resumePosition(
         position: Double(remote.userData?.playbackPositionTicks ?? 0) / 10_000_000,
         duration: remote.runTimeTicks.map { Double($0) / 10_000_000 }, watched: remote.userData?.played == true) > 0
+}
+
+private struct HomeContinuingCaption: View {
+    let item: MediaCard
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            LucentPosterCaption(title: item.seriesName ?? item.name, lines: 1)
+            if let subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(HomePalette.muted).lineLimit(1)
+            }
+        }
+    }
+
+    private var subtitle: String? {
+        guard let season = item.season, let episode = item.episode, episode > 0 else {
+            return item.year.map(String.init)
+        }
+        let label = season == 0 ? MediaIdentity.specialEpisodeTitle(episode) : "S\(season):E\(episode)"
+        return item.kind == "Episode" && item.name != item.seriesName ? "\(label) - \(item.name)" : label
+    }
 }
 
 private struct HomeContinuingList: View {
@@ -1636,15 +1608,14 @@ private struct HomeContinuingList: View {
                     ForEach(items,id:\.id) { item in
                         Button { selectedID = library.openEmbyItem(sourceID:source.id,remote:item).id } label: {
                             VStack(alignment:.leading,spacing:8) {
-                                EmbyArtwork(source:source,itemID:item.id,backdrop:true,width:600)
+                                EmbyArtwork(source: source, itemID: item.seriesId ?? item.id, backdrop: true, width: 600, allowsPortraitFallback: false)
                                     .frame(height:110)
                                     .overlay(alignment: .bottom) {
                                         LucentPlaybackProgressOverlay(position: Double(item.userData?.playbackPositionTicks ?? 0) / 10_000_000,
                                             duration: item.runTimeTicks.map { Double($0) / 10_000_000 })
                                     }
                                     .clipShape(RoundedRectangle(cornerRadius:14))
-                                LucentPosterCaption(title: item.seriesName ?? item.name, subtitle: item.displayYearText, lines: 1)
-                                if let label = item.identity.episodeLabel { Text(label).font(.caption).foregroundStyle(.secondary) }
+                                HomeContinuingCaption(item: MediaCard(server: item))
                             }
                         }.buttonStyle(.plain)
                     }
@@ -1666,7 +1637,7 @@ private struct HomeContinuingList: View {
                 do {
                     guard let token = try KeychainPasswordStore.embyToken(for:source.id) else { throw URLError(.userAuthenticationRequired) }
                     items = try await EmbyClient.resume(source:source,token:token,limit:10000).items
-                        .filter { homeResumeCandidate($0, sourceID: source.id, library: library) }
+                        .filter { homeResumeCandidate($0, sourceID: source.id, localItems: library.items) }
                 } catch { self.error = error.localizedDescription }
             }
         }
@@ -1698,6 +1669,14 @@ private enum SearchEntry: Identifiable, Sendable {
     case jellyfin(JellyfinSource, JellyfinItem)
     case plex(PlexSource, PlexItem)
 
+    var metadataKey: String {
+        switch self {
+        case .emby(let source, let item): LibraryStore.cardKey(sourceID: source.id, itemID: item.id)
+        case .jellyfin(let source, let item): LibraryStore.cardKey(sourceID: source.id, itemID: item.id)
+        case .plex(let source, let item): LibraryStore.cardKey(sourceID: source.id, itemID: item.ratingKey)
+        }
+    }
+
     var id: String {
         switch self {
         case .emby(let source, let item): "emby|\(source.id)|\(item.id)"
@@ -1709,6 +1688,19 @@ private enum SearchEntry: Identifiable, Sendable {
         switch self {
         case .emby(_, let item), .jellyfin(_, let item): item.name
         case .plex(_, let item): item.title
+        }
+    }
+    var serverAsset: String {
+        switch self {
+        case .emby(let source, _): source.kind.assetName
+        case .jellyfin: "JellyfinBrand"
+        case .plex: "PlexBrand"
+        }
+    }
+    var rating: Double? {
+        switch self {
+        case .emby(_, let item), .jellyfin(_, let item): item.communityRating
+        case .plex(_, let item): item.rating
         }
     }
     var year: String? {
@@ -1725,6 +1717,16 @@ private struct SearchGroup: Identifiable, Sendable {
     let entries: [SearchEntry]
 }
 
+private struct SearchResultsPage: Identifiable, Hashable {
+    let id = UUID()
+    let term: String
+    let localItems: [MediaItem]
+    let serverItems: [SearchEntry]
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 private struct SearchRemotePoster: View {
     let request: URLRequest?
     let cacheKey: String
@@ -1733,21 +1735,20 @@ private struct SearchRemotePoster: View {
 
 struct MobileSearchView: View {
     @State private var searchPresented = false
+    @FocusState private var searchFocused: Bool
     @EnvironmentObject private var library: LibraryStore
-    let catalog: String
+    let isSelected: Bool
     @Binding var detailPresented: Bool
     @Binding var query: String
     @Binding var submittedQuery: String
 
-    @State private var scope = "server"
     @State private var groups: [SearchGroup] = []
     @State private var localResults: [MediaItem] = []
-    @State private var recommendations: [SearchEntry] = []
-    @State private var localRecommendations: [MediaItem] = []
     @State private var loading = false
     @State private var errorMessage: String?
     @State private var selectedItemID: UUID?
-    @State private var recommendationBatch = 0
+    @State private var selectedResultsPage: SearchResultsPage?
+    @State private var completedSearchTerm: String?
     @AppStorage("lucent.search.history") private var historyJSON = "[]"
 
     private let columns = [GridItem(.flexible(), spacing: 12),
@@ -1767,7 +1768,7 @@ struct MobileSearchView: View {
         }
     }
     private var hasResults: Bool {
-        scope == "library" ? !localResults.isEmpty : groups.contains { !$0.entries.isEmpty }
+        !localResults.isEmpty || groups.contains { !$0.entries.isEmpty }
     }
 
     var body: some View {
@@ -1777,55 +1778,92 @@ struct MobileSearchView: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 16, trailing: 20))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                VStack(alignment: .leading, spacing: 26) {
-                    if !term.isEmpty && (!localResults.isEmpty || groups.contains(where: { !$0.entries.isEmpty })) {
-                        MobileSegmentedTabs(options: [("媒体库", "library"),
-                                                      ("影视服务器", "server")],
-                                            selection: $scope)
-                    }
-
-                    if term.isEmpty {
-                        recommendationContent
-                    } else {
+                if !term.isEmpty {
+                    Group {
                         searchResultsContent
                     }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 26, trailing: 20))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 36, trailing: 20))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color(uiColor: .systemGroupedBackground))
+            .overlay {
+                if term.isEmpty || (!loading && errorMessage == nil && !hasResults) {
+                    VStack(spacing: 16) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 84, weight: .light))
+                            .accessibilityHidden(true)
+                        Text("搜索聚合媒体库和影音服务器内容")
+                            .font(.subheadline)
+                    }
+                    .foregroundStyle(.secondary)
+                    .allowsHitTesting(false)
+                }
+            }
             .navigationTitle("搜索")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $query, isPresented: $searchPresented,
                         placement: .navigationBarDrawer(displayMode: .always),
                         prompt: "搜索影片和剧集")
-            .onChange(of: searchPresented) { wasPresented, isPresented in
-                guard wasPresented, !isPresented else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    submittedQuery = ""
+            .searchFocused($searchFocused)
+            .task(id: isSelected) {
+                guard isSelected else {
+                    searchFocused = false
+                    return
                 }
+                if !term.isEmpty, hasResults {
+                    query = submittedQuery
+                    return
+                }
+                if !searchPresented {
+                    searchPresented = true
+                }
+                await Task.yield()
+                guard !Task.isCancelled, isSelected else { return }
+                searchFocused = true
+            }
+            .onChange(of: searchPresented) { wasPresented, isPresented in
+                guard isSelected, wasPresented, !isPresented else { return }
+                clearSubmittedSearch()
             }
             .onSubmit(of: .search) {
                 submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .toolbar(.visible, for: .navigationBar)
             .lucentTabRoot()
-            .task(id: catalog) { scope = catalog == "library" ? "library" : "server" }
             .task(id: term) { await search() }
-            .task(id: recommendationBatch) { await loadRecommendations() }
             .navigationDestination(item: $selectedItemID) { id in
                 Group {
                     MediaDetailView(itemID: id, onBack: { withAnimation { selectedItemID = nil } }).environmentObject(library)
                 }.lucentSecondaryPage()
             }
+            .navigationDestination(item: $selectedResultsPage) { page in
+                ScrollView {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                        ForEach(page.localItems) { localResultButton($0) }
+                        ForEach(page.serverItems) { entryButton($0) }
+                    }
+                    .padding(20)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle(page.term)
+                .navigationBarTitleDisplayMode(.inline)
+                .lucentSecondaryPage()
+            }
             .onChange(of: selectedItemID) { _, value in
                 detailPresented = value != nil
             }
+        }
+    }
+
+    private func clearSubmittedSearch() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            submittedQuery = ""
         }
     }
 
@@ -1861,105 +1899,75 @@ struct MobileSearchView: View {
         }
     }
 
-    @ViewBuilder private var recommendationContent: some View {
-        if (scope == "library" && !localRecommendations.isEmpty) ||
-            (scope == "server" && !recommendations.isEmpty) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("推荐观看").font(.title3.bold())
-                    Spacer()
-                    Button {
-                        recommendationBatch += 1
-                    } label: {
-                        Label("换一批", systemImage: "arrow.clockwise")
-                            .font(.subheadline)
-                    }
-                    .buttonStyle(.borderless)
-                }
-                if scope == "library" {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                        ForEach(localRecommendations) { item in
-                            Button { selectedItemID = item.id } label: {
-                                posterCard(title: item.identity?.seriesName ?? item.title, subtitle: item.catalogDisplayYearText) {
-                                    if let url = library.posterURL(for: item) {
-                                        LocalPosterView(url: url)
-                                    } else {
-                                        posterPlaceholder
-                                    }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } else {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                        ForEach(recommendations) { entry in
-                            entryButton(entry)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     @ViewBuilder private var searchResultsContent: some View {
-        if loading && scope == "server" {
+        if loading {
             ProgressView("正在搜索…")
                 .frame(maxWidth: .infinity).padding(.top, 36)
         }
         if let errorMessage {
             Text(errorMessage).font(.subheadline).foregroundStyle(.secondary)
         }
-        if scope == "library", !localResults.isEmpty {
-            resultSection(title: "媒体库", count: localResults.count) {
-                ForEach(localResults) { item in
-                    Button { selectedItemID = item.id } label: {
-                        posterCard(title: item.identity?.seriesName ?? item.title, subtitle: item.catalogDisplayYearText) {
-                            if let url = library.posterURL(for: item) {
-                                LocalPosterView(url: url)
-                            } else {
-                                posterPlaceholder
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+        if !localResults.isEmpty {
+            let items = localResults
+            resultSection(title: "聚合媒体库", items: items,
+                          page: SearchResultsPage(term: term, localItems: items, serverItems: []),
+                          card: localResultButton)
         }
-        if scope == "server" {
-            ForEach(groups) { group in
-                if !group.entries.isEmpty {
-                    resultSection(title: group.title, count: group.entries.count) {
-                        ForEach(group.entries) { entry in entryButton(entry) }
-                    }
-                }
-            }
-        }
-        if (!loading || scope == "library") && errorMessage == nil && !hasResults {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("没有找到“\(term)”")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                recommendationContent
-            }
-            .padding(.top, 16)
+        ForEach(groups) { group in
+            resultSection(title: group.title, asset: group.entries.first?.serverAsset, items: group.entries,
+                          page: SearchResultsPage(term: term, localItems: [], serverItems: group.entries),
+                          card: entryButton)
         }
     }
 
-    private func resultSection<Content: View>(
-        title: String, count: Int, @ViewBuilder content: () -> Content
+    private func resultSection<Item: Identifiable, Card: View>(
+        title: String, asset: String? = nil, items: [Item], page: SearchResultsPage, @ViewBuilder card: @escaping (Item) -> Card
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).font(.title3.bold())
-                Text("\(count)").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                selectedResultsPage = page
+            } label: {
+                HStack {
+                    LucentSourceLabel(title: title, asset: asset).font(.headline)
+                    Spacer()
+                    Text("\(items.count)")
+                        .font(.subheadline)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .contentShape(Rectangle())
             }
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 20, content: content)
+            .buttonStyle(.plain)
+            .accessibilityHint("查看该来源的搜索结果")
+
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(items) { item in
+                        card(item).frame(width: 106)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
         }
+    }
+
+    private func localResultButton(_ item: MediaItem) -> some View {
+        Button { selectedItemID = item.id } label: {
+            posterCard(title: item.catalogDisplayTitle, subtitle: item.catalogDisplayYearText, rating: item.metadata?.rating) {
+                if let url = library.posterURL(for: item) {
+                    LocalPosterView(url: url)
+                } else {
+                    posterPlaceholder
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func entryButton(_ entry: SearchEntry) -> some View {
-        Button { open(entry) } label: {
-            posterCard(title: entry.title, subtitle: entry.year) {
+        let metadata = library.cardMetadata[entry.metadataKey]
+        return Button { open(entry) } label: {
+            posterCard(title: metadata?.title ?? entry.title, subtitle: metadata?.year ?? entry.year, rating: metadata?.rating ?? entry.rating) {
                 entryPoster(entry)
             }
         }
@@ -1967,11 +1975,11 @@ struct MobileSearchView: View {
     }
 
     private func posterCard<Poster: View>(
-        title: String, subtitle: String?, @ViewBuilder poster: @escaping () -> Poster
+        title: String, subtitle: String?, rating: Double?, @ViewBuilder poster: @escaping () -> Poster
     ) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        LucentCatalogPosterLayout {
             Color.clear
-                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                .aspectRatio(LucentUI.posterAspectRatio, contentMode: .fit)
                 .overlay {
                     GeometryReader { geometry in
                         poster()
@@ -1979,17 +1987,13 @@ struct MobileSearchView: View {
                             .clipped()
                     }
                 }
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 13))
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(2, reservesSpace: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let subtitle {
-                Text(subtitle).font(.caption2).foregroundStyle(.secondary)
-            }
+                .overlay(alignment: .bottomTrailing) {
+                    if let rating { LucentRatingBadge(rating: rating).padding(3) }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
+        } caption: {
+            LucentCatalogCaption(title: title, yearText: subtitle)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var posterPlaceholder: some View {
@@ -2000,18 +2004,18 @@ struct MobileSearchView: View {
     @ViewBuilder private func entryPoster(_ entry: SearchEntry) -> some View {
         switch entry {
         case .emby(let source, let item):
-            EmbyArtwork(source: source, itemID: item.id, backdrop: false, width: 360)
+            EmbyArtwork(source: source, itemID: item.id, backdrop: false, width: LucentUI.catalogPosterRequestWidth)
         case .jellyfin(let source, let item):
             SearchRemotePoster(
                 request: (try? KeychainPasswordStore.jellyfinToken(for: source.id))
                     .flatMap { JellyfinClient.posterRequest(source: source, token: $0, itemID: item.id) },
-                cacheKey: "search|jellyfin|\(source.id)|\(item.id)")
+                cacheKey: "jellyfin|\(source.id)|\(item.id)")
         case .plex(let source, let item):
             SearchRemotePoster(
                 request: (try? KeychainPasswordStore.plexToken(for: source.id)).flatMap { token in
                     item.thumb.flatMap { PlexClient.posterRequest(source: source, token: token, thumb: $0) }
                 },
-                cacheKey: "search|plex|\(source.id)|\(item.ratingKey)")
+                cacheKey: "plex|\(source.id)|\(item.ratingKey)")
         }
     }
 
@@ -2036,14 +2040,16 @@ struct MobileSearchView: View {
     }
 
     private func search() async {
-        guard !term.isEmpty else {
+        let searchTerm = term
+        guard completedSearchTerm != searchTerm else { return }
+        completedSearchTerm = nil
+        guard !searchTerm.isEmpty else {
             groups = []
             localResults = []
             errorMessage = nil
             loading = false
             return
         }
-        let searchTerm = term
         remember(searchTerm)
         localResults = groupedLocalTitles(library.localLibraryItems.filter {
             $0.missingSince == nil &&
@@ -2056,89 +2062,64 @@ struct MobileSearchView: View {
         let emby = library.embySources
         let jellyfin = library.jellyfinSources
         let plex = library.plexSources
-        let found = await withTaskGroup(of: SearchGroup?.self) { taskGroup in
+        let requestedAt = Date()
+        let found = await withTaskGroup(of: (SearchGroup?, String?).self) { taskGroup in
             for source in emby {
                 taskGroup.addTask {
-                    guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
-                          !token.isEmpty,
-                          let page = try? await EmbyClient.search(
-                            source: source, token: token, term: searchTerm),
-                          !page.items.isEmpty else { return nil }
-                    return SearchGroup(id: "emby|\(source.id)", title: source.name,
-                        entries: page.items.map { .emby(source, $0) })
+                    do {
+                        guard let token = try KeychainPasswordStore.embyToken(for: source.id),
+                              !token.isEmpty else { return (nil, source.name) }
+                        let page = try await EmbyClient.search(source: source, token: token, term: searchTerm)
+                        guard !page.items.isEmpty else { return (nil, nil) }
+                        return (SearchGroup(id: "emby|\(source.id)", title: source.name,
+                                            entries: page.items.map { .emby(source, $0) }), nil)
+                    } catch { return (nil, source.name) }
                 }
             }
             for source in jellyfin {
                 taskGroup.addTask {
-                    guard let token = try? KeychainPasswordStore.jellyfinToken(for: source.id),
-                          !token.isEmpty,
-                          let items = try? await JellyfinClient.search(
-                            source: source, token: token, term: searchTerm),
-                          !items.isEmpty else { return nil }
-                    return SearchGroup(id: "jellyfin|\(source.id)", title: source.name,
-                        entries: items.map { .jellyfin(source, $0) })
+                    do {
+                        guard let token = try KeychainPasswordStore.jellyfinToken(for: source.id),
+                              !token.isEmpty else { return (nil, source.name) }
+                        let items = try await JellyfinClient.search(source: source, token: token, term: searchTerm)
+                        guard !items.isEmpty else { return (nil, nil) }
+                        return (SearchGroup(id: "jellyfin|\(source.id)", title: source.name,
+                                            entries: items.map { .jellyfin(source, $0) }), nil)
+                    } catch { return (nil, source.name) }
                 }
             }
             for source in plex {
                 taskGroup.addTask {
-                    guard let token = try? KeychainPasswordStore.plexToken(for: source.id),
-                          !token.isEmpty,
-                          let items = try? await PlexClient.search(
-                            source: source, token: token, term: searchTerm),
-                          !items.isEmpty else { return nil }
-                    return SearchGroup(id: "plex|\(source.id)", title: source.name,
-                        entries: items.map { .plex(source, $0) })
+                    do {
+                        guard let token = try KeychainPasswordStore.plexToken(for: source.id),
+                              !token.isEmpty else { return (nil, source.name) }
+                        let items = try await PlexClient.search(source: source, token: token, term: searchTerm)
+                        guard !items.isEmpty else { return (nil, nil) }
+                        return (SearchGroup(id: "plex|\(source.id)", title: source.name,
+                                            entries: items.map { .plex(source, $0) }), nil)
+                    } catch { return (nil, source.name) }
                 }
             }
             var results: [SearchGroup] = []
-            for await group in taskGroup {
+            var failures: [String] = []
+            for await (group, failure) in taskGroup {
                 if let group { results.append(group) }
+                if let failure { failures.append(failure) }
             }
-            return results
+            return (results, failures)
         }
-        guard !Task.isCancelled else { return }
-        groups = found.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        guard !Task.isCancelled, term == searchTerm else { return }
+        let records = found.0.flatMap(\.entries).map { entry in
+            (entry.metadataKey, LibraryStore.CardMetadata(title: entry.title, year: entry.year,
+                                                         rating: entry.rating, updatedAt: requestedAt))
+        }
+        library.mergeCardMetadata(Dictionary(records, uniquingKeysWith: { _, latest in latest }))
+        completedSearchTerm = searchTerm
+        groups = found.0.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        if !found.1.isEmpty {
+            errorMessage = "部分来源搜索失败：\(found.1.sorted().joined(separator: "、"))"
+        }
         loading = false
-    }
-
-    private func loadRecommendations() async {
-        localRecommendations = Array(groupedLocalTitles(library.localLibraryItems.filter {
-            $0.missingSince == nil
-        }).shuffled().prefix(9))
-        let emby = library.embySources
-        let jellyfin = library.jellyfinSources
-        let plex = library.plexSources
-        let found = await withTaskGroup(of: [SearchEntry].self) { taskGroup in
-            for source in emby {
-                taskGroup.addTask {
-                    guard let token = try? KeychainPasswordStore.embyToken(for: source.id),
-                          let items = try? await EmbyClient.latest(
-                            source: source, token: token, limit: 24) else { return [] }
-                    return items.map { .emby(source, $0) }
-                }
-            }
-            for source in jellyfin {
-                taskGroup.addTask {
-                    guard let token = try? KeychainPasswordStore.jellyfinToken(for: source.id),
-                          let items = try? await JellyfinClient.browsePage(
-                            source: source, token: token, limit: 24) else { return [] }
-                    return items.map { .jellyfin(source, $0) }
-                }
-            }
-            for source in plex {
-                taskGroup.addTask {
-                    guard let token = try? KeychainPasswordStore.plexToken(for: source.id),
-                          let items = try? await PlexClient.browsePage(
-                            source: source, token: token, limit: 24) else { return [] }
-                    return items.map { .plex(source, $0) }
-                }
-            }
-            var entries: [SearchEntry] = []
-            for await items in taskGroup { entries.append(contentsOf: items) }
-            return entries
-        }
-        guard !Task.isCancelled else { return }
-        recommendations = Array(found.shuffled().prefix(9))
     }
 
     private func remember(_ value: String) {

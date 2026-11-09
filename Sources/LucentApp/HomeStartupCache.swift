@@ -14,6 +14,7 @@ struct HomeStartupSnapshot: Codable, Sendable {
     let shelves: [Shelf]
     let artworks: [String: TMDBService.DetailArtwork]
     let selectedHeroID: String?
+    var heroRefreshedAt: Date? = nil
 }
 actor HomeStartupCache {
     static let shared = HomeStartupCache()
@@ -32,14 +33,14 @@ actor HomeStartupCache {
               Date().timeIntervalSince(value.savedAt) >= 0, Date().timeIntervalSince(value.savedAt) < 7 * 86400 else { return nil }
         return value
     }
-    func update(id: UUID, context: String, artworkID: String? = nil, artwork: TMDBService.DetailArtwork? = nil, selection: String? = nil) {
+    func update(id: UUID, context: String, artworkID: String? = nil, artwork: TMDBService.DetailArtwork? = nil, selection: String? = nil, latest: [MediaCard]? = nil, heroRefreshedAt: Date? = nil) {
         guard let existing = read(id: id, context: context) else { return }
         var artworks = existing.artworks
         if let artworkID, let artwork { artworks[artworkID] = artwork }
         write(id: id, value: .init(version: existing.version, context: context, savedAt: existing.savedAt,
-            views: existing.views, latest: existing.latest, continuing: existing.continuing,
+            views: existing.views, latest: latest ?? existing.latest, continuing: existing.continuing,
             continuingTotal: existing.continuingTotal, shelves: existing.shelves,
-            artworks: artworks, selectedHeroID: selection ?? existing.selectedHeroID))
+            artworks: artworks, selectedHeroID: selection ?? existing.selectedHeroID, heroRefreshedAt: heroRefreshedAt ?? existing.heroRefreshedAt))
     }
     func updateShelves(id: UUID, context: String, shelves: [HomeStartupSnapshot.Shelf]) {
         guard !shelves.isEmpty, let existing = read(id: id, context: context) else { return }
@@ -51,7 +52,7 @@ actor HomeStartupCache {
         write(id: id, value: .init(version: existing.version, context: context, savedAt: existing.savedAt,
             views: existing.views, latest: existing.latest, continuing: existing.continuing,
             continuingTotal: existing.continuingTotal, shelves: merged,
-            artworks: existing.artworks, selectedHeroID: existing.selectedHeroID))
+            artworks: existing.artworks, selectedHeroID: existing.selectedHeroID, heroRefreshedAt: existing.heroRefreshedAt))
     }
     func write(id: UUID, value: HomeStartupSnapshot) {
         guard let data = try? JSONEncoder().encode(value), data.count <= 4 * 1024 * 1024 else { return }

@@ -153,5 +153,5 @@ with tempfile.TemporaryDirectory(prefix='lucent-aggregate-') as tmp:
     folder = pathlib.Path(tmp)
     source = folder / 'Check.swift'
     source.write_text(models + '\n' + chinese + '\n' + cloud + '\n' + imports + '\n' + stubs)
-    subprocess.run(['swiftc', '-swift-version', '5', '-parse-as-library', '-module-cache-path', '/tmp/lucent-swift-module-cache', str(source), '-o', str(folder / 'check')], check=True)
+    subprocess.run(['swiftc', '-swift-version', '5', '-parse-as-library', '-module-cache-path', str(folder / 'ModuleCache'), str(source), '-o', str(folder / 'check')], check=True)
     subprocess.run([str(folder / 'check')], check=True)

@@ -54,6 +54,7 @@ struct PlexItem: Decodable, Sendable {
     let parentIndex: Int?
     let index: Int?
     let year: Int?
+    let rating: Double?
     let duration: Double?
     let viewOffset: Double?
     let viewCount: Int?

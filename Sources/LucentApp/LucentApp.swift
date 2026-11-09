@@ -13,8 +13,8 @@ final class LucentOrientationDelegate: NSObject, UIApplicationDelegate {
         Self.playbackIsPresented ? .landscape : Self.browsingOrientations
     }
 
-    static func setPlaybackPresented(_ presented: Bool, forceUpdate: Bool = false) {
-        guard playbackIsPresented != presented || forceUpdate else { return }
+    static func setPlaybackPresented(_ presented: Bool) {
+        guard playbackIsPresented != presented else { return }
         playbackIsPresented = presented
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {
@@ -55,17 +55,57 @@ struct LucentApp: App {
             if ProcessInfo.processInfo.environment["LUCENT_PLAYBACK_AUDIT"] == "1" {
                 PlaybackAuditEntry().environmentObject(library)
             } else {
-                LibraryView().environmentObject(library).modifier(LocalizationEnvironment())
+                libraryRoot
             }
             #else
-            LibraryView()
-                .environmentObject(library).modifier(LocalizationEnvironment())
+            libraryRoot
             #endif
             }
             .modifier(AppAppearance())
         }
     }
+
+    private var libraryRoot: some View {
+        LibraryView()
+            .environmentObject(library)
+            .modifier(LocalizationEnvironment())
+            #if os(iOS)
+            .modifier(LaunchArtworkHandoff())
+            #endif
+    }
+
 }
+
+#if os(iOS)
+private struct LaunchArtworkHandoff: ViewModifier {
+    @State private var visible = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if visible {
+                ZStack {
+                    Color.white.ignoresSafeArea()
+                    Image("LaunchIconGradientPlayTransparent")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 160, height: 160)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+                .transition(.opacity)
+                .task {
+                    do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
+                        visible = false
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
 
 #if os(iOS) && DEBUG
 private struct PlaybackAuditEntry: View {

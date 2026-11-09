@@ -8,6 +8,15 @@ enum OpenSubtitlesClient {
         let downloads: Int
         let hearingImpaired: Bool
         let filename: String
+
+        var displayRelease: String { Self.displayName(release) }
+        var displayFilename: String { Self.displayName(filename) }
+
+        private static func displayName(_ name: String) -> String {
+            name.replacingOccurrences(of: #"(?i)(?<![a-z0-9])(?:s00?(?=e[0-9])|season[ ._-]*00?(?![0-9])|第\s*0\s*季)"#,
+                                      with: MediaIdentity.seasonTitle(0) + " ",
+                                      options: .regularExpression)
+        }
     }
 
     private struct SearchResponse: Decodable {

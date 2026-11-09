@@ -39,7 +39,7 @@ struct NativeAppShell<Home: View, Sources: View, Search: View, Settings: View>: 
         NavigationSplitView {
             List(NativeAppPage.allCases, selection: $page) { value in
                 Label(LocalizedStringKey(value.title), systemImage: value.symbol).tag(value)
-            }.navigationTitle("Lucent").navigationSplitViewColumnWidth(min: 180, ideal: 220)
+            }.lucentPageTitle("Lucent").navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } detail: {
             switch page {
             case .home: NavigationStack { home() }
@@ -272,8 +272,9 @@ struct NativeShelf: Identifiable, Hashable, Sendable {
                 result = [.init(id: "latest", title: "最近入库", entries: items.filter { $0.type != "Episode" }.map { .init(catalog: catalog, remote: $0, plex: nil, local: nil) })]
             } else if let id = catalog.sourceID, let source = library.plexSources.first(where: { $0.id == id }) {
                 guard let token = try KeychainPasswordStore.plexToken(for: id), !token.isEmpty else { throw URLError(.userAuthenticationRequired) }
-                if force { try await library.synchronizePlexHome(sourceID: id) }
+                let requestedAt = Date()
                 let items = try await PlexClient.catalogPage(source: source, token: token, start: 0)
+                library.synchronizePlexHome(sourceID: id, displayedItems: items, requestedAt: requestedAt)
                 result = [.init(id: "latest", title: "最近入库", entries: items.filter { $0.type != "episode" }.map { .init(catalog: catalog, remote: nil, plex: $0, local: nil) })]
             }
             try Task.checkCancellation()
@@ -346,7 +347,7 @@ struct NativeHomeView: View {
                         actionTitle: catalog.id == "library" ? "配置聚合媒体库" : "添加片源") {
                         if catalog.id == "library" { UserDefaults.standard.set(0, forKey: "lucent.sources.selectedKind") }
                         showSources()
-                    }
+                    }.frame(maxWidth: .infinity, minHeight: 400)
                 }
                 ForEach(shelves) { shelf in
                     VStack(alignment: .leading, spacing: 16) {
@@ -371,12 +372,12 @@ struct NativeHomeView: View {
                     }
                 }
             }.padding(contentInset)
-        }.background(LucentUI.page).navigationTitle(catalog.name)
+        }.background(LucentUI.page).lucentPageTitle(catalog.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink { LucentFavoritesView().environmentObject(library) } label: {
-                    Label("收藏", systemImage: "heart")
-                }
+                    Image(systemName: "heart").accessibilityLabel("收藏")
+                }.labelStyle(.iconOnly)
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -387,7 +388,8 @@ struct NativeHomeView: View {
                         }
                     }
                     Button("刷新首页", systemImage: "arrow.clockwise") { refresh() }
-                } label: { Label("首页内容", systemImage: "rectangle.stack") }
+                } label: { Image(systemName: "rectangle.stack").accessibilityLabel("首页内容") }
+                .labelStyle(.iconOnly)
             }
         }
         .task(id: "\(catalog.id)|\(localRebuild)") { await rebuildLocalShelves() }
@@ -424,10 +426,7 @@ struct NativeHomeView: View {
     }
     private var hero: some View {
         let entry = heroes[min(heroIndex, heroes.count - 1)]
-        return ZStack(alignment: .bottomLeading) {
-            NativeHeroBackground(entry: entry)
-            LinearGradient(colors: [.clear, .black.opacity(0.88)], startPoint: .top, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 16) {
                 DetailTitleArtwork(url: heroArtwork?.logoURL, title: heroArtwork?.localizedTitle ?? entry.title).frame(maxWidth: 420, alignment: .leading)
                 if let rating = entry.rating { Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill").font(.caption).foregroundStyle(.yellow) }
                 Text(entry.overview).font(.footnote).foregroundStyle(.white).lineLimit(3).frame(maxWidth: 720, alignment: .leading)
@@ -438,8 +437,18 @@ struct NativeHomeView: View {
                     Text("\(min(heroIndex, heroes.count - 1) + 1) / \(heroes.count)").foregroundStyle(.white).monospacedDigit()
                     Button("下一部", systemImage: "chevron.right") { heroIndex = (heroIndex + 1) % heroes.count }
                 }
-            }.padding(32)
-        }.frame(height: 440).clipShape(RoundedRectangle(cornerRadius: 24)).focusSection()
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 440, alignment: .bottomLeading)
+        .background {
+            GeometryReader { geometry in
+                NativeHeroBackground(entry: entry)
+                    .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                    .overlay { LinearGradient(colors: [.clear, .black.opacity(0.88)], startPoint: .top, endPoint: .bottom) }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24)).focusSection()
             .transition(.opacity).animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: heroIndex)
             .task(id: "\(entry.id)|\(contentLocalizationID)") {
                 heroArtwork = nil
@@ -465,7 +474,7 @@ struct NativeShelfGrid: View {
                     Button { selected = entry.destination(in: library) } label: { NativeMediaCard(entry: entry, landscape: shelf.landscape) }.lucentContentButtonStyle()
                 }
             }.padding(NativeLayout.pageInset)
-        }.navigationTitle(LocalizedStringKey(shelf.title)).background(LucentUI.page)
+        }.lucentPageTitle(shelf.title).background(LucentUI.page)
             .navigationDestination(item: $selected) { NativeEntryPage(route: $0).environmentObject(library) }
     }
 }

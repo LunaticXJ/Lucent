@@ -27,8 +27,13 @@ actor ServerStateOutbox {
         try JSONEncoder().encode(Array(pending.values)).write(to: url, options: .atomic)
     }
     func submit(_ record: Record, deliver: @escaping @Sendable (Record) async throws -> Void) throws {
+        try submit([record], deliver: deliver)
+    }
+    func submit(_ records: [Record], deliver: @escaping @Sendable (Record) async throws -> Void) throws {
         load()
-        if pending[record.key].map({ $0.revision <= record.revision }) ?? true { pending[record.key] = record }
+        for record in records where pending[record.key].map({ $0.revision <= record.revision }) ?? true {
+            pending[record.key] = record
+        }
         try persist() // Do not start a request until its recovery record is durable.
         start(deliver: deliver)
     }

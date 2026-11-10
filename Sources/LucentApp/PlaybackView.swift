@@ -1014,7 +1014,7 @@ struct PlaybackView: View {
                     toolButton("音轨，\(audioSummary)", symbol: "waveform") { openPanel(.audio) }
                     toolButton("字幕，\(subtitleSummary)", symbol: "captions.bubble") { openPanel(.subtitles) }
                     #if os(iOS)
-                    toolButton("弹幕", symbol: danmakuEnabled ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right") { openPanel(.danmaku) }
+                    toolButton("弹幕", symbol: danmakuEnabled ? "list.bullet.rectangle.fill" : "list.bullet.rectangle") { openPanel(.danmaku) }
                     #endif
                     toolButton("更多设置", symbol: "slider.horizontal.3") { openPanel(.settings) }
                 }

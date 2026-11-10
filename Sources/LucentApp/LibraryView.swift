@@ -78,9 +78,11 @@ struct LibraryView: View {
     @AppStorage("lucent.home.selectedCatalog") private var selectedHomeCatalog = "auto"
     @AppStorage("lucent.sources.selectedKind") private var mobileSourceKind = 1
     @State private var homeRefreshID = UUID()
-    @State private var showSourceChooser = false
-    private enum SourceChooserScope { case servers, library, storage }
-    @State private var sourceChooserScope: SourceChooserScope = .library
+    private enum SourceChooserScope: Identifiable {
+        case servers, library, storage
+        var id: Self { self }
+    }
+    @State private var sourceChooserScope: SourceChooserScope?
     @State private var pendingSourceAddition: SourceAddition?
     @State private var pendingSourceRemoval: SourceRemoval?
     @State private var serverChecks: [UUID: ServerCheck] = [:]
@@ -401,7 +403,7 @@ struct LibraryView: View {
             .sheet(isPresented: $showAddAddress) { addAddressSheet }
             .sheet(isPresented: $showSMB) { smbSheet }
             #if os(iOS)
-            .sheet(isPresented: $showSourceChooser, onDismiss: performSourceAddition) { sourceChooser }
+            .sheet(item: $sourceChooserScope, onDismiss: performSourceAddition) { scope in sourceChooser(scope) }
             .confirmationDialog("移除 \(pendingSourceRemoval?.name ?? "片源")？",
                                 isPresented: Binding(get: { pendingSourceRemoval != nil },
                                                      set: { if !$0 { pendingSourceRemoval = nil } }),
@@ -644,7 +646,8 @@ struct LibraryView: View {
     }
 
     private var mobileAddSourceMenu: some View {
-        Button { sourceChooserScope = mobileSourceKind == 1 ? .servers : .library; showSourceChooser = true } label: {
+        let scope: SourceChooserScope = mobileSourceKind == 0 ? .library : .servers
+        return Button { sourceChooserScope = scope } label: {
             Image(systemName: "plus").font(.system(size: 19, weight: .semibold))
                 .frame(width: 44, height: 44)
                 .modifier(LucentGlass(shape: Circle()))
@@ -652,13 +655,13 @@ struct LibraryView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(mobileSourceKind == 1 ? "添加影视服务器" : "添加片源")
+        .accessibilityLabel(scope == .servers ? "添加影视服务器" : "添加片源")
     }
 
-    private var sourceChooser: some View {
+    private func sourceChooser(_ scope: SourceChooserScope) -> some View {
         NavigationStack {
             Form {
-                    if sourceChooserScope == .servers {
+                    if scope == .servers {
                         additionSection("影视服务器", detail: "直接使用服务器中的海报、分类和观看记录") {
                             additionRow("Emby", detail: "账户密码或访问令牌", brand: "EmbyBrand", icon: "server.rack", choice: .emby)
                             additionRow("Jellyfin", detail: "连接自己的影音服务器", brand: "JellyfinBrand", icon: "server.rack", choice: .jellyfin)
@@ -668,12 +671,12 @@ struct LibraryView: View {
                             additionRow("绿联云影视", detail: "连接绿联影视中心", brand: "UGREENBrand", icon: "server.rack", choice: .ugreen)
                         }
                     }
-                    if sourceChooserScope == .library {
+                    if scope == .library {
                         additionSection("添加文件源", detail: "从已连接的存储选择目录，独立命名并扫描入库") {
                             additionRow("从存储导入目录", detail: "支持跨目录多选与批量命名", icon: "folder.badge.plus", choice: .importDirectories)
                         }
                     }
-                    if sourceChooserScope != .servers {
+                    if scope != .servers {
                         additionSection("添加存储", detail: "仅建立连接，导入目录后才扫描入库") {
                             additionRow("本地文件夹", detail: "选择“文件”App 中的目录", icon: "folder", choice: .folder)
                             additionRow("SMB 共享", detail: "NAS、电脑与局域网共享", icon: "externaldrive", choice: .smb)
@@ -686,8 +689,8 @@ struct LibraryView: View {
                     }
             }
             .background(LucentUI.page)
-            .navigationTitle(LocalizedStringKey(sourceChooserScope == .servers ? "添加影视服务器" : sourceChooserScope == .storage ? "添加存储" : "配置媒体库")).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showSourceChooser = false } } }
+            .navigationTitle(LocalizedStringKey(scope == .servers ? "添加影视服务器" : scope == .storage ? "添加存储" : "配置媒体库")).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { sourceChooserScope = nil } } }
         }
         .tint(.gray)
     }
@@ -703,7 +706,7 @@ struct LibraryView: View {
 
     private func additionRow(_ title: String, detail: String, brand: String? = nil,
                              icon: String, choice: SourceAddition) -> some View {
-        Button { pendingSourceAddition = choice; showSourceChooser = false } label: {
+        Button { pendingSourceAddition = choice; sourceChooserScope = nil } label: {
             HStack(spacing: 14) {
                 Group {
                     if let brand { Image(brand).resizable().scaledToFit() }
@@ -745,7 +748,6 @@ struct LibraryView: View {
         if addStorageAfterDismiss {
             addStorageAfterDismiss = false
             sourceChooserScope = .storage
-            showSourceChooser = true
             return
         }
         guard let id = pendingStorageEdit else { return }
@@ -1288,7 +1290,6 @@ struct LibraryView: View {
             .navigationDestination(isPresented: $showStorageManager) {
                 StorageManagementView(add: {
                     sourceChooserScope = .storage
-                    showSourceChooser = true
                 }, edit: {
                     pendingStorageEdit = $0
                     finishStorageManagement()
@@ -1333,7 +1334,7 @@ struct LibraryView: View {
             .sheet(isPresented: $showAddAddress) { addAddressSheet }
             .sheet(isPresented: $showSMB) { smbSheet }
             #if os(iOS)
-            .sheet(isPresented: $showSourceChooser, onDismiss: performSourceAddition) { sourceChooser }
+            .sheet(item: $sourceChooserScope, onDismiss: performSourceAddition) { scope in sourceChooser(scope) }
             .sheet(isPresented: $showStorageManager, onDismiss: finishStorageManagement) {
                 NavigationStack {
                     StorageManagementView(add: { addStorageAfterDismiss = true; showStorageManager = false },

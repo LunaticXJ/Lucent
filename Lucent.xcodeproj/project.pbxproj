@@ -26,13 +26,13 @@
 		0B34F2F2815143B85E83D757 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E4134C0DEEECD14F65AA3F /* MediaItem.swift */; };
 		0B377D149A34709694EB5E69 /* GuangyaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD58F9CDEFCD1A54A229F2C /* GuangyaClient.swift */; };
 		0C4A142C2F0BC765637BA8E2 /* LocalLibraryCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890EA0A452C20EF4FA89481B /* LocalLibraryCatalog.swift */; };
+		0D7DF8A08F2AEDC646D1C871 /* HomeStartupCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */; };
 		0DCCC689CA7018940AA7E5CF /* ServerStateOutbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = B075A3DBFFEFCBA22A6AC144 /* ServerStateOutbox.swift */; };
 		0DD8A08F9F0ACA68D31E2397 /* CloudTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B21B489209BF281CC97760 /* CloudTokenRefresher.swift */; };
 		0EA81EB0DCEE6AAE2A663E7E /* PlexAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C3EF162365113C3AE02C /* PlexAuthClient.swift */; };
 		0EB0D332BF33DF1250B6BD9F /* PlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5B09B632BE6F600E0A73D /* PlaybackView.swift */; };
 		0F40D3F50094E6139E108CD7 /* LocalLibraryCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890EA0A452C20EF4FA89481B /* LocalLibraryCatalog.swift */; };
 		0F543795E1691477C27AE762 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95723DE6607ECC25204574AD /* MobileHomeView.swift */; };
-		0D7DF8A08F2AEDC646D1C871 /* HomeStartupCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */; };
 		1059007BB1CA28D76A3C4227 /* ServerTranscodeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81937293A1231BB104313284 /* ServerTranscodeClient.swift */; };
 		13D52318B099074B63B61072 /* LocalLibraryCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890EA0A452C20EF4FA89481B /* LocalLibraryCatalog.swift */; };
 		15BD601680E883BB76E3C0BD /* PlaybackGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9610F70E54F507C0DA5F09D4 /* PlaybackGestures.swift */; };
@@ -53,7 +53,6 @@
 		288CF51304CD127238BDCD93 /* MobileFolderBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6085F58DB67998CC0A22C8B6 /* MobileFolderBrowserView.swift */; };
 		28CAFF75F547A0E76A536D3F /* AppSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E56329F4E0765E74F2E481 /* AppSettingsView.swift */; };
 		297463927B08C6E31BE5D285 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95723DE6607ECC25204574AD /* MobileHomeView.swift */; };
-		51D33A53B475BBD835450AFF /* HomeStartupCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */; };
 		2CB7394E6AD1411B30DACC92 /* MediaCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E723B4D0752AD82F23DEBC5 /* MediaCard.swift */; };
 		2DCEA7F7AD5C96800BF5193F /* JellyfinClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C06239CC35CD4002E499AF /* JellyfinClient.swift */; };
 		2DF0147E6E1BA72DD26DB541 /* SubtitleFonts in Resources */ = {isa = PBXBuildFile; fileRef = 04E544A82F1CA8933FE2B117 /* SubtitleFonts */; };
@@ -104,6 +103,7 @@
 		515202157CE82AE73B4B7CF1 /* AggregateLibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7531C2D84EE33C21289EDD82 /* AggregateLibraryViews.swift */; };
 		51587498600223A2ED406674 /* NetworkUsagePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857FD801898475FFFD93D60E /* NetworkUsagePolicy.swift */; };
 		51B4D771D07712E4FAC66B06 /* PlaybackSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B47960E227602A663361BC /* PlaybackSession.swift */; };
+		51D33A53B475BBD835450AFF /* HomeStartupCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */; };
 		51E9B6F3A842845998F23CF9 /* LocalMediaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 613D4B9D4BC9970F157E7A65 /* LocalMediaCache.swift */; };
 		52330AB6208321B7AE8CF113 /* TMDBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B90FA0F98ADEC54199E0C51 /* TMDBService.swift */; };
 		528CDC034C23C9CA4059B8E8 /* PlaylistResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */; };
@@ -162,6 +162,7 @@
 		7D7429865DD36A7FA429F812 /* PlaybackProgressPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB3C381D64C9E0DD7DF2F059 /* PlaybackProgressPolicy.swift */; };
 		7DD92EC37A1340CEDB45C904 /* DolbyVisionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD9B3CD53AC5E71C15F3628 /* DolbyVisionSupport.swift */; };
 		7F3C04932F4B6F3CE73D75D4 /* PlaybackGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9610F70E54F507C0DA5F09D4 /* PlaybackGestures.swift */; };
+		7F798759DDF5CC696E7EE5A4 /* HomeStartupCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */; };
 		8322DA1654ACE3485EFABDDC /* SubtitleTextDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA3772CE55217175326A253 /* SubtitleTextDecoder.swift */; };
 		889F157010A2D7735B712DDB /* PlaylistResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC68660C79542C0E1F0CDF /* PlaylistResolver.swift */; };
 		88D7E2FCA7C2B00A2A7EF29E /* LibraryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E35B278954ECB17B8C8177 /* LibraryRepository.swift */; };
@@ -271,7 +272,6 @@
 		E122D1E718331874C22C3AEF /* PlaybackTransitionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F95D43C252A1080FD7FFEC6 /* PlaybackTransitionCoordinator.swift */; };
 		E1CB4757EDA2BB2305535E2A /* PlaybackGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9610F70E54F507C0DA5F09D4 /* PlaybackGestures.swift */; };
 		E234741AB7CD5562C6DD1FE0 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95723DE6607ECC25204574AD /* MobileHomeView.swift */; };
-		7F798759DDF5CC696E7EE5A4 /* HomeStartupCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */; };
 		E282CEA03702FF94DE92CBA5 /* ChineseCloudClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */; };
 		E3299ED03F6FA63D16C57078 /* PlaybackTransitionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F95D43C252A1080FD7FFEC6 /* PlaybackTransitionCoordinator.swift */; };
 		E51ED567A8D088D905485D55 /* HTTPRangeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */; };
@@ -361,9 +361,10 @@
 		3FD9B3CD53AC5E71C15F3628 /* DolbyVisionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DolbyVisionSupport.swift; sourceTree = "<group>"; };
 		4579E1DA42DBD7F145BE6EAA /* HTTPRangeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPRangeReader.swift; sourceTree = "<group>"; };
 		483F341CF13C9DAF8728F0DE /* PlexClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexClient.swift; sourceTree = "<group>"; };
-		573A54B8D4EF46144B6CCD59 /* Lucent-iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Lucent-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		573A54B8D4EF46144B6CCD59 /* Lucent-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lucent-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		5A958243E594A7D86762A57B /* CloudDriveClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudDriveClient.swift; sourceTree = "<group>"; };
 		5B309C00ED20341424CB374F /* SMBDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBDownloader.swift; sourceTree = "<group>"; };
+		5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStartupCache.swift; sourceTree = "<group>"; };
 		5F95D43C252A1080FD7FFEC6 /* PlaybackTransitionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackTransitionCoordinator.swift; sourceTree = "<group>"; };
 		6004F7BA9BACA9FA29223380 /* PlaybackSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackSegments.swift; sourceTree = "<group>"; };
 		6085F58DB67998CC0A22C8B6 /* MobileFolderBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileFolderBrowserView.swift; sourceTree = "<group>"; };
@@ -396,7 +397,6 @@
 		92B47960E227602A663361BC /* PlaybackSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackSession.swift; sourceTree = "<group>"; };
 		94B344F549D4E3A09FE92BAE /* LocalCatalogCollectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCatalogCollectionView.swift; sourceTree = "<group>"; };
 		95723DE6607ECC25204574AD /* MobileHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileHomeView.swift; sourceTree = "<group>"; };
-		5DE33C7447656906EA9A6D0D /* HomeStartupCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStartupCache.swift; sourceTree = "<group>"; };
 		9610F70E54F507C0DA5F09D4 /* PlaybackGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackGestures.swift; sourceTree = "<group>"; };
 		97DF71622AD5A9D1D13B249D /* SMBScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBScanner.swift; sourceTree = "<group>"; };
 		986091A570E9C0BDD21E460D /* PlatformUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformUI.swift; sourceTree = "<group>"; };
@@ -421,7 +421,7 @@
 		C0B19D0EEA9FCADAF0DD1670 /* PlayerSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSurface.swift; sourceTree = "<group>"; };
 		C1577FC41CF6B1388DC3FD5E /* MobileLocalLibraryHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileLocalLibraryHomeView.swift; sourceTree = "<group>"; };
 		C1F2182F09EED82BE51B7630 /* ChineseCloudClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChineseCloudClient.swift; sourceTree = "<group>"; };
-		C33ECAD42376B61A16E2982A /* Lucent-tvOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Lucent-tvOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C33ECAD42376B61A16E2982A /* Lucent-tvOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lucent-tvOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C54B97982618CB94DF83B691 /* MediaDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaDetailView.swift; sourceTree = "<group>"; };
 		C576D3B6ADCCD6673D0C01ED /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
 		C65F4FAFA1CF5FF33F253119 /* WebDAVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVClient.swift; sourceTree = "<group>"; };
@@ -708,9 +708,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-				};
+				LastUpgradeCheck = 2720;
 			};
 			buildConfigurationList = 8FBBB0B78EF5EA9640521572 /* Build configuration list for PBXProject "Lucent" */;
 			developmentRegion = "zh-Hans";
@@ -1078,6 +1076,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Generated/iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = KLTVG9CT4C;
 				INFOPLIST_FILE = "Generated/iOS-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1112,6 +1111,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Generated/macOS.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -1131,6 +1131,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Generated/iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = KLTVG9CT4C;
 				INFOPLIST_FILE = "Generated/iOS-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1148,6 +1149,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Generated/macOS.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -1165,6 +1167,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -1196,9 +1199,11 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 6065;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -1212,6 +1217,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
@@ -1240,6 +1246,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -1271,9 +1278,11 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 6065;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -1294,6 +1303,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;

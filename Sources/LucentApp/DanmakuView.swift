@@ -147,13 +147,21 @@ struct DanmakuLayout: Sendable {
     }
 }
 
+private enum DanmakuFontSize {
+    static let defaultValue = 16.0
+
+    static func normalized(_ value: Double) -> Double {
+        value == 17 ? defaultValue : value
+    }
+}
+
 struct DanmakuOverlay: View {
     let comments: [DanmakuComment]
     let time: Double
     let playing: Bool
     let rate: Double
     @AppStorage("lucent.danmaku.opacity") private var opacity = 0.8
-    @AppStorage("lucent.danmaku.fontSize") private var fontSize = 17.0
+    @AppStorage("lucent.danmaku.fontSize") private var savedFontSize = DanmakuFontSize.defaultValue
     @AppStorage("lucent.danmaku.area") private var area = 0.5
     @AppStorage("lucent.danmaku.duration") private var duration = 12.0
     @AppStorage("lucent.danmaku.offset") private var offset = 0.0
@@ -175,6 +183,7 @@ struct DanmakuOverlay: View {
     }
 
     var body: some View {
+        let fontSize = DanmakuFontSize.normalized(savedFontSize)
         GeometryReader { geometry in
             TimelineView(.animation(paused: !playing)) { frame in
                 Canvas { context, size in
@@ -220,7 +229,7 @@ struct DanmakuSettingsView: View {
     let close: () -> Void
     @AppStorage("lucent.danmaku.enabled") private var enabled = false
     @AppStorage("lucent.danmaku.opacity") private var opacity = 0.8
-    @AppStorage("lucent.danmaku.fontSize") private var fontSize = 17.0
+    @AppStorage("lucent.danmaku.fontSize") private var savedFontSize = DanmakuFontSize.defaultValue
     @AppStorage("lucent.danmaku.area") private var area = 0.5
     @AppStorage("lucent.danmaku.duration") private var duration = 12.0
     @AppStorage("lucent.danmaku.offset") private var offset = 0.0
@@ -245,10 +254,10 @@ struct DanmakuSettingsView: View {
                     if !model.comments.isEmpty { Button("移除此影片弹幕", role: .destructive) { model.clear(for: item.id) } }
                 }
                 settingsSection("手动匹配") {
-                    LabeledContent("来源") {
+                    settingsMenu("来源", value: selectedServer.name) {
                         Picker("来源", selection: $selectedServerID) {
                             ForEach(servers) { server in Text(server.name).tag(server.id) }
-                        }.labelsHidden().pickerStyle(.menu)
+                        }
                     }.disabled(busy)
                     TextField("影片或剧集名称", text: $query)
                         .submitLabel(.search)
@@ -284,7 +293,10 @@ struct DanmakuSettingsView: View {
                     displayPicker("不透明度", selection: $opacity, values: [0.2, 0.4, 0.6, 0.8, 1]) {
                         $0.formatted(.percent.precision(.fractionLength(0)))
                     }
-                    displayPicker("字号", selection: $fontSize, values: [14, 17, 20, 24, 28, 32, 36]) {
+                    displayPicker("字号", selection: Binding(
+                        get: { DanmakuFontSize.normalized(savedFontSize) },
+                        set: { savedFontSize = $0 }
+                    ), values: [14, DanmakuFontSize.defaultValue, 20, 24, 28, 32, 36]) {
                         $0.formatted(.number.precision(.fractionLength(0...2)))
                     }
                     displayPicker("显示区域", selection: $area, values: [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1]) {
@@ -315,7 +327,7 @@ struct DanmakuSettingsView: View {
                     Button("重置偏移") { offset = 0 }.disabled(offset == 0)
                 }
             }
-            .font(.system(size: PlayerControlStyle.scaled(14)))
+            .font(.system(size: PlayerControlStyle.scaled(13)))
             .padding(16)
         }
             .task {
@@ -360,12 +372,25 @@ struct DanmakuSettingsView: View {
                                values: [Double], format: @escaping (Double) -> String) -> some View {
         let current = selection.wrappedValue
         let options = values.contains(current) ? values : (values + [current]).sorted()
-        return LabeledContent(title) {
+        return settingsMenu(title, value: format(current)) {
             Picker(title, selection: selection) {
                 ForEach(options, id: \.self) { value in
                     Text(format(value)).tag(value)
                 }
-            }.labelsHidden().pickerStyle(.menu)
+            }
+        }
+    }
+
+    private func settingsMenu<Content: View>(_ title: LocalizedStringKey, value: String,
+                                              @ViewBuilder content: () -> Content) -> some View {
+        LabeledContent(title) {
+            Menu(content: content) {
+                Text(value)
+                    .font(.system(size: PlayerControlStyle.scaled(13)))
+                    .lineLimit(1)
+            }
+            .accessibilityLabel(Text(title))
+            .accessibilityValue(Text(value))
         }
     }
 }

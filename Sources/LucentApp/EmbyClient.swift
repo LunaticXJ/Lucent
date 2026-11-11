@@ -302,6 +302,7 @@ enum EmbyClient {
             URLQueryItem(name: "SortOrder", value: "Descending"),
             URLQueryItem(name: "Limit", value: String(limit)),
             URLQueryItem(name: "IncludeItemTypes", value: "Movie,Episode,Video"),
+            URLQueryItem(name: "Fields", value: "ProductionYear"),
             URLQueryItem(name: "EnableUserData", value: "true")
         ]
         request.url = components.url

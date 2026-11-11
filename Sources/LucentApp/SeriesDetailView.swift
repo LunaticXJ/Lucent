@@ -673,9 +673,15 @@ struct SeriesDetailView: View {
             } else {
                 HStack {
                     Menu {
-                        ForEach(seasons, id: \.self) { number in
-                            Button(MediaIdentity.seasonTitle(number)) { season = number; episodePage = 0 }
+                        Picker("季", selection: Binding(
+                            get: { season },
+                            set: { season = $0; episodePage = 0 }
+                        )) {
+                            ForEach(seasons, id: \.self) { number in
+                                Text(MediaIdentity.seasonTitle(number)).tag(number)
+                            }
                         }
+                        .pickerStyle(.inline)
                     } label: {
                         HStack(spacing: 5) { Text(MediaIdentity.seasonTitle(season)); Image(systemName: "chevron.down").font(.caption) }
                     }
@@ -740,6 +746,17 @@ struct SeriesDetailView: View {
                     SeriesArtwork(baseAddress: server?.base, token: server?.token,
                                   itemID: episode.id, backdrop: false, fallback: nil, preferredURL: episodeArtworkURL(episode))
                         .frame(width: LucentUI.detailSize(210), height: LucentUI.detailSize(122)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay {
+                            if episode.id == activeEpisode?.id {
+                                Image(systemName: "play.fill")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: LucentUI.detailSize(44), height: LucentUI.detailSize(44))
+                                    .background(.black.opacity(0.55), in: Circle())
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                         .overlay(alignment: .topTrailing) {
                             if episodeWatched(episode) {
                                 Image(systemName: "checkmark").font(.caption.bold())
@@ -768,6 +785,7 @@ struct SeriesDetailView: View {
                 }
             }
             .lucentContentButtonStyle()
+            .accessibilityAddTraits(episode.id == activeEpisode?.id ? .isSelected : [])
             if let summary = episode.overview, !summary.isEmpty {
                 synopsisPreview(summary, title: "第 \(episode.indexNumber ?? 0) 集简介", lines: 3,
                                 font: .caption, opacity: 0.65)
@@ -863,18 +881,18 @@ struct SeriesDetailView: View {
             ScrollView {
                 HStack {
                     Menu {
-                        ForEach(seasons, id: \.self) { number in
-                            Button {
-                                season = number
+                        Picker("季", selection: Binding(
+                            get: { season },
+                            set: {
+                                season = $0
                                 selectedEpisodeIDs.removeAll()
-                            } label: {
-                                if season == number {
-                                    Label(MediaIdentity.seasonTitle(number), systemImage: "checkmark")
-                                } else {
-                                    Text(MediaIdentity.seasonTitle(number))
-                                }
+                            }
+                        )) {
+                            ForEach(seasons, id: \.self) { number in
+                                Text(MediaIdentity.seasonTitle(number)).tag(number)
                             }
                         }
+                        .pickerStyle(.inline)
                     } label: {
                         HStack(spacing: 9) {
                             Text(MediaIdentity.seasonTitle(season)).font(.subheadline.weight(.semibold))
@@ -1163,6 +1181,26 @@ struct SeriesDetailView: View {
     }
 }
 
+private struct MediaInfoCardRow: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        return CGSize(width: sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(0, sizes.count - 1)),
+                      height: sizes.map(\.height).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for card in subviews {
+            let width = card.sizeThatFits(.unspecified).width
+            card.place(at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
+                       proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width + spacing
+        }
+    }
+}
+
 struct DetailMediaMetadataPanel: View {
     let streams: [JellyfinItem.MediaSource.Stream]
     let source: JellyfinItem.MediaSource?
@@ -1234,7 +1272,7 @@ struct DetailMediaMetadataPanel: View {
                     Text("暂无媒体流信息").font(.subheadline).foregroundStyle(foreground.opacity(0.65))
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .top, spacing: 12) {
+                        MediaInfoCardRow(spacing: 12) {
                             ForEach(Array(streams.enumerated()), id: \.offset) { _, stream in
                                 streamCard(stream)
                             }
@@ -1299,7 +1337,7 @@ struct DetailMediaMetadataPanel: View {
         .padding(17)
         .frame(width: LucentUI.detailSize(238), alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
-        .frame(minHeight: LucentUI.mediaInfoCardHeight, alignment: .topLeading)
+        .frame(minHeight: LucentUI.mediaInfoCardHeight, maxHeight: .infinity, alignment: .topLeading)
         .lucentReadableFocus()
         .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 24)))
     }

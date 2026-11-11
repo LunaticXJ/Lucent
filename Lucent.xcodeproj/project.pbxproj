@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A13C48D25681C101003A27D1 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A13C48D25681C101003A27D2 /* LaunchScreen.storyboard */; };
+		A13C48D25681C101003A27D1 /* LucentBrandLaunch.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A13C48D25681C101003A27D2 /* LucentBrandLaunch.storyboard */; };
 		003BF4DAF08E93334E94569C /* MetadataMatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB61CECD00AF476B45B5B456 /* MetadataMatchView.swift */; };
 		00851FA4619CDA27ABEE5D91 /* HTTPDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F0C5CFCD219967D8C56420 /* HTTPDownloader.swift */; };
 		00A45412742ABAF03A8CD962 /* PlaybackTransitionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F95D43C252A1080FD7FFEC6 /* PlaybackTransitionCoordinator.swift */; };
@@ -344,7 +344,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		A13C48D25681C101003A27D2 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = Generated/LaunchScreen.storyboard; sourceTree = SOURCE_ROOT; };
+		A13C48D25681C101003A27D2 /* LucentBrandLaunch.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = Generated/LucentBrandLaunch.storyboard; sourceTree = SOURCE_ROOT; };
 		01708FE3B303834E6076CE73 /* LucentUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LucentUI.swift; sourceTree = "<group>"; };
 		04E544A82F1CA8933FE2B117 /* SubtitleFonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SubtitleFonts; path = Sources/LucentApp/Resources/SubtitleFonts; sourceTree = SOURCE_ROOT; };
 		08669968F397CA13B8995B96 /* MovieDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieDetailView.swift; sourceTree = "<group>"; };
@@ -754,7 +754,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DAF9EE9CC0282DC04CF55899 /* Assets.xcassets in Resources */,
-				A13C48D25681C101003A27D1 /* LaunchScreen.storyboard in Resources */,
+				A13C48D25681C101003A27D1 /* LucentBrandLaunch.storyboard in Resources */,
 				303DB568E864A78CD686BD9E /* Localizable.xcstrings in Resources */,
 				36F8063129AE228067CC37ED /* SubtitleFonts in Resources */,
 			);
@@ -1073,6 +1073,7 @@
 		2436A09E91D5AF9533BA6E05 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconGraphiteIce AppIconGraphiteRose";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Generated/iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -1128,6 +1129,7 @@
 		656E07D260B8916631E4D661 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconGraphiteIce AppIconGraphiteRose";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Generated/iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";

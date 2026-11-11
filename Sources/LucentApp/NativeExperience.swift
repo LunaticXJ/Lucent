@@ -83,6 +83,11 @@ struct NativeMediaEntry: Identifiable, Sendable {
     var rating: Double? { remote?.communityRating ?? local?.metadata?.rating }
     var year: Int? { remote?.displayYear ?? plex?.year ?? local?.catalogDisplayYear }
     var yearText: String? { remote?.displayYearText ?? local?.catalogDisplayYearText ?? plex?.year.map(String.init) }
+    var isMovie: Bool {
+        if let remote { return remote.type == "Movie" }
+        if let plex { return plex.type == "movie" }
+        return local?.identity?.seriesName == nil && local != nil
+    }
     var position: Double {
         if let local { return local.position }
         if let plex { return (plex.viewOffset ?? 0) / 1000 }
@@ -142,7 +147,7 @@ struct NativeMediaCard: View {
                     if landscape && showsProgress { LucentPlaybackProgressOverlay(position: entry.position, duration: entry.duration, progress: entry.progress) }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
-            LucentPosterCaption(title: entry.title, subtitle: showsProgress && landscape ? nil : entry.yearText, lines: 1)
+            LucentPosterCaption(title: entry.title, subtitle: showsProgress && landscape && !entry.isMovie ? nil : entry.yearText, lines: 1)
         }.contentShape(Rectangle())
     }
 }

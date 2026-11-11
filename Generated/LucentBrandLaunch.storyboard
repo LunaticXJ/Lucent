@@ -11,18 +11,16 @@
                     <view key="view" contentMode="scaleToFill" id="launch-view">
                         <rect key="frame" x="0" y="0" width="393" height="852"/>
                         <subviews>
-                            <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" image="LaunchIconGradientPlayTransparent" translatesAutoresizingMaskIntoConstraints="NO" id="launch-icon">
-                                <rect key="frame" x="116.5" y="346" width="160" height="160"/>
-                                <constraints>
-                                    <constraint firstAttribute="width" constant="160" id="icon-width"/>
-                                    <constraint firstAttribute="height" constant="160" id="icon-height"/>
-                                </constraints>
+                            <imageView userInteractionEnabled="NO" clipsSubviews="YES" contentMode="scaleToFill" image="LaunchLightAndShadow" translatesAutoresizingMaskIntoConstraints="NO" id="brand-artwork">
+                                <rect key="frame" x="0" y="0" width="393" height="852"/>
                             </imageView>
                         </subviews>
                         <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                         <constraints>
-                            <constraint firstItem="launch-icon" firstAttribute="centerX" secondItem="launch-view" secondAttribute="centerX" id="icon-center-x"/>
-                            <constraint firstItem="launch-icon" firstAttribute="centerY" secondItem="launch-view" secondAttribute="centerY" id="icon-center-y"/>
+                            <constraint firstItem="brand-artwork" firstAttribute="leading" secondItem="launch-view" secondAttribute="leading" id="art-leading"/>
+                            <constraint firstItem="brand-artwork" firstAttribute="trailing" secondItem="launch-view" secondAttribute="trailing" id="art-trailing"/>
+                            <constraint firstItem="brand-artwork" firstAttribute="top" secondItem="launch-view" secondAttribute="top" id="art-top"/>
+                            <constraint firstItem="brand-artwork" firstAttribute="bottom" secondItem="launch-view" secondAttribute="bottom" id="art-bottom"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -31,6 +29,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="LaunchIconGradientPlayTransparent" width="160" height="160"/>
+        <image name="LaunchLightAndShadow" width="852" height="1846"/>
     </resources>
 </document>

@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 enum AppSettingsAction {
     case profiles, trakt, enrichMetadata, purgeMissing
@@ -124,6 +127,7 @@ struct AppSettingsView: View {
                 .pickerStyle(.menu)
             } header: { Text("外观") }
             #if os(iOS)
+            AppIconSettingsSection()
             Section("首页") {
                 Toggle("滚动时收起底栏", isOn: $collapseDock)
             }
@@ -398,3 +402,88 @@ struct AppSettingsView: View {
         }
     }
 }
+
+#if os(iOS)
+enum AppIconChoice: String, CaseIterable, Identifiable {
+    case primary = "AppIcon"
+    case graphiteIce = "AppIconGraphiteIce"
+    case graphiteRose = "AppIconGraphiteRose"
+
+    var id: Self { self }
+    var systemName: String? { self == .primary ? nil : rawValue }
+    var previewName: String { rawValue + "Preview" }
+
+    @MainActor static var current: Self {
+        UIApplication.shared.alternateIconName.flatMap(Self.init(rawValue:)) ?? .primary
+    }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .primary: "默认图标"
+        case .graphiteIce: "冰蓝石墨"
+        case .graphiteRose: "淡粉石墨"
+        }
+    }
+}
+
+private struct AppIconSettingsSection: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedName: String?
+    @State private var isChanging = false
+    @State private var showFailure = false
+
+    var body: some View {
+        Section("更换图标") {
+            HStack(spacing: 12) {
+                ForEach(AppIconChoice.allCases) { icon in
+                    let selected = selectedName == icon.systemName
+                    Button {
+                        changeIcon(to: icon)
+                    } label: {
+                        Image(icon.previewName)
+                            .resizable()
+                            .frame(width: 58, height: 58)
+                            .clipShape(RoundedRectangle(cornerRadius: 13))
+                            .padding(4)
+                            .overlay {
+                                if selected {
+                                    RoundedRectangle(cornerRadius: 17)
+                                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(icon.title))
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+        .disabled(isChanging || !UIApplication.shared.supportsAlternateIcons)
+        .onAppear { selectedName = UIApplication.shared.alternateIconName }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { selectedName = UIApplication.shared.alternateIconName }
+        }
+        .alert("无法更换图标", isPresented: $showFailure) {
+            Button("好", role: .cancel) {}
+        }
+    }
+
+    private func changeIcon(to icon: AppIconChoice) {
+        guard !isChanging, selectedName != icon.systemName else { return }
+        isChanging = true
+        Task { @MainActor in
+            defer {
+                selectedName = UIApplication.shared.alternateIconName
+                isChanging = false
+            }
+            do {
+                try await UIApplication.shared.setAlternateIconName(icon.systemName)
+            } catch {
+                showFailure = true
+            }
+        }
+    }
+}
+#endif

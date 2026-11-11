@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import MediaPlayer
 import AVFAudio
+import Combine
 
 /// Gesture input is below the controls, so buttons and sliders retain ownership.
 struct PlaybackGestureSurface: UIViewRepresentable {
@@ -105,6 +106,14 @@ struct PlaybackSystemVolume: UIViewRepresentable {
 @MainActor final class PlaybackVolumeControl: ObservableObject {
     weak var view: MPVolumeView?
     var value: Float { AVAudioSession.sharedInstance().outputVolume }
+
+    var changes: AnyPublisher<Float, Never> {
+        AVAudioSession.sharedInstance().publisher(for: \.outputVolume, options: [.initial, .new])
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
     func set(_ value: Float) {
         guard let slider = view?.subviews.compactMap({ $0 as? UISlider }).first else { return }
         slider.setValue(min(1, max(0, value)), animated: false)

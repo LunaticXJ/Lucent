@@ -24,7 +24,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: Generated/LaunchScreen.storyboard
+      - path: Generated/LucentBrandLaunch.storyboard
       - path: Sources/LucentApp
         excludes: [Resources/SubtitleFonts]
       - path: Sources/LucentApp/Resources/SubtitleFonts
@@ -44,7 +44,7 @@ targets:
       properties:
         CFBundleDisplayName: Lucent
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchStoryboardName: LaunchScreen
+        UILaunchStoryboardName: LucentBrandLaunch
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -68,6 +68,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lucent.app.ios
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconGraphiteIce AppIconGraphiteRose"
         TARGETED_DEVICE_FAMILY: '1,2'
   Lucent-tvOS:
     type: application

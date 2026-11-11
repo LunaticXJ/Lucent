@@ -356,6 +356,10 @@ struct PlaybackView: View {
             playbackGestureSurface
             PlaybackSystemVolume(control: gestureVolume)
                 .frame(width: 120, height: 20).offset(x: -10000).allowsHitTesting(false)
+                .onReceive(gestureVolume.changes) { level in
+                    guard scenePhase == .active, !gestureActive, heldRate == nil else { return }
+                    showGestureHUD(volumeHUDText(level))
+                }
             if let gestureHUD {
                 VStack(spacing: 10) {
                     if gestureActive && seekPreviewEnabled && gesturePreviewing { seekPreviewCard(at: gestureTarget) }
@@ -1223,6 +1227,10 @@ struct PlaybackView: View {
     private func gestureOption(_ key: String) -> Bool {
         UserDefaults.standard.object(forKey: "lucent.gestures." + key) as? Bool ?? true
     }
+    private func volumeHUDText(_ level: Float) -> String {
+        "\("音量".lucentLocalized) \(Int((level * 100).rounded()))%"
+    }
+
     private func showGestureHUD(_ text: String, persistent: Bool = false) {
         hudTask?.cancel()
         gestureHUD = text
@@ -1285,13 +1293,18 @@ struct PlaybackView: View {
                             if originalBrightness == nil { originalBrightness = UIScreen.main.brightness }
                             UIScreen.main.brightness = level
                         }
-                        showGestureHUD("\((gestureRightSide ? "音量" : "亮度").lucentLocalized) \(Int(level * 100))%", persistent: true)
+                        let message = gestureRightSide ? volumeHUDText(Float(level)) : "\("亮度".lucentLocalized) \(Int(level * 100))%"
+                        showGestureHUD(message, persistent: true)
                     }
                 } else if [.ended, .cancelled, .failed].contains(state) {
                     if horizontal && state == .ended && abs(gestureTarget - gestureStartTime) > 0.5 { session.seek(to: gestureTarget) }
                     session.clearPreview()
                     gestureActive = false
-                    gestureHUD = nil
+                    if !horizontal, gestureRightSide, state == .ended, let gestureHUD {
+                        showGestureHUD(gestureHUD)
+                    } else {
+                        gestureHUD = nil
+                    }
                     lastControlInteraction = Date()
                 }
             },

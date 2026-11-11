@@ -79,25 +79,36 @@ struct LucentApp: App {
 #if os(iOS)
 private struct LaunchArtworkHandoff: ViewModifier {
     @State private var visible = true
+    @State private var finishing = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content.overlay {
             if visible {
-                ZStack {
-                    Color.white.ignoresSafeArea()
-                    Image("LaunchIconGradientPlayTransparent")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 160, height: 160)
+                GeometryReader { geometry in
+                    let width = geometry.size.width
+                    let height = geometry.size.height
+                    ZStack(alignment: .topLeading) {
+                        Image("LaunchLightAndShadow")
+                            .resizable()
+                            .frame(width: width, height: height)
+                        Image(AppIconChoice.current.previewName)
+                            .resizable()
+                            .frame(width: width * 100 / 852, height: height * 100 / 1846)
+                            .clipShape(RoundedRectangle(cornerRadius: width * 22 / 852))
+                            .position(x: width * 152 / 852, y: height * 1620 / 1846)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
                 .accessibilityHidden(true)
-                .transition(.opacity)
+                .opacity(finishing ? 0 : 1)
+                .allowsHitTesting(!finishing)
                 .task {
-                    do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
+                    let fadeDuration = reduceMotion ? 0.15 : 0.32
+                    do { try await Task.sleep(for: .seconds(2 - fadeDuration)) } catch { return }
+                    withAnimation(.easeInOut(duration: fadeDuration)) {
+                        finishing = true
+                    } completion: {
                         visible = false
                     }
                 }

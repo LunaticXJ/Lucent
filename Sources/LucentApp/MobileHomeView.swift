@@ -1076,7 +1076,8 @@ struct MobileHomeView: View {
                                            height: HomePalette.isPad ? 160 : 110)
                                     .clipShape(RoundedRectangle(cornerRadius: 16))
                                     .modifier(HomeMatchedSource(key: key, namespace: detailTransition, sourceBackground: themeColor))
-                                    HomeContinuingCaption(item: item)
+                                    HomeContinuingCaption(item: item,
+                                        cachedYear: library.cardMetadata[LibraryStore.cardKey(sourceID: source.id, itemID: item.id)]?.year)
                                 }
                                 .frame(width: HomePalette.continueWidth, alignment: .leading)
                             }
@@ -1574,6 +1575,7 @@ struct MobileHomeView: View {
 
 private struct HomeContinuingCaption: View {
     let item: MediaCard
+    var cachedYear: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -1586,7 +1588,7 @@ private struct HomeContinuingCaption: View {
 
     private var subtitle: String? {
         guard let season = item.season, let episode = item.episode, episode > 0 else {
-            return item.year.map(String.init)
+            return item.yearText ?? cachedYear
         }
         let label = season == 0 ? MediaIdentity.specialEpisodeTitle(episode) : "S\(season):E\(episode)"
         return item.kind == "Episode" && item.name != item.seriesName ? "\(label) - \(item.name)" : label

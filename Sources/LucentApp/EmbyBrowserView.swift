@@ -181,23 +181,22 @@ private struct EmbyBrowserPageView: View {
 
     private var sortMenu: some View {
         Menu {
-            Button {
-                ascending.toggle()
-            } label: {
-                Label(ascending ? "升序" : "降序",
-                      systemImage: ascending ? "arrow.up" : "arrow.down")
-            }
-            Divider()
-            ForEach(sortOptions) { option in
-                Button {
-                    sortChosen = true
-                    sort = option
-                } label: {
-                    if effectiveSort == option {
-                        Label(option.title, systemImage: "checkmark")
-                    } else { Text(option.title) }
+            SwiftUI.Section {
+                ForEach(sortOptions) { option in
+                    let selected = effectiveSort == option
+                    let direction = selected && option != .random ? (ascending ? " ↑" : " ↓") : ""
+                    Toggle(isOn: Binding(
+                        get: { effectiveSort == option },
+                        set: { _ in
+                            if effectiveSort == option && option != .random { ascending.toggle() }
+                            sortChosen = true
+                            sort = option
+                        }
+                    )) {
+                        Text(option.title.lucentLocalized + direction)
+                    }
                 }
-            }
+            } header: { Text("排序") }
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 19, weight: .medium))

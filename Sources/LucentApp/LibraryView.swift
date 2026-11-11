@@ -70,6 +70,7 @@ struct LibraryView: View {
     #if os(iOS)
     private enum MobileTab: Hashable { case home, sources, settings, search }
     @State private var mobileTab: MobileTab = .home
+    @AppStorage("lucent.home.collapseDock") private var collapseHomeDock = true
     @State private var mobileSearchText = ""
     @State private var mobileSubmittedSearchText = ""
     @State private var embyServerKind: ServerKind = .emby
@@ -363,7 +364,7 @@ struct LibraryView: View {
                         value: MobileTab.settings) { mobileSettingsShell }
                     Tab(value: MobileTab.search, role: .search) { mobileSearchTab }
                 }
-                .tabBarMinimizeBehavior(.onScrollDown)
+                .tabBarMinimizeBehavior(collapseHomeDock && mobileTab == .home ? .onScrollDown : .never)
             } else {
                 TabView(selection: $mobileTab) {
                     mobileHomeTab

@@ -140,7 +140,22 @@ struct LocalCatalogCollectionView: View {
     @Binding var detailPresented: Bool
     var onBack: (() -> Void)? = nil
     @State private var selectedCollection: LocalCatalogCollection?
-    @State private var sort = "newest"
+    private enum Sort: String, CaseIterable, Identifiable {
+        case title, newest, year, rating
+
+        var id: Self { self }
+        var title: String {
+            switch self {
+            case .title: "标题"
+            case .newest: "添加日期"
+            case .year: "年份"
+            case .rating: "评分"
+            }
+        }
+    }
+
+    @State private var sort: Sort = .newest
+    @State private var reversedSort = false
     @State private var genre = "全部题材"
     @State private var watched = "all"
     @State private var selectedItemID: UUID?
@@ -159,19 +174,37 @@ struct LocalCatalogCollectionView: View {
             return (genre == "全部题材" || $0.metadata?.genres?.contains(genre) == true) &&
             (watched == "all" || (watched == "watched" ? seen : !seen))
         }
+        let sorted: [MediaItem]
         switch sort {
-        case "title": return filtered.sorted { $0.catalogDisplayTitle.localizedStandardCompare($1.catalogDisplayTitle) == .orderedAscending }
-        case "year": return filtered.sorted { ($0.metadata?.year ?? 0) > ($1.metadata?.year ?? 0) }
-        case "rating": return filtered.sorted { ($0.metadata?.rating ?? 0) > ($1.metadata?.rating ?? 0) }
-        default: return filtered
+        case .title:
+            sorted = filtered.sorted { $0.catalogDisplayTitle.localizedStandardCompare($1.catalogDisplayTitle) == .orderedAscending }
+        case .year:
+            sorted = filtered.sorted { ($0.metadata?.year ?? 0) > ($1.metadata?.year ?? 0) }
+        case .rating:
+            sorted = filtered.sorted { ($0.metadata?.rating ?? 0) > ($1.metadata?.rating ?? 0) }
+        case .newest:
+            sorted = filtered
         }
+        return reversedSort ? Array(sorted.reversed()) : sorted
     }
     private var filterMenu: some View {
         Menu {
-            Picker("排序", selection: $sort) {
-                Text("最近添加").tag("newest"); Text("名称").tag("title")
-                Text("年份").tag("year"); Text("评分").tag("rating")
-            }
+            Section {
+                ForEach(Sort.allCases) { option in
+                    let selected = sort == option
+                    let ascending = (option == .title) != reversedSort
+                    let direction = selected ? (ascending ? " ↑" : " ↓") : ""
+                    Toggle(isOn: Binding(
+                        get: { sort == option },
+                        set: { _ in
+                            reversedSort = sort == option ? !reversedSort : false
+                            sort = option
+                        }
+                    )) {
+                        Text(option.title.lucentLocalized + direction)
+                    }
+                }
+            } header: { Text("排序") }
             Picker("观看状态", selection: $watched) {
                 Text("全部").tag("all"); Text("未观看").tag("unwatched"); Text("已观看").tag("watched")
             }

@@ -92,13 +92,7 @@ struct AggregateLibraryOverview: View {
             }.buttonStyle(.plain)
         }
         .foregroundStyle(.primary)
-        .background(LucentUI.serverCardGradient,
-                    in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: LucentUI.sectionRadius)
-                .strokeBorder(LucentUI.serverCardBorder(), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
+        .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius)))
     }
     private func metric(_ title: String, _ value: Int) -> some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -156,6 +150,9 @@ struct StorageManagementView: View {
     let edit: (UUID) -> Void
     var onBack: (() -> Void)? = nil
     @State private var browsing: LibraryStorage?
+    // Plain Bool drives the push; the value is kept across dismissal so the
+    // browser view doesn't collapse to blank during the pop animation.
+    @State private var browserShown = false
     @State private var renaming: LibraryStorage?
     @State private var removing: LibraryStorage?
     @State private var name = ""
@@ -171,9 +168,9 @@ struct StorageManagementView: View {
         }
         #if !os(macOS)
         .lucentCollectionChrome(title: "存储") {
-            if browsing == nil { Button("添加存储", systemImage: "plus", action: add) }
+            if !browserShown { Button("添加存储", systemImage: "plus", action: add) }
         }
-        .navigationDestination(isPresented: Binding(get: { browsing != nil }, set: { if !$0 { browsing = nil } })) {
+        .navigationDestination(isPresented: $browserShown) {
             if let storage = browsing {
                 StorageDirectoryBrowser(storageID: storage.id, root: .root)
                     .environmentObject(library).lucentSecondaryPage()
@@ -205,7 +202,7 @@ struct StorageManagementView: View {
         if !storages.isEmpty {
             Section(title) {
                 ForEach(storages) { storage in
-                    Button { browsing = storage } label: {
+                    Button { browsing = storage; browserShown = true } label: {
                         HStack(spacing: 14) {
                             Image(systemName: storage.icon).font(.title2).frame(width: 34)
                             VStack(alignment: .leading, spacing: 5) {
@@ -218,7 +215,7 @@ struct StorageManagementView: View {
                         }.padding(.vertical, 7).contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     .contextMenu {
-                        Button("浏览与导入", systemImage: "folder") { browsing = storage }
+                        Button("浏览与导入", systemImage: "folder") { browsing = storage; browserShown = true }
                         Button("重命名", systemImage: "pencil") { renaming = storage; name = storage.name }
                         if storage.kind != .dlna && storage.kind != .local { Button("编辑连接", systemImage: "slider.horizontal.3") { edit(storage.id) } }
                         Button("移除存储", systemImage: "trash", role: .destructive) { removing = storage }
@@ -256,6 +253,12 @@ struct StorageDirectoryBrowser: View {
         get { selection.selectionMode }
         nonmutating set { selection.selectionMode = newValue }
     }
+    init(storageID: UUID, root: StorageDirectory) {
+        self.storageID = storageID
+        self.root = root
+        self.ancestors = []
+        _selection = StateObject(wrappedValue: StorageDirectorySelection())
+    }
     fileprivate init(storageID: UUID, root: StorageDirectory,
                      selection: StorageDirectorySelection? = nil, ancestors: [StorageBreadcrumb] = []) {
         self.storageID = storageID
@@ -276,7 +279,9 @@ struct StorageDirectoryBrowser: View {
                 LucentStateView(title: "无法读取目录", symbol: "wifi.exclamationmark", message: message, actionTitle: "重试") { Task { await load() } }
             } else {
                 List {
-                    #if os(tvOS)
+                    // In-list selection toggle so choosing directories is always
+                    // reachable, independent of the navigation-bar button.
+                    #if os(tvOS) || os(iOS)
                     Section {
                         Button(selectionMode ? "取消选择" : "选择目录", systemImage: selectionMode ? "xmark" : "checkmark.circle") {
                             selectionMode.toggle()

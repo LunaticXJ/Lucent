@@ -930,13 +930,18 @@ struct MobileHomeView: View {
                         if heroLoading[item.id] == true { LucentPosterLoadingIndicator() }
                     }
                 HStack(spacing: 7) {
-                    if let rating = displayItem.communityRating {
-                        Image(systemName: "star.fill").foregroundStyle(LucentUI.ratingTint)
+                    let rating = displayItem.communityRating
+                    let date = heroDisplayDate(for: displayItem)
+                    let showsRating = (rating ?? 0) > 0
+                    if let rating, rating > 0 {
+                        Image(systemName: "star.fill").foregroundStyle(.orange)
                         Text(rating.formatted(.number.precision(.fractionLength(1))))
                     }
-                    if let date = heroDisplayDate(for: displayItem) { Text("·  " + date) }
+                    if let date {
+                        Text((showsRating ? "·  " : "") + date)
+                    }
                     if let genres = displayItem.genres, !genres.isEmpty {
-                        Text("·  " + genres.prefix(2).joined(separator: "、")).lineLimit(1)
+                        Text((showsRating || date != nil ? "·  " : "") + genres.prefix(2).joined(separator: "、")).lineLimit(1)
                     }
                 }
                 .font(.caption.weight(.semibold))

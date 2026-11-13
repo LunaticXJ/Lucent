@@ -1813,10 +1813,14 @@ final class LibraryStore: ObservableObject {
         items.insert(contentsOf: additions, at: 0)
     }
 
-    func purgeMissingItems() {
+    /// Removes items whose source file disappeared from their storage/server and
+    /// that have no local download; also deletes posters, subtitles and playback states.
+    @discardableResult
+    func purgeMissingItems() -> Int {
         let removed = Set(items.filter { $0.missingSince != nil && downloadedURL(for: $0) == nil }.map(\.id))
         removeItemsAndAssets { removed.contains($0.id) }
         save()
+        return removed.count
     }
 
     private func removeItemsAndAssets(where shouldRemove: (MediaItem) -> Bool) {

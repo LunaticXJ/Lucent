@@ -168,9 +168,6 @@ struct MovieDetailView: View {
                         Button(item.isFavorite ? "取消收藏" : "收藏", systemImage: item.isFavorite ? "heart.slash" : "heart") {
                             library.toggleFavorite(id: item.id)
                         }
-                        Button("更多播放选项与资料", systemImage: "slider.horizontal.3") {
-                            onMore()
-                        }
 
         } label: { Image(systemName: "ellipsis") }
         .accessibilityLabel("更多")

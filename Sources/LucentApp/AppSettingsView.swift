@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 enum AppSettingsAction {
-    case profiles, trakt, enrichMetadata, purgeMissing
+    case profiles, trakt
 }
 
 
@@ -31,6 +31,7 @@ struct AppSettingsView: View {
     @State private var metadataTokenConfigured = false
     @State private var metadataTokenStatus: String?
     @State private var matchingItem: MediaItem?
+    @State private var purgeStatus: String?
     @AppStorage(NetworkUsagePolicy.playbackKey) private var cellularPlayback = true
     @AppStorage(NetworkUsagePolicy.syncKey) private var cellularSync = false
     @AppStorage(NetworkUsagePolicy.downloadKey) private var cellularDownloads = false
@@ -62,7 +63,8 @@ struct AppSettingsView: View {
                     settingsRow("字幕", icon: "captions.bubble")
                 }
                 NavigationLink { PlaybackServicesView(scope: .danmaku).lucentSecondaryPage() } label: {
-                    settingsRow("弹幕", icon: "bubble.left.and.bubble.right")
+                    // Matches the player's danmaku tool button.
+                    settingsRow("弹幕", icon: "list.bullet.rectangle")
                 }
             }
             Section("内容与存储") {
@@ -76,9 +78,6 @@ struct AppSettingsView: View {
                 }
                 NavigationLink { CacheSettingsView(embedded: true).lucentSecondaryPage() } label: {
                     settingsRow("缓存与存储", icon: "internaldrive")
-                }
-                NavigationLink { metadataPage.lucentSecondaryPage() } label: {
-                    settingsRow("在线元数据", icon: "photo.on.rectangle.angled")
                 }
             }
             Section("账户与同步") {
@@ -238,19 +237,17 @@ struct AppSettingsView: View {
         }
     }
 
-    private var metadataPage: some View {
-        settingsPage("在线元数据") {
-            Section {
-                LabeledContent("TMDB", value: metadataTokenConfigured ? "令牌已配置" : "尚未配置")
-                SecureField("API 密钥或读取令牌", text: $metadataTokenInput)
-                    .textContentType(.password).privacySensitive()
-                    .autocorrectionDisabled().lucentTextInput()
-                Button("保存令牌") { saveMetadataToken() }
-                    .foregroundStyle(.primary)
-                    .disabled(metadataTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            } header: { Text("The Movie Database") }
+    private var metadataSection: some View {
+        Section("在线元数据") {
+            LabeledContent("TMDB", value: metadataTokenConfigured ? "令牌已配置".lucentLocalized : "尚未配置".lucentLocalized)
+            SecureField("API 密钥或读取令牌", text: $metadataTokenInput)
+                .textContentType(.password).privacySensitive()
+                .autocorrectionDisabled().lucentTextInput()
+            Button("保存令牌") { saveMetadataToken() }
+                .foregroundStyle(.primary)
+                .disabled(metadataTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             if let metadataTokenStatus {
-                Section { Text(metadataTokenStatus).font(.subheadline).foregroundStyle(.secondary) }
+                Text(metadataTokenStatus.lucentLocalized).font(.subheadline).foregroundStyle(.secondary)
             }
         }
     }
@@ -271,26 +268,7 @@ struct AppSettingsView: View {
 
     private var libraryPage: some View {
         settingsPage("聚合媒体库") {
-            Section("浏览") {
-                LucentSettingsPicker("默认排序", selection: $sortSelection) {
-                    Text("最近添加").tag("newest")
-                    Text("标题").tag("title")
-                }
-                .pickerStyle(.menu)
-                LucentSettingsPicker("默认筛选", selection: $filterSelection) {
-                    Text("全部").tag("all")
-                    Text("未看完").tag("unwatched")
-                    Text("收藏").tag("favorites")
-                }
-                .pickerStyle(.menu)
-            }
             if library.activeProfile?.isChild != true {
-                Section {
-                    LabeledContent("存储连接", value: "\(library.libraryStorages.count)")
-                    LabeledContent("已启用文件源", value: "\(library.fileSources.filter { $0.enabled && !$0.needsConfirmation }.count)")
-                } header: { Text("文件源") } footer: {
-                    Text("在片源中连接存储并导入目录。停用不删除记录。")
-                }
                 Section("扫描与影片资料") {
                     LucentSettingsPicker("自动扫描", selection: $autoScanInterval) {
                         Text("仅手动").tag(0.0)
@@ -300,21 +278,12 @@ struct AppSettingsView: View {
                     Toggle("媒体信息探测", isOn: Binding(
                         get: { library.mediaProbeEnabled },
                         set: { library.setMediaProbeEnabled($0) }))
-                    Text("扫描时探测编码与音轨，默认关闭。")
-                        .font(.caption).foregroundStyle(.secondary)
                     LabeledContent("待匹配文件", value: "\(unmatchedItems.count)")
-                    LabeledContent("已探测媒体", value: "\(library.localLibraryItems.filter { $0.technicalInfo != nil }.count)")
-                    if let title = library.processingItemTitle { ProgressView("探测：\(title)").font(.caption) }
-                    if let status = library.catalogProcessingStatus { Text(LocalizedStringKey(status)).font(.caption).foregroundStyle(.secondary) }
-                    Button("重试获取未完成的资料", systemImage: "arrow.triangle.2.circlepath") { library.retryLocalLibraryProcessing() }
+                    Button("重试待匹配文件资料获取", systemImage: "arrow.triangle.2.circlepath") { library.retryLocalLibraryProcessing() }
                         .foregroundStyle(.primary)
                     if scanningSources { ProgressView("正在扫描文件源") }
                     Button("刷新聚合媒体库", systemImage: "arrow.clockwise") { refreshLibrary() }
                         .foregroundStyle(.primary).disabled(scanningSources)
-                    Button { onAction(.enrichMetadata) } label: {
-                        Label("补全影片资料", systemImage: "sparkles")
-                    }
-                    .foregroundStyle(.primary).disabled(library.enrichingMetadata)
                     if !unmatchedItems.isEmpty {
                         Menu("手动匹配影片资料", systemImage: "text.magnifyingglass") {
                             ForEach(unmatchedItems.prefix(30)) { item in
@@ -324,11 +293,20 @@ struct AppSettingsView: View {
                         .foregroundStyle(.primary)
                     }
                 }
+                metadataSection
                 Section {
-                    Button(role: .destructive) { onAction(.purgeMissing) } label: {
+                    Button(role: .destructive) {
+                        let removed = library.purgeMissingItems()
+                        purgeStatus = removed > 0
+                            ? String(format: "已清理 %lld 个失效影片".lucentLocalized, removed)
+                            : "没有需要清理的失效影片".lucentLocalized
+                    } label: {
                         Label("清理失效影片", systemImage: "trash")
                     }
                     .disabled(!library.items.contains { $0.missingSince != nil })
+                    if let purgeStatus { Text(purgeStatus.lucentLocalized).font(.subheadline).foregroundStyle(.secondary) }
+                } footer: {
+                    Text("扫描发现片源中的文件被移除后，影片会标记为失效；此操作会删除失效影片的记录与本地缓存。没有失效影片时按钮不可用。")
                 }
             }
         }
@@ -345,13 +323,12 @@ struct AppSettingsView: View {
                     Button { onSelectProfile(profile.id) } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "person.crop.circle").font(.title3).foregroundStyle(.secondary)
-                            Text(profile.name).foregroundStyle(.primary)
+                            Text(profile.displayName).foregroundStyle(.primary)
                             Spacer()
                             if library.activeProfile?.id == profile.id {
                                 Image(systemName: "checkmark").foregroundStyle(.secondary)
                             }
                         }
-                        .padding(.vertical, 5)
                     }
                     .accessibilityAddTraits(library.activeProfile?.id == profile.id ? .isSelected : [])
                 }

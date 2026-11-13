@@ -99,6 +99,8 @@ final class PlaybackSession: ObservableObject {
     }
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
+    /// Furthest media position the active engine has buffered, for the seek bar's loading range.
+    @Published private(set) var bufferedTime: Double = 0
     let player = AVPlayer()
     private var mpvEngineStorage: MPVPlaybackEngine?
     @Published private(set) var videoScaleMode = VideoScaleMode(
@@ -1032,6 +1034,7 @@ final class PlaybackSession: ObservableObject {
         mpvAttachedSubtitle = false
         mpvAttachedAudio = false
         chapters = []
+        bufferedTime = 0
         audioOptions = []
         selectedAudioIndex = nil
         subtitleOptions = []
@@ -1310,6 +1313,7 @@ final class PlaybackSession: ObservableObject {
         if length.isFinite && length > 0 { duration = length }
         guard observeProgress(time, ready: engine.isSessionReady && engine.state != .loading && engine.state != .seeking) else { return }
         currentTime = time
+        bufferedTime = engine.bufferedPosition
         isBuffering = engine.isBuffering
         if chapters.isEmpty, !engine.mediaChapters.isEmpty {
             chapters = engine.mediaChapters.map { .init(index: $0.id, title: $0.name, start: $0.startSeconds) }
@@ -1793,6 +1797,7 @@ final class PlaybackSession: ObservableObject {
             if segments.isEmpty { segments = PlaybackSegmentClient.fromChapters(chapters, duration: duration) }
         }
         currentTime = seconds
+        bufferedTime = seconds + mpvEngine.bufferedAhead
         isBuffering = mpvEngine.isBuffering
         isSeekingPlayback = mpvEngine.isSeeking
         if abs(seconds - lastMPVPosition) > 0.1 {
@@ -2294,6 +2299,7 @@ final class PlaybackSession: ObservableObject {
         guard observeProgress(seconds, ready: player.currentItem?.status == .readyToPlay && !isSeekingPlayback) else { return }
         if seconds > 0.05 { isPreparing = false }
         currentTime = seconds
+        bufferedTime = Self.bufferedEnd(of: player.currentItem)
         applyAutomaticSkip(at: seconds)
         if player.timeControlStatus == .playing { isBuffering = false }
         else if player.timeControlStatus == .waitingToPlayAtSpecifiedRate { isBuffering = true }
@@ -2305,6 +2311,15 @@ final class PlaybackSession: ObservableObject {
             record(seconds)
             lastProgressSave = Date()
         }
+    }
+
+    private static func bufferedEnd(of item: AVPlayerItem?) -> Double {
+        guard let ranges = item?.loadedTimeRanges else { return 0 }
+        return ranges.compactMap { range -> Double? in
+            let value = range.timeRangeValue
+            let end = CMTimeAdd(value.start, value.duration).seconds
+            return end.isFinite ? end : nil
+        }.max() ?? 0
     }
 
     func toggleSidecarSubtitle() {

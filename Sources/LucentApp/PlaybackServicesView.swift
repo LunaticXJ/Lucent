@@ -28,8 +28,6 @@ struct PlaybackServicesView: View {
     @State private var key = ""
     @State private var username = ""
     @State private var password = ""
-    @State private var appID = ""
-    @State private var secret = ""
     @State private var status: String?
     @State private var busy = false
     @State private var loggedIn = false
@@ -56,7 +54,7 @@ struct PlaybackServicesView: View {
             }
             if scope == .danmaku {
                 Section {
-                    NavigationLink("自定义弹幕 API") {
+                    NavigationLink("自定义弹幕服务器") {
                         CustomDanmakuServersView().lucentSecondaryPage()
                     }
                 }
@@ -72,31 +70,21 @@ struct PlaybackServicesView: View {
                 } footer: {
                     Text("每行输入一个屏蔽词，适用于所有影片。")
                 }
-                Section {
-                    TextField("App ID", text: $appID)
-                    SecureField("App Secret", text: $secret)
-                    Link("弹弹play 开发者中心", destination: URL(string: "https://dev.dandanplay.com/")!)
-                } header: { Text("弹弹play") } footer: {
-                    Text("使用自行申请的应用凭据。在线搜索会发送影片名称，选择后下载对应集的弹幕。")
-                }
             }
-            Section {
-                Button("保存配置") {
-                    do {
-                        if scope == .subtitles {
+            if scope == .subtitles {
+                Section {
+                    Button("保存配置") {
+                        do {
                             if key != (try KeychainPasswordStore.openSubtitlesAPIKey() ?? "") {
                                 try KeychainPasswordStore.setPlaybackServiceSecret("", key: "opensubtitles-session"); loggedIn = false
                             }
                             try KeychainPasswordStore.setOpenSubtitlesAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
-                        } else {
-                            try KeychainPasswordStore.setPlaybackServiceSecret(appID.trimmingCharacters(in: .whitespacesAndNewlines), key: "dandan-app-id")
-                            try KeychainPasswordStore.setPlaybackServiceSecret(secret.trimmingCharacters(in: .whitespacesAndNewlines), key: "dandan-secret")
-                        }
-                        status = "已保存"
-                    } catch { status = error.localizedDescription }
-                }.disabled(busy)
-                if busy { ProgressView() }
-                if let status { Text(LocalizedStringKey(status)).font(.footnote).foregroundStyle(.secondary) }
+                            status = "已保存"
+                        } catch { status = error.localizedDescription }
+                    }.disabled(busy)
+                    if busy { ProgressView() }
+                    if let status { Text(LocalizedStringKey(status)).font(.footnote).foregroundStyle(.secondary) }
+                }
             }
         }
         .lucentPageTitle(scope == .subtitles ? "字幕服务配置" : "弹幕服务").lucentNavigationTitleStyle()
@@ -106,9 +94,6 @@ struct PlaybackServicesView: View {
             if scope == .subtitles {
                 key = (try? KeychainPasswordStore.openSubtitlesAPIKey()) ?? ""
                 loggedIn = PlaybackServiceConfiguration.subtitleSession() != nil
-            } else {
-                appID = (try? KeychainPasswordStore.playbackServiceSecret("dandan-app-id")) ?? ""
-                secret = (try? KeychainPasswordStore.playbackServiceSecret("dandan-secret")) ?? ""
             }
         }
     }
@@ -163,7 +148,7 @@ struct CustomDanmakuServersView: View {
                 Text("支持兼容弹弹play协议的 API。可填写服务器根地址或以 /api/v2 结尾的地址，并保留服务提供的鉴权路径。")
             }
         }
-        .lucentPageTitle("自定义弹幕 API").lucentNavigationTitleStyle()
+        .lucentPageTitle("自定义弹幕服务器").lucentNavigationTitleStyle()
         .modifier(LucentSettingsPageStyle())
         .navigationDestination(item: $editing) { server in
             CustomDanmakuServerEditor(server: server,

@@ -162,7 +162,7 @@ struct PlaybackView: View {
     @State private var controlsVisible = true
     @State private var lastControlInteraction = Date()
     @State private var secondaryPanel: ControlPanel?
-    private enum ControlPanel: String { case danmaku = "弹幕", audio = "音轨", subtitles = "字幕", rate = "播放速度", settings = "更多设置", playlist = "播放列表", diagnostics = "播放信息" }
+    private enum ControlPanel: String { case danmaku = "弹幕", audio = "音轨", subtitles = "字幕", rate = "播放速度", chapters = "章节", settings = "更多设置", playlist = "播放列表", diagnostics = "播放信息" }
     private var primaryControlsVisible: Bool {
         controlsVisible && secondaryPanel == nil && !showEpisodeList
     }
@@ -464,8 +464,10 @@ struct PlaybackView: View {
             }.environmentObject(library)
         }
         .task(id: "\(item.id)|\(danmakuEnabled)") {
+            // 弹弹play 官方源仅在代码内置凭据已配置时可用。
             await danmaku.load(for: item, enabled: danmakuEnabled,
-                servers: [.official] + CustomDanmakuServers.available(danmakuServersData))
+                servers: (DandanplayCredentials.isConfigured ? [.official] : [])
+                    + CustomDanmakuServers.available(danmakuServersData))
         }
         .task {
             while !Task.isCancelled {
@@ -975,6 +977,9 @@ struct PlaybackView: View {
                             .frame(width: PlayerControlStyle.scaled(48), height: PlayerControlStyle.controlSize)
                     }
                     .accessibilityLabel("播放速度 \(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale))) 倍")
+                    if session.chapters.count > 1 {
+                        toolButton("章节", symbol: "book") { openPanel(.chapters) }
+                    }
                 }
                 .padding(.horizontal, 4)
                 .lucentVideoGlass()
@@ -1070,6 +1075,10 @@ struct PlaybackView: View {
         return session.hasSidecarSubtitle && session.subtitlesEnabled ? "外挂字幕" : "关闭"
     }
 
+    private var currentChapter: PlaybackChapter? {
+        session.chapters.last { $0.start <= session.currentTime }
+    }
+
     private func openPanel(_ panel: ControlPanel) {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
             secondaryPanel = panel
@@ -1095,8 +1104,8 @@ struct PlaybackView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(panel.rawValue).font(.system(size: PlayerControlStyle.scaled(20), weight: .semibold))
-                            Text(panelSubtitle(panel))
+                            Text(LocalizedStringKey(panel.rawValue)).font(.system(size: PlayerControlStyle.scaled(20), weight: .semibold))
+                            Text(LocalizedStringKey(panelSubtitle(panel)))
                                 .font(.system(size: PlayerControlStyle.scaled(12))).foregroundStyle(PlayerControlStyle.secondary)
                                 .lineLimit(1)
                         }
@@ -1121,6 +1130,26 @@ struct PlaybackView: View {
                             case .audio: trackControls(audio: true)
                             case .subtitles: trackControls(audio: false)
                             case .rate: rateControls
+                            case .chapters:
+                                if session.chapters.isEmpty {
+                                    Text("当前影片没有章节信息。")
+                                        .font(.system(size: PlayerControlStyle.scaled(13)))
+                                        .foregroundStyle(PlayerControlStyle.secondary)
+                                        .padding(.horizontal, 12)
+                                } else {
+                                    panelSection("共 \(session.chapters.count) 个章节") {
+                                        ForEach(session.chapters) { chapter in
+                                            Button {
+                                                session.seek(to: chapter.start)
+                                                closePanel()
+                                            } label: {
+                                                PlayerOptionRow(title: chapter.title,
+                                                                detail: Self.timeLabel(chapter.start),
+                                                                selected: currentChapter?.id == chapter.id)
+                                            }
+                                        }
+                                    }
+                                }
                             case .playlist:
                                 panelSection("共 \(session.playlistEntries.count) 项") {
                                     ForEach(session.playlistEntries) { entry in
@@ -1167,6 +1196,7 @@ struct PlaybackView: View {
         case .audio: return audioSummary
         case .subtitles: return subtitleSummary
         case .rate: return "当前 \(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale))) 倍速"
+        case .chapters: return currentChapter.map(\.title) ?? "选择要跳转的章节"
         case .settings: return "当前使用 \(session.activeEngineTitle)"
         case .playlist: return "选择接下来播放的内容"
         case .diagnostics: return "当前使用 \(session.activeEngineTitle)"
@@ -1192,7 +1222,7 @@ struct PlaybackView: View {
             }
             .padding(.horizontal, 12)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                ForEach([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { rate in
+                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0], id: \.self) { rate in
                     let selected = abs(Double(session.playbackRate) - rate) < 0.01
                     Button {
                         session.setPlaybackRate(Float(rate))
@@ -1364,12 +1394,41 @@ struct PlaybackView: View {
             let rawFraction = session.duration.isFinite && session.duration > 0
                 ? (isSeeking ? seekPosition : session.currentTime) / session.duration : 0
             let fraction = rawFraction.isFinite ? min(1, max(0, rawFraction)) : 0
+            let rawBuffered = session.duration.isFinite && session.duration > 0
+                ? session.bufferedTime / session.duration : 0
+            let buffered = rawBuffered.isFinite ? min(1, max(0, rawBuffered)) : 0
+            let trackHeight: CGFloat = isSeeking ? 8 : 5
+            let thumbSize: CGFloat = isSeeking ? 18 : 13
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.2)).frame(height: isSeeking ? 6 : 4)
-                Capsule().fill(.white).frame(width: max(0, width * fraction), height: isSeeking ? 6 : 4)
-                Circle().fill(.white).frame(width: isSeeking ? 16 : 11, height: isSeeking ? 16 : 11)
-                    .offset(x: min(max(0, width - (isSeeking ? 16 : 11)),
-                                   max(0, width * fraction - (isSeeking ? 8 : 5.5))))
+                Capsule()
+                    .fill(.white.opacity(0.14))
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.5))
+                    .frame(height: trackHeight)
+                if buffered > fraction {
+                    Capsule()
+                        .fill(.white.opacity(0.3))
+                        .frame(width: max(0, width * buffered), height: trackHeight)
+                }
+                Capsule()
+                    .fill(.white)
+                    .frame(width: max(0, width * fraction), height: trackHeight)
+                Circle()
+                    .fill(.white)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.28), radius: 5, y: 1)
+                    .offset(x: min(max(0, width - thumbSize), max(0, width * fraction - thumbSize / 2)))
+            }
+            .background {
+                if #available(iOS 26, macOS 26, tvOS 26, *) {
+                    Capsule()
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(.black.opacity(0.35)), in: Capsule())
+                        .frame(height: trackHeight)
+                } else {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .frame(height: trackHeight)
+                }
             }
             .overlay(alignment: .topLeading) {
                 if isSeeking {

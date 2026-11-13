@@ -133,6 +133,12 @@ extension String {
     }
 }
 
+extension ViewerProfile {
+    /// The stock profile persists its creation-time name; render it localized
+    /// while custom names stay verbatim.
+    var displayName: String { name == "默认" ? "默认".lucentLocalized : name }
+}
+
 private final class LocalizedDateCache: @unchecked Sendable {
     static let shared = LocalizedDateCache()
     let values: NSCache<NSString, NSString> = {

@@ -502,14 +502,6 @@ struct SeriesDetailView: View {
                             .disabled(episodes.isEmpty || loading)
                         Button(isSeriesFavorite ? "取消收藏" : "收藏", systemImage: isSeriesFavorite ? "heart.slash" : "heart") { toggleSeriesFavorite() }
                             .disabled(!canFavoriteSeries)
-                        Button("更多播放选项与资料", systemImage: "slider.horizontal.3") {
-                            if let episode = activeEpisode, let selected = mediaItem(for: episode) {
-                                onMore(selected)
-                            } else if !isSeriesEntry {
-                                onMore(item)
-                            }
-                        }
-                        .disabled(isSeriesEntry && activeEpisode == nil)
 
         } label: { Image(systemName: "ellipsis") }
         .accessibilityLabel("更多")

@@ -8,7 +8,10 @@ import CoreImage
 enum ArtworkImageDecoder {
     private static let cache: NSCache<NSString, LucentPlatformImage> = {
         let cache = NSCache<NSString, LucentPlatformImage>()
-        cache.totalCostLimit = 64 * 1024 * 1024
+        // Decoded hero-scale bitmaps cost ~32MB each (8MP × 4 bytes). A 64MB budget
+        // only holds about two of them, so swipe neighbors keep evicting each other
+        // and every revisit re-decodes, flashing the placeholder between slides.
+        cache.totalCostLimit = 256 * 1024 * 1024
         cache.countLimit = 100
         return cache
     }()

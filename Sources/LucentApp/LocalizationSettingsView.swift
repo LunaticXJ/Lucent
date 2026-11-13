@@ -70,7 +70,7 @@ struct LocalizationSettingsView: View {
                     Group {
                         LocaleChoiceList(title: "地区", selection: $region, automatic: "system", options: Locale.Region.isoRegions.map { ($0.identifier, locale.localizedString(forRegionCode: $0.identifier) ?? $0.identifier) })
                     }.lucentSecondaryPage()
-                } label: { LabeledContent("地区", value: region == "system" ? String(localized: "跟随系统", locale: locale) : locale.localizedString(forRegionCode: region) ?? region) }
+                } label: { LabeledContent("地区", value: region == "system" ? "跟随系统".lucentLocalized : locale.localizedString(forRegionCode: region) ?? region) }
                 LucentSettingsPicker("日期格式", selection: $dateOrder) {
                     Text("跟随地区").tag("system")
                     Text("年 / 月 / 日").tag("ymd")
@@ -86,7 +86,7 @@ struct LocalizationSettingsView: View {
                     Group {
                         LocaleChoiceList(title: "时区", selection: $zone, automatic: "system", options: TimeZone.knownTimeZoneIdentifiers.map { ($0, (TimeZone(identifier: $0)?.localizedName(for: .standard, locale: locale) ?? $0) + " · " + $0) })
                     }.lucentSecondaryPage()
-                } label: { LabeledContent("时区", value: zone == "system" ? String(localized: "跟随系统", locale: locale) : zone) }
+                } label: { LabeledContent("时区", value: zone == "system" ? "跟随系统".lucentLocalized : zone) }
                 LabeledContent("日期预览", value: LocalizationPreferences.current.formatted(Date()))
             }
             Section {
@@ -111,7 +111,7 @@ private struct LocaleChoiceList: View {
     @State private var query = ""
     var body: some View {
         List {
-            choice(automatic, title: String(localized: "跟随系统", locale: LocalizationPreferences.current.displayLocale))
+            choice(automatic, title: "跟随系统".lucentLocalized)
             ForEach(options.filter { query.isEmpty || $0.1.localizedStandardContains(query) || $0.0.localizedStandardContains(query) }.sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }, id: \.0) { id, title in
                 choice(id, title: title)
             }

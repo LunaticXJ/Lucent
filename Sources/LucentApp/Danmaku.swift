@@ -99,7 +99,7 @@ enum DanmakuError: LocalizedError {
     }
     var errorDescription: String? {
         switch self {
-        case .credentials: "请先在设置的弹幕服务中填写弹弹play App ID 和 Secret，或选择自定义弹幕 API。"
+        case .credentials: "弹弹play 官方源未配置，请配置自定义弹幕服务器。"
         case .request(let code): "弹幕请求失败（\(code)），请检查服务授权或稍后再试。"
         case .invalidFile: "弹幕文件无效或超过 15 MB，支持弹弹play JSON 和 Bilibili XML。"
         case .noComments: "没有可显示的弹幕。"
@@ -107,6 +107,14 @@ enum DanmakuError: LocalizedError {
         case .invalidResponse: "服务器未返回兼容弹弹play协议的数据，请检查 API 地址。"
         }
     }
+}
+
+/// 弹弹play official API credentials are a build-time configuration item, not a
+/// user-facing setting. Fill them in here before enabling the official source.
+enum DandanplayCredentials {
+    static let appID = ""
+    static let appSecret = ""
+    static var isConfigured: Bool { !appID.isEmpty && !appSecret.isEmpty }
 }
 
 enum DandanplayClient {
@@ -295,9 +303,9 @@ enum DandanplayClient {
         return request
     }
     private static func fetch(path: String, parameters: [URLQueryItem], server: Server) async throws -> Data {
-        // Never read or forward official credentials to a user-defined endpoint.
-        let appID = server.isOfficial ? try KeychainPasswordStore.playbackServiceSecret("dandan-app-id") : nil
-        let secret = server.isOfficial ? try KeychainPasswordStore.playbackServiceSecret("dandan-secret") : nil
+        // Never forward official credentials to a user-defined endpoint.
+        let appID = server.isOfficial ? DandanplayCredentials.appID : nil
+        let secret = server.isOfficial ? DandanplayCredentials.appSecret : nil
         var request = try makeRequest(path: path, parameters: parameters, server: server, appID: appID, secret: secret)
         request.setValue("Lucent/1.0", forHTTPHeaderField: "User-Agent")
         // Strip signing headers when the provider redirects comment bodies to its CDN.

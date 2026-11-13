@@ -309,7 +309,7 @@ struct LucentFavoritesView: View {
         let visible = Set(library.visibleItems.map(\.id))
         let local = LocalCatalogCollection.favorites.items(cards: library.localCatalogCards,
             files: library.localLibraryItems.filter { $0.missingSince == nil && visible.contains($0.id) })
-        var result = [Group(id: "library", title: String(localized: "聚合媒体库"), items: local)]
+        var result = [Group(id: "library", title: "聚合媒体库".lucentLocalized, items: local)]
         let favorites = library.visibleItems.filter(\.isFavorite)
         result += library.embySources.map { source in
             Group(id: "emby:\(source.id)", title: source.name, asset: source.kind.assetName, items: favorites.filter {

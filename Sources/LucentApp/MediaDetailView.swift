@@ -483,7 +483,7 @@ struct MediaDetailView: View {
                                     Menu("儿童资料可见性") {
                                         ForEach(childProfiles) { profile in
                                             let visible = !profile.blockedItemIDs.contains(item.id)
-                                            Button("\(profile.name)：\(visible ? "可见" : "隐藏")") {
+                                            Button("\(profile.displayName)：\((visible ? "可见" : "隐藏").lucentLocalized)") {
                                                 library.setChildVisibility(profileID: profile.id,
                                                                            itemID: item.id, visible: !visible)
                                             }

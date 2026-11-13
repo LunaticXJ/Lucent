@@ -302,8 +302,6 @@ struct LibraryView: View {
                 switch action {
                 case .profiles: showProfiles = true
                 case .trakt: showTrakt = true
-                case .enrichMetadata: Task { await library.enrichMissingMetadata() }
-                case .purgeMissing: library.purgeMissingItems()
                 }
             }, onSelectProfile: { id in
                 if library.activeProfile?.isChild == true && library.viewerProfiles.first(where: { $0.id == id })?.isChild == false {
@@ -463,6 +461,11 @@ struct LibraryView: View {
                 browserUploadSheet
             }
             #endif
+            // Mobile counterpart of nativeShell's sheets: settings actions raise
+            // these bindings, so they must be owned here or the buttons do nothing.
+            .sheet(isPresented: $showProfiles) { profilesSheet }
+            .sheet(isPresented: $showProfileUnlock) { profileUnlockSheet }
+            .sheet(isPresented: $showTrakt, onDismiss: { traktAuthTask?.cancel(); traktAuthTask = nil }) { traktSheet }
     }
 
     private var hasConfiguredMediaServer: Bool {
@@ -624,8 +627,6 @@ struct LibraryView: View {
         switch action {
         case .profiles: showProfiles = true
         case .trakt: showTrakt = true
-        case .enrichMetadata: Task { await library.enrichMissingMetadata() }
-        case .purgeMissing: library.purgeMissingItems()
         }
     }
 
@@ -2800,7 +2801,7 @@ struct LibraryView: View {
                 Section("现有资料") {
                     ForEach(library.viewerProfiles) { profile in
                         HStack {
-                            Text(profile.name)
+                            Text(profile.displayName)
                             if profile.isChild { Text("儿童").foregroundStyle(.secondary) }
                             Spacer()
                             if profile.id != library.activeProfileID,

@@ -2773,6 +2773,182 @@
         }
       }
     },
+    "令牌已配置": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "令牌已配置"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token configured"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "權杖已設定"
+          }
+        }
+      }
+    },
+    "当前来源": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前来源"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current Source"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前來源"
+          }
+        }
+      }
+    },
+    "尚未配置": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未配置"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not configured"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未設定"
+          }
+        }
+      }
+    },
+    "已清理 %lld 个失效影片": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已清理 %lld 个失效影片"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removed %lld missing items"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已清理 %lld 個失效影片"
+          }
+        }
+      }
+    },
+    "没有需要清理的失效影片": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有需要清理的失效影片"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No missing items to clean up"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有需要清理的失效影片"
+          }
+        }
+      }
+    },
+    "扫描发现片源中的文件被移除后，影片会标记为失效；此操作会删除失效影片的记录与本地缓存。没有失效影片时按钮不可用。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "扫描发现片源中的文件被移除后，影片会标记为失效；此操作会删除失效影片的记录与本地缓存。没有失效影片时按钮不可用。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When a scan finds that files were removed from a source, those items are marked as missing. This deletes the records and local caches of missing items. The button is unavailable when there are none."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "掃描發現片源中的檔案被移除後，影片會標記為失效；此操作會刪除失效影片的記錄與本機快取。沒有失效影片時按鈕不可用。"
+          }
+        }
+      }
+    },
+    "已保存，正在处理媒体库资料与图片。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存，正在处理媒体库资料与图片。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved. Refreshing library metadata and artwork."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已儲存，正在處理媒體庫資料與圖片。"
+          }
+        }
+      }
+    },
+    "保存失败：请检查系统钥匙串权限。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存失败：请检查系统钥匙串权限。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save failed. Check Keychain permissions."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存失敗：請檢查系統鑰匙圈權限。"
+          }
+        }
+      }
+    },
     "跟随系统": {
       "localizations": {
         "zh-Hans": {

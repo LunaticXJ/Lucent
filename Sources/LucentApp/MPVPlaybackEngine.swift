@@ -251,6 +251,8 @@ final class MPVPlaybackEngine {
     var isPaused: Bool { (flagProperty("pause") ?? 0) != 0 }
     var isPlaying: Bool { loadedURL != nil && !ended && !isPaused && duration > 0 }
     var isBuffering: Bool { (flagProperty("paused-for-cache") ?? 0) != 0 }
+    /// Seconds demuxed ahead of the playhead, for the seek bar's buffered range.
+    var bufferedAhead: Double { max(0, doubleProperty("demuxer-cache-time") ?? 0) }
     var isSeeking: Bool { awaitingPlaybackRestart || (flagProperty("seeking") ?? 0) != 0 }
     var isSeekable: Bool { (flagProperty("seekable") ?? 0) != 0 }
     var hasVideoOutput: Bool { (intProperty("video-params/w") ?? 0) > 0 }

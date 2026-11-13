@@ -236,9 +236,13 @@ struct DanmakuSettingsView: View {
     @AppStorage(CustomDanmakuServers.key) private var customServersData = Data()
     @AppStorage("lucent.danmaku.selectedServer") private var selectedServerID = "official"
     @State private var query = ""
-    private var servers: [DandanplayClient.Server] { [.official] + CustomDanmakuServers.available(customServersData) }
-    private var selectedServer: DandanplayClient.Server {
-        servers.first(where: { $0.id == selectedServerID }) ?? servers.first(where: { !$0.isOfficial }) ?? .official
+    private var servers: [DandanplayClient.Server] {
+        // 弹弹play 官方源仅在代码内置凭据已配置时展示。
+        (DandanplayCredentials.isConfigured ? [.official] : [])
+            + CustomDanmakuServers.available(customServersData)
+    }
+    private var selectedServer: DandanplayClient.Server? {
+        servers.first(where: { $0.id == selectedServerID }) ?? servers.first
     }
     @State private var matches: [DandanplayClient.Episode] = []
     @State private var busy = false
@@ -250,15 +254,15 @@ struct DanmakuSettingsView: View {
                 settingsSection("弹幕状态") {
                     Toggle("显示弹幕", isOn: $enabled)
                         .tint(.gray)
-                    LabeledContent("当前来源", value: model.source)
+                    LabeledContent("当前来源", value: model.source == "未选择弹幕" ? "未选择弹幕".lucentLocalized : model.source)
                     if !model.comments.isEmpty { Button("移除此影片弹幕", role: .destructive) { model.clear(for: item.id) } }
                 }
                 settingsSection("手动匹配") {
-                    settingsMenu("来源", value: selectedServer.name) {
+                    settingsMenu("来源", value: servers.isEmpty ? "未配置" : selectedServer?.name ?? "未配置") {
                         Picker("来源", selection: $selectedServerID) {
                             ForEach(servers) { server in Text(server.name).tag(server.id) }
                         }
-                    }.disabled(busy)
+                    }.disabled(busy || servers.isEmpty)
                     TextField("影片或剧集名称", text: $query)
                         .submitLabel(.search)
                         .onSubmit { if query.count >= 2 && !busy { search() } }
@@ -332,11 +336,12 @@ struct DanmakuSettingsView: View {
         }
             .task {
                 query = item.identity?.seriesName ?? item.metadata?.localizedTitle ?? item.title
-                selectedServerID = selectedServer.id
+                selectedServerID = selectedServer?.id ?? selectedServerID
             }
             .onChange(of: selectedServerID) { _, _ in matches = []; searched = false; status = nil }
             .onChange(of: customServersData) { _, _ in
-                selectedServerID = selectedServer.id; matches = []; searched = false; status = nil
+                selectedServerID = selectedServer?.id ?? selectedServerID
+                matches = []; searched = false; status = nil
             }
     }
 
@@ -350,8 +355,11 @@ struct DanmakuSettingsView: View {
         }
     }
     private func search(precise: Bool = false) {
+        guard let endpoint = selectedServer else {
+            status = "请先在设置的弹幕服务中配置自定义弹幕服务器。"
+            return
+        }
         busy = true; status = nil; matches = []
-        let endpoint = selectedServer
         Task {
             defer { busy = false }
             do {

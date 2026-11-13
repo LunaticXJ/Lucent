@@ -21,10 +21,8 @@ struct LocalizationPreferences: Sendable {
         value.content = defaults.string(forKey: "lucent.locale.content") ?? "auto"
         value.subtitles = defaults.string(forKey: "lucent.locale.subtitles") ?? "auto"
         value.audio = defaults.string(forKey: "lucent.locale.audio") ?? "original"
-        value.region = defaults.string(forKey: "lucent.locale.region") ?? "system"
-        value.dateOrder = defaults.string(forKey: "lucent.locale.dateOrder") ?? "system"
-        value.clock = defaults.string(forKey: "lucent.locale.clock") ?? "system"
-        value.zone = defaults.string(forKey: "lucent.locale.zone") ?? "system"
+        // Region, date order, clock and time zone follow the system by design;
+        // there is no UI to override them anymore.
         return value
     }
     var interfaceLanguage: String {

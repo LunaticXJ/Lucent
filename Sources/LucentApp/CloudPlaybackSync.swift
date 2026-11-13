@@ -201,7 +201,6 @@ enum CloudUserPreferences {
         "lucent.player.showRemainingTime", "lucent.player.videoScaleMode", "lucent.player.nextEpisodePrompt",
         "lucent.player.minimumResumePercent", "lucent.player.completedPercent", "lucent.playback.discTransition",
         "lucent.locale.interface", "lucent.locale.content", "lucent.locale.subtitles", "lucent.locale.audio",
-        "lucent.locale.region", "lucent.locale.dateOrder", "lucent.locale.clock", "lucent.locale.zone",
         "lucent.danmaku.enabled", "lucent.danmaku.opacity", "lucent.danmaku.fontSize", "lucent.danmaku.area",
         "lucent.danmaku.customServers", "lucent.danmaku.selectedServer",
         "lucent.danmaku.duration", "lucent.danmaku.offset", "lucent.danmaku.blocked",

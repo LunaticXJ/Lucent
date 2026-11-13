@@ -168,7 +168,8 @@ struct StorageManagementView: View {
         }
         #if !os(macOS)
         .lucentCollectionChrome(title: "存储") {
-            if !browserShown { Button("添加存储", systemImage: "plus", action: add) }
+            // Reached only through import flows; adding storage lives in the
+            // config page's storage section header, not here.
         }
         .navigationDestination(isPresented: $browserShown) {
             if let storage = browsing {
@@ -244,6 +245,9 @@ struct StorageDirectoryBrowser: View {
     @State private var entries: [StorageDirectory] = []
     @StateObject private var selection: StorageDirectorySelection
     private let ancestors: [StorageBreadcrumb]
+    /// Browse-only instances (e.g. from the config page storage cards) hide
+    /// the directory-selection import UI entirely.
+    private let allowsSelection: Bool
     @State private var child: StorageDirectory?
     private var selected: [StorageDirectory] {
         get { selection.selected }
@@ -253,10 +257,11 @@ struct StorageDirectoryBrowser: View {
         get { selection.selectionMode }
         nonmutating set { selection.selectionMode = newValue }
     }
-    init(storageID: UUID, root: StorageDirectory) {
+    init(storageID: UUID, root: StorageDirectory, allowsSelection: Bool = true) {
         self.storageID = storageID
         self.root = root
         self.ancestors = []
+        self.allowsSelection = allowsSelection
         _selection = StateObject(wrappedValue: StorageDirectorySelection())
     }
     fileprivate init(storageID: UUID, root: StorageDirectory,
@@ -264,6 +269,7 @@ struct StorageDirectoryBrowser: View {
         self.storageID = storageID
         self.root = root
         self.ancestors = ancestors
+        self.allowsSelection = true
         _selection = StateObject(wrappedValue: selection ?? StorageDirectorySelection())
     }
     @State private var loading = false
@@ -282,10 +288,12 @@ struct StorageDirectoryBrowser: View {
                     // In-list selection toggle so choosing directories is always
                     // reachable, independent of the navigation-bar button.
                     #if os(tvOS) || os(iOS)
-                    Section {
-                        Button(selectionMode ? "取消选择" : "选择目录", systemImage: selectionMode ? "xmark" : "checkmark.circle") {
-                            selectionMode.toggle()
-                            if !selectionMode { selected = [] }
+                    if allowsSelection {
+                        Section {
+                            Button(selectionMode ? "取消选择" : "选择目录", systemImage: selectionMode ? "xmark" : "checkmark.circle") {
+                                selectionMode.toggle()
+                                if !selectionMode { selected = [] }
+                            }
                         }
                     }
                     #endif
@@ -308,7 +316,7 @@ struct StorageDirectoryBrowser: View {
         #if !os(macOS)
         .lucentCollectionChrome(title: trail.isEmpty ? (root.path.isEmpty ? (library.libraryStorages.first { $0.id == storageID }?.name ?? "存储") : root.name) : current.name) {
             #if !os(tvOS)
-            if child == nil { Button(selectionMode ? "取消选择" : "选择目录") {
+            if child == nil && allowsSelection { Button(selectionMode ? "取消选择" : "选择目录") {
                 selectionMode.toggle()
                 if !selectionMode { selected = [] }
             }.font(.subheadline) }

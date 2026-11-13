@@ -25,6 +25,8 @@ enum PlaybackServiceScope { case subtitles, danmaku }
 struct PlaybackServicesView: View {
     let scope: PlaybackServiceScope
     @AppStorage("lucent.danmaku.blocked") private var blockedDanmakuWords = ""
+    @AppStorage(CustomDanmakuServers.key) private var danmakuServersData = Data()
+    @State private var editingDanmakuServer: CustomDanmakuServer?
     @State private var key = ""
     @State private var username = ""
     @State private var password = ""
@@ -54,9 +56,15 @@ struct PlaybackServicesView: View {
             }
             if scope == .danmaku {
                 Section {
-                    NavigationLink("自定义弹幕服务器") {
-                        CustomDanmakuServersView().lucentSecondaryPage()
+                    ForEach(danmakuServers) { server in danmakuServerRow(server) }
+                    if danmakuServers.isEmpty {
+                        Text("尚未添加弹幕服务器").foregroundStyle(.secondary)
                     }
+                    Button { editingDanmakuServer = CustomDanmakuServer() } label: {
+                        Label("添加服务器", systemImage: "plus")
+                    }
+                } footer: {
+                    Text("支持兼容弹弹play协议的 API。可填写服务器根地址或以 /api/v2 结尾的地址，并保留服务提供的鉴权路径。")
                 }
                 Section {
                     #if os(tvOS)
@@ -90,6 +98,13 @@ struct PlaybackServicesView: View {
         .lucentPageTitle(scope == .subtitles ? "字幕服务配置" : "弹幕服务").lucentNavigationTitleStyle()
         .lucentTextInput().autocorrectionDisabled()
         .modifier(LucentSettingsPageStyle())
+        .navigationDestination(item: $editingDanmakuServer) { server in
+            CustomDanmakuServerEditor(server: server,
+                existing: danmakuServers.contains(where: { $0.id == server.id }), save: { newServer in
+                    storeDanmakuServer(newServer)
+                    UserDefaults.standard.set("custom:" + newServer.id.uuidString, forKey: "lucent.danmaku.selectedServer")
+                }, remove: { persistDanmakuServers(danmakuServers.filter { $0.id != server.id }) }).lucentSecondaryPage()
+        }
         .task {
             if scope == .subtitles {
                 key = (try? KeychainPasswordStore.openSubtitlesAPIKey()) ?? ""
@@ -109,63 +124,34 @@ struct PlaybackServicesView: View {
             } catch { status = error.localizedDescription }
         }
     }
-}
 
-struct CustomDanmakuServersView: View {
-    @AppStorage(CustomDanmakuServers.key) private var data = Data()
-    @State private var editing: CustomDanmakuServer?
-    private var servers: [CustomDanmakuServer] { CustomDanmakuServers.decode(data) }
-    var body: some View {
-        Form {
-            Section {
-                ForEach(servers) { server in
-                    HStack(spacing: 12) {
-                        Button { editing = server } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(server.displayName).foregroundStyle(.primary)
-                                Text(URLComponents(string: server.address)?.host ?? "")
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        #if os(tvOS)
-                        .buttonStyle(.automatic)
-                        #else
-                        .buttonStyle(.plain)
-                        #endif
-                        Toggle("启用", isOn: Binding(get: { server.enabled }, set: { enabled in
-                            var value = server; value.enabled = enabled; store(value)
-                        })).labelsHidden().accessibilityLabel("启用：\(server.displayName)")
-                    }
-                }.onDelete { indices in
-                    var values = servers; values.remove(atOffsets: indices); persist(values)
-                }
-                if servers.isEmpty {
-                    Text("尚未添加弹幕服务器").foregroundStyle(.secondary)
-                }
-                Button("添加服务器", systemImage: "plus") { editing = CustomDanmakuServer() }
-            } footer: {
-                Text("支持兼容弹弹play协议的 API。可填写服务器根地址或以 /api/v2 结尾的地址，并保留服务提供的鉴权路径。")
+    private var danmakuServers: [CustomDanmakuServer] { CustomDanmakuServers.decode(danmakuServersData) }
+
+    private func danmakuServerRow(_ server: CustomDanmakuServer) -> some View {
+        HStack(spacing: 12) {
+            Button { editingDanmakuServer = server } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(server.displayName).foregroundStyle(.primary)
+                    Text(URLComponents(string: server.address)?.host ?? "")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
-        }
-        .lucentPageTitle("自定义弹幕服务器").lucentNavigationTitleStyle()
-        .modifier(LucentSettingsPageStyle())
-        .navigationDestination(item: $editing) { server in
-            CustomDanmakuServerEditor(server: server,
-                existing: servers.contains(where: { $0.id == server.id }), save: {
-                    store($0)
-                    UserDefaults.standard.set("custom:" + $0.id.uuidString, forKey: "lucent.danmaku.selectedServer")
-                }, remove: { persist(servers.filter { $0.id != server.id }) }).lucentSecondaryPage()
+            .buttonStyle(.plain)
+            Toggle("启用", isOn: Binding(get: { server.enabled }, set: { enabled in
+                var value = server; value.enabled = enabled; storeDanmakuServer(value)
+            })).labelsHidden().accessibilityLabel("启用：\(server.displayName)")
         }
     }
-    private func store(_ server: CustomDanmakuServer) {
-        var values = servers
+
+    private func storeDanmakuServer(_ server: CustomDanmakuServer) {
+        var values = danmakuServers
         if let index = values.firstIndex(where: { $0.id == server.id }) { values[index] = server }
         else { values.append(server) }
-        persist(values)
+        persistDanmakuServers(values)
     }
-    private func persist(_ values: [CustomDanmakuServer]) {
-        if let encoded = try? JSONEncoder().encode(values) { data = encoded }
+    private func persistDanmakuServers(_ values: [CustomDanmakuServer]) {
+        if let encoded = try? JSONEncoder().encode(values) { danmakuServersData = encoded }
     }
 }
 

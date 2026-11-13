@@ -81,8 +81,6 @@ struct LibraryView: View {
     @State private var showLibraryConfig = false
     @State private var showLibraryStorageManager = false
     @State private var showFolderBrowser = false
-    @State private var renamingLibrary = false
-    @State private var libraryNameDraft = ""
     @State private var homeRefreshID = UUID()
     private enum SourceChooserScope: Identifiable {
         case all, servers, library, storage
@@ -638,27 +636,30 @@ struct LibraryView: View {
     #endif
 
     #if os(iOS)
-    @ViewBuilder
     private var mobileSourcesContent: some View {
-        // Render module titles through real Form section headers so the style
-        // is identical to the settings pages by construction, not imitation.
-        // AnyView cuts the generic type nesting so the runtime can resolve the
-        // type without overflowing the stack (huge view types crash at launch).
+        // Card-based page rendered in a ScrollView: context menus on grid
+        // cards inside a List row highlight the entire row, so the grid must
+        // live outside a List. AnyView keeps the shell's composite type shallow.
         AnyView(
-            Form {
-                Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    sourcesSectionHeader("聚合媒体库")
                     libraryBannerCard
-                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                        .listRowBackground(Color.clear)
-                } header: { Text("聚合媒体库") }
-                Section {
+                    sourcesSectionHeader("影视服务器")
+                        .padding(.top, 20)
                     serverGrid
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                } header: { Text("影视服务器") }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
-            .modifier(LucentSettingsPageStyle())
         )
+    }
+
+    private func sourcesSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 8)
     }
 
     private var displayLibraryName: String {
@@ -694,18 +695,7 @@ struct LibraryView: View {
             HStack(spacing: 14) {
                 libraryBadgeIcon
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 7) {
-                        Text(displayLibraryName).font(.headline).lineLimit(1)
-                        // A nested Button inside the card Button never receives
-                        // taps; a tap gesture on the icon takes priority instead.
-                        Image(systemName: "pencil").font(.system(size: 12)).foregroundStyle(.secondary)
-                            .padding(4).contentShape(Rectangle())
-                            .onTapGesture {
-                                libraryNameDraft = displayLibraryName == "我的媒体库" ? "" : displayLibraryName
-                                renamingLibrary = true
-                            }
-                            .accessibilityLabel("修改媒体库名称")
-                    }
+                    Text(displayLibraryName).font(.headline).lineLimit(1)
                     // Same plain-text count style as the server cards.
                     Text("电影 \(libraryMovieCount) · 剧集 \(librarySeriesCount)")
                         .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
@@ -722,11 +712,6 @@ struct LibraryView: View {
             .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
-        .alert("修改媒体库名称", isPresented: $renamingLibrary) {
-            TextField("名称", text: $libraryNameDraft)
-            Button("保存") { libraryDisplayName = libraryNameDraft.trimmingCharacters(in: .whitespaces) }
-            Button("取消", role: .cancel) { }
-        }
     }
 
     private var libraryConfigPage: some View {
@@ -846,7 +831,7 @@ struct LibraryView: View {
         }
         .navigationDestination(isPresented: $showConfigStorageBrowser) {
             if let storage = browsingConfigStorage {
-                StorageDirectoryBrowser(storageID: storage.id, root: .root)
+                StorageDirectoryBrowser(storageID: storage.id, root: .root, allowsSelection: false)
                     .environmentObject(library).lucentSecondaryPage()
             }
         }
@@ -1039,7 +1024,18 @@ struct LibraryView: View {
                             additionRow("绿联云影视", detail: "连接绿联影视中心", brand: "UGREENBrand", icon: "server.rack", choice: .ugreen)
                         }
                     }
-                    if scope == .library || scope == .storage {
+                    if scope == .storage {
+                        // 添加存储入口：只保留存储类型，无标题行、无文件源与局域网模块。
+                        Section {
+                            additionRow("本地文件夹", detail: "选择“文件”App 中的目录", icon: "folder", choice: .folder)
+                            additionRow("SMB 共享", detail: "NAS、电脑与局域网共享", icon: "externaldrive", choice: .smb)
+                            additionRow("WebDAV", detail: "连接 WebDAV 存储服务", icon: "network", choice: .webDAV)
+                            additionRow("网盘", detail: "115、123、百度及其他已支持的网盘", icon: "cloud", choice: .cloud)
+                        } footer: {
+                            Text("仅建立连接，导入目录后才扫描入库。")
+                        }
+                    }
+                    if scope == .library {
                         additionSection("添加文件源", detail: "从已连接的存储选择目录，独立命名并扫描入库") {
                             additionRow("从存储导入目录", detail: "支持跨目录多选与批量命名", icon: "folder.badge.plus", choice: .importDirectories)
                         }

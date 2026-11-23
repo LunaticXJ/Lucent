@@ -34,10 +34,10 @@ enum PlayerControlStyle {
     static let selectedFill = Color.white.opacity(0.14)
     static let divider = Color.white.opacity(0.1)
     #if os(tvOS)
-    static let controlSize: CGFloat = 72
-    static let panelRadius: CGFloat = 32
-    static let rowHeight: CGFloat = 88
-    static let panelInset: CGFloat = 32
+    static let controlSize: CGFloat = 60
+    static let panelRadius: CGFloat = 24
+    static let rowHeight: CGFloat = 64
+    static let panelInset: CGFloat = 20
     static let outerInset: CGFloat = 60
     #else
     static let controlSize: CGFloat = 44
@@ -55,7 +55,7 @@ enum PlayerControlStyle {
     }
     static func panelWidth(_ available: CGFloat) -> CGFloat {
         #if os(tvOS)
-        min(760, max(620, available * 0.4))
+        min(620, max(520, available * 0.32))
         #else
         min(400, max(300, available * 0.46))
         #endif
@@ -388,7 +388,16 @@ struct PlaybackView: View {
                 .ignoresSafeArea(.container)
             #endif
             VStack(spacing: 0) {
+                #if os(tvOS)
+                if !controlsLocked && primaryControlsVisible {
+                    HStack {
+                        Text(Date(), style: .time).font(.callout.monospacedDigit())
+                        Spacer()
+                    }.padding(.horizontal, 80).padding(.top, 40)
+                }
+                #else
                 if !controlsLocked && primaryControlsVisible { playbackHeader }
+                #endif
                 Spacer(minLength: 0)
                 #if !os(tvOS)
                 if primaryControlsVisible {
@@ -402,7 +411,11 @@ struct PlaybackView: View {
                 }
                 #endif
                 Spacer(minLength: 0)
+                #if os(tvOS)
+                if !controlsLocked && controlsVisible && !showEpisodeList { televisionFooter }
+                #else
                 if !controlsLocked && primaryControlsVisible { playbackFooter }
+                #endif
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             #if os(tvOS)
@@ -1079,6 +1092,66 @@ struct PlaybackView: View {
         session.chapters.last { $0.start <= session.currentTime }
     }
 
+    #if os(tvOS)
+    private var televisionFooter: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .bottom, spacing: 32) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if case .episode(_, let season, let episode, _) = item.identity {
+                        Text("\(MediaIdentity.seasonTitle(season)) · 第 \(episode) 集")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Text(item.title).font(.title3.weight(.semibold)).lineLimit(1)
+                }
+                Spacer(minLength: 24)
+                HStack(spacing: 20) {
+                    toolButton("播放速度", symbol: "speedometer") { openPanel(.rate) }
+                    toolButton("字幕", symbol: "captions.bubble") { openPanel(.subtitles) }
+                    toolButton("音轨", symbol: "waveform") { openPanel(.audio) }
+                    toolButton("更多设置", symbol: "slider.horizontal.3") { openPanel(.settings) }
+                }
+                .focusSection()
+            }
+            seekTrack
+            HStack {
+                Text(Self.timeLabel(isSeeking ? seekPosition : session.currentTime))
+                Spacer()
+                Text(Self.timeLabel(session.duration))
+            }
+            .font(.callout.monospacedDigit())
+            HStack(spacing: 14) {
+                if onSelectEpisode != nil, item.identity?.seriesName != nil {
+                    let previous = adjacentEpisode(forward: false)
+                    toolButton("上一集", symbol: "backward.end.fill") {
+                        if let previous { selectEpisode(previous) }
+                    }.disabled(previous == nil)
+                }
+                toolButton("后退", symbol: "gobackward.10") { session.skip(by: -seekInterval) }
+                Button { session.togglePlayback() } label: {
+                    Label(playbackIsActive ? "暂停" : "播放", systemImage: playbackIsActive ? "pause.fill" : "play.fill")
+                }
+                .prefersDefaultFocus(true, in: playerFocusScope)
+                toolButton("前进", symbol: "goforward.10") { session.skip(by: seekInterval) }
+                if onSelectEpisode != nil, item.identity?.seriesName != nil {
+                    let next = adjacentEpisode(forward: true)
+                    toolButton("下一集", symbol: "forward.end.fill") {
+                        if let next { selectEpisode(next) }
+                    }.disabled(next == nil)
+                }
+                if item.identity?.seriesName != nil {
+                    Button("播放列表", systemImage: "list.bullet") { showEpisodeList = true }
+                } else if session.playlistEntries.count > 1 {
+                    Button("播放列表", systemImage: "list.bullet") { openPanel(.playlist) }
+                }
+            }
+            .buttonStyle(.bordered)
+            .focusSection()
+        }
+        .padding(.horizontal, 80).padding(.top, 36).padding(.bottom, 46)
+        .background(LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom))
+    }
+    #endif
+
     private func openPanel(_ panel: ControlPanel) {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
             secondaryPanel = panel
@@ -1097,7 +1170,7 @@ struct PlaybackView: View {
 
     private func controlPanel(_ panel: ControlPanel) -> some View {
         GeometryReader { geometry in
-            ZStack(alignment: .trailing) {
+            ZStack(alignment: playerPanelAlignment) {
                 Color.clear.contentShape(Rectangle()).onTapGesture { closePanel() }
                     .accessibilityLabel("关闭播放面板")
                     .accessibilityAddTraits(.isButton)
@@ -1173,7 +1246,7 @@ struct PlaybackView: View {
                     }
                 }
                 .frame(width: PlayerControlStyle.panelWidth(geometry.size.width),
-                       height: max(0, geometry.size.height - PlayerControlStyle.outerInset * 2))
+                       height: panelHeight(geometry.size.height))
                 .clipShape(RoundedRectangle(cornerRadius: PlayerControlStyle.panelRadius))
                 .lucentVideoGlass(radius: PlayerControlStyle.panelRadius)
                 .padding(.trailing, PlayerControlStyle.outerInset).padding(.vertical, PlayerControlStyle.outerInset)
@@ -1188,6 +1261,22 @@ struct PlaybackView: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var playerPanelAlignment: Alignment {
+        #if os(tvOS)
+        .topTrailing
+        #else
+        .trailing
+        #endif
+    }
+
+    private func panelHeight(_ available: CGFloat) -> CGFloat {
+        #if os(tvOS)
+        min(650, max(0, available - 360))
+        #else
+        max(0, available - PlayerControlStyle.outerInset * 2)
+        #endif
     }
 
     private func panelSubtitle(_ panel: ControlPanel) -> String {
@@ -1212,7 +1301,24 @@ struct PlaybackView: View {
         }
     }
 
-    private var rateControls: some View {
+    @ViewBuilder private var rateControls: some View {
+        #if os(tvOS)
+        VStack(spacing: 8) {
+            ForEach([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { rate in
+                Button {
+                    session.setPlaybackRate(Float(rate))
+                    closePanel()
+                } label: {
+                    HStack(spacing: 16) {
+                        Image(systemName: "checkmark")
+                            .opacity(abs(Double(session.playbackRate) - rate) < 0.01 ? 1 : 0)
+                        Text(rate == 1 ? "正常 1.0×" : "\(rate.formatted())×")
+                        Spacer()
+                    }.font(.system(size: 26)).frame(minHeight: 44)
+                }
+            }
+        }
+        #else
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("\(Double(session.playbackRate).formatted(.number.locale(LocalizationPreferences.current.displayLocale)))×")
@@ -1243,6 +1349,7 @@ struct PlaybackView: View {
                 }
             }
         }
+        #endif
     }
 
     private var gestureIsActive: Bool {
@@ -1720,6 +1827,12 @@ struct PlaybackView: View {
             }
             .tint(.gray).padding(14)
             .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 14))
+            #if os(tvOS)
+            VStack(alignment: .leading, spacing: 16) {
+                Text("设置跳过时间")
+                skipTimeSettings
+            }
+            #else
             DisclosureGroup("设置跳过时间") {
                 PlaybackSkipSettingsView(item: item, duration: session.duration, currentTime: session.currentTime) { intro, credits in
                     session.setManualSkipTimes(intro: intro, credits: credits)
@@ -1729,11 +1842,21 @@ struct PlaybackView: View {
             .font(.system(size: PlayerControlStyle.scaled(14), weight: .medium))
             .padding(14)
             .background(PlayerControlStyle.rowFill, in: RoundedRectangle(cornerRadius: 14))
+            #endif
         }
         Button { openPanel(.diagnostics) } label: {
             panelRow("播放信息", symbol: "info.circle")
         }
     }
+
+    #if os(tvOS)
+    private var skipTimeSettings: some View {
+        PlaybackSkipSettingsView(item: item, duration: session.duration, currentTime: session.currentTime) { intro, credits in
+            session.setManualSkipTimes(intro: intro, credits: credits)
+        }
+        .id(item.id)
+    }
+    #endif
 
     private struct PlaybackDiagnosticsPanel: View {
         let report: PlaybackDiagnostics

@@ -92,7 +92,11 @@ struct AppSettingsView: View {
             }
         }
         .modifier(LucentSettingsPageStyle())
+        #if os(tvOS)
+        .toolbar(.hidden, for: .navigationBar)
+        #else
         .lucentPageTitle("设置")
+        #endif
         .lucentTabRoot()
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)

@@ -92,7 +92,7 @@ struct AggregateLibraryOverview: View {
             }.buttonStyle(.plain)
         }
         .foregroundStyle(.primary)
-        .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius)))
+        .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))
     }
     private func metric(_ title: String, _ value: Int) -> some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -339,7 +339,7 @@ struct StorageDirectoryBrowser: View {
                     }
                     Spacer()
                     Button("下一步") { showingReview = true }.buttonStyle(.borderedProminent).tint(.gray).disabled(selected.isEmpty)
-                }.padding(16).modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))).padding(12)
+                }.padding(16).background(LucentUI.panel, in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius)).padding(12)
             }
         }
         #if !os(macOS)

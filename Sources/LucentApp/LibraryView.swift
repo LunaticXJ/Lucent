@@ -222,6 +222,7 @@ struct LibraryView: View {
     @State private var selectedItemID: UUID?
     @State private var mobileLibraryCollectionPresented = false
     @State private var mobileDetailPresented = false
+    @State private var homeTopButtonsHidden = false
     @State private var serverMediaCounts: [UUID: (movies: Int, series: Int)] = [:]
     @State private var showCacheSettings = false
     @State private var editingItem: MediaItem?
@@ -337,7 +338,7 @@ struct LibraryView: View {
 
     private var homeCatalogTitle: String {
         let key = effectiveHomeCatalog
-        if key == "library" { return "聚合媒体库" }
+        if key == "library" { return displayLibraryName }
         if let source = library.embySources.first(where: { key == "emby:\($0.id.uuidString)" }) { return source.name }
         if let source = library.jellyfinSources.first(where: { key == "jellyfin:\($0.id.uuidString)" }) { return source.name }
         if let source = library.plexSources.first(where: { key == "plex:\($0.id.uuidString)" }) { return source.name }
@@ -506,7 +507,8 @@ struct LibraryView: View {
                 } else if catalog == "library" {
                     MobileHomeView(showSources: { showLibraryConfig = true; mobileTab = .sources }, localLibrary: true,
                                    onCollectionChange: { mobileLibraryCollectionPresented = $0 },
-                                   refreshID: homeRefreshID, detailPresented: $mobileDetailPresented)
+                                   refreshID: homeRefreshID, detailPresented: $mobileDetailPresented,
+                                   onScrollStateChange: updateHomeTopButtons)
                 } else if catalog.hasPrefix("emby:") {
                     MobileHomeView(showSources: { mobileTab = .sources },
                                    preferredSourceID: UUID(uuidString: String(catalog.dropFirst(5))),
@@ -514,7 +516,7 @@ struct LibraryView: View {
                                    refreshID: homeRefreshID,
                                    showCacheSettings: { showCacheSettings = true },
                                    detailPresented: $mobileDetailPresented,
-                                   onScrollStateChange: { _ in })
+                                   onScrollStateChange: updateHomeTopButtons)
                 } else {
                     MobileServerCatalogView(catalog: catalog, refreshID: homeRefreshID,
                                             detailPresented: $mobileDetailPresented)
@@ -525,7 +527,7 @@ struct LibraryView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar(mobileDetailPresented || mobileLibraryCollectionPresented ? .hidden : .visible, for: .tabBar)
             .toolbar {
-                if mobileTab == .home && (hasConfiguredMediaServer || !isAggregateHomeEmpty) {
+                if mobileTab == .home && !homeTopButtonsHidden && (hasConfiguredMediaServer || !isAggregateHomeEmpty) {
                     ToolbarItem(placement: .topBarTrailing) {
                         NavigationLink {
                             LucentFavoritesView().environmentObject(library)
@@ -539,7 +541,7 @@ struct LibraryView: View {
                     Menu {
                         Picker("首页内容", selection: Binding(get: { effectiveHomeCatalog },
                                                         set: { selectedHomeCatalog = $0 })) {
-                            Label("聚合媒体库", systemImage: "rectangle.stack").tag("library")
+                            Label(displayLibraryName, systemImage: "rectangle.stack").tag("library")
                         if !library.embySources.isEmpty || !library.jellyfinSources.isEmpty || !library.plexSources.isEmpty {
                             ForEach(library.embySources) { source in
                                 Label(source.name, image: source.kind.assetName)
@@ -561,7 +563,7 @@ struct LibraryView: View {
                         }
                     } label: {
                         if homeCatalogKind == "library" {
-                            Label("聚合媒体库", systemImage: "rectangle.stack")
+                            Label(displayLibraryName, systemImage: "rectangle.stack")
                                 .labelStyle(.iconOnly)
                         } else {
                             ServerBrandIcon(kind: homeCatalogKind)
@@ -575,9 +577,17 @@ struct LibraryView: View {
             }
         }
             .onChange(of: effectiveHomeCatalog) { _, _ in
+                homeTopButtonsHidden = false
                 mobileLibraryCollectionPresented = false
                 mobileDetailPresented = false
             }
+    }
+
+    private func updateHomeTopButtons(_ scrollingDown: Bool) {
+        guard homeTopButtonsHidden != scrollingDown else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            homeTopButtonsHidden = scrollingDown
+        }
     }
 
     private var mobileSearchTab: some View {
@@ -637,29 +647,22 @@ struct LibraryView: View {
 
     #if os(iOS)
     private var mobileSourcesContent: some View {
-        // Card-based page rendered in a ScrollView: context menus on grid
-        // cards inside a List row highlight the entire row, so the grid must
-        // live outside a List. AnyView keeps the shell's composite type shallow.
-        AnyView(
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    sourcesSectionHeader("聚合媒体库")
-                    libraryBannerCard
-                    sourcesSectionHeader("影视服务器")
-                        .padding(.top, 20)
-                    serverGrid
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+        List {
+            Section("聚合媒体库") {
+                libraryBannerCard
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
-        )
-    }
-
-    private func sourcesSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.bottom, 8)
+            Section("影视服务器") {
+                serverGrid
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .modifier(LucentSettingsPageStyle())
     }
 
     private var displayLibraryName: String {
@@ -708,7 +711,7 @@ struct LibraryView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius)))
+            .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))
             .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
@@ -793,7 +796,7 @@ struct LibraryView: View {
             }
             Section {
                 if library.libraryStorages.isEmpty {
-                    configEmptyHint("尚未添加存储，点击右上角「添加存储」", icon: "externaldrive.badge.plus")
+                    configEmptyHint("尚未添加", icon: "externaldrive.badge.plus")
                 } else {
                     ForEach(library.libraryStorages) { storage in configStorageRow(storage) }
                 }
@@ -802,7 +805,7 @@ struct LibraryView: View {
             }
             Section {
                 if library.fileSources.isEmpty {
-                    configEmptyHint("尚未导入文件源，点击右上角「从存储导入」", icon: "folder.badge.plus")
+                    configEmptyHint("尚未导入", icon: "folder.badge.plus")
                 } else {
                     ForEach(library.fileSources) { source in configFileSourceRow(source) }
                 }
@@ -897,7 +900,7 @@ struct LibraryView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: LucentUI.sectionRadius)))
+        .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))
         .contextMenu {
             Button("刷新媒体库", systemImage: "arrow.clockwise") { refreshConfigLibrary() }
                 .disabled(libraryConfigScanning)
@@ -1277,7 +1280,7 @@ struct LibraryView: View {
             .foregroundStyle(.primary)
             .padding(15)
             .frame(maxWidth: .infinity, minHeight: 154, alignment: .leading)
-            .modifier(LucentGlass(shape: RoundedRectangle(cornerRadius: 22)))
+            .background(LucentUI.panel, in: RoundedRectangle(cornerRadius: 22))
         }
         .buttonStyle(.plain)
         .accessibilityHint("打开此服务器首页，长按可编辑、刷新或移除")

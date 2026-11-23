@@ -32,6 +32,13 @@ struct NativeSourcesView: View {
     let addDLNA: () -> Void
     let addFolder: () -> Void
     let editCloud: (UUID) -> Void
+    private var serverColumns: [GridItem] {
+        #if os(tvOS)
+        [GridItem(.adaptive(minimum: 460, maximum: 560), spacing: 36)]
+        #else
+        [GridItem(.adaptive(minimum: 280, maximum: 480), spacing: 22)]
+        #endif
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             if library.activeProfile?.isChild == true {
@@ -41,10 +48,15 @@ struct NativeSourcesView: View {
                 Text("影视服务器").tag(1)
                 Text("聚合媒体库").tag(0)
             }.pickerStyle(.segmented)
+            #if os(tvOS)
+            .frame(maxWidth: 780)
+            .frame(maxWidth: .infinity)
+            .focusSection()
+            #endif
             if kind == 0 {
                 AggregateLibraryOverview(manageStorage: { storageManager = true }, importSource: { storageManager = true })
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 480), spacing: 22)], spacing: 22) {
+                LazyVGrid(columns: serverColumns, spacing: 32) {
                     ForEach(NativeCatalog.all(in: library).filter { $0.id != "library" }) { server in
                         Button {
                             guard let id = server.sourceID else { return }
@@ -52,7 +64,7 @@ struct NativeSourcesView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 16) {
                                 HStack {
-                                    Text(server.name).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                                    Text(server.name).font(.headline).lineLimit(2)
                                     Spacer()
                                     if let asset = server.asset { Image(asset).resizable().scaledToFit().frame(width: 44, height: 44) }
                                 }
@@ -60,18 +72,13 @@ struct NativeSourcesView: View {
                                     HStack(spacing: 18) {
                                         Label("\(count.movies)", systemImage: "film")
                                         Label("\(count.series)", systemImage: "tv")
-                                    }.font(.subheadline).foregroundStyle(.secondary)
+                                    }.font(.subheadline).lineLimit(1).foregroundStyle(.secondary)
                                 }
                                 Text(address(server)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                             }
                             .padding(22).frame(maxWidth: .infinity, minHeight: 130, alignment: .leading)
-                            .background(LucentUI.serverCardGradient,
-                                        in: RoundedRectangle(cornerRadius: LucentUI.sectionRadius))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: LucentUI.sectionRadius)
-                                    .strokeBorder(LucentUI.serverCardBorder(), lineWidth: 1)
-                                    .allowsHitTesting(false)
-                            }
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 28))
+                            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 28))
                         }.buttonStyle(.bordered)
                         .task(id: "\(server.id)|\(countsRevision)") { await loadCounts(server) }
                         .contextMenu {
@@ -104,7 +111,13 @@ struct NativeSourcesView: View {
                 .disabled(library.activeProfile?.isChild == true)
             }
         }
+        #if os(tvOS)
+        .fullScreenCover(item: $editor, onDismiss: { countsRevision = UUID() }) { route in
+            NativeServerEditor(kind: route.kind, existingID: route.existing).environmentObject(library)
+        }
+        #else
         .sheet(item: $editor, onDismiss: { countsRevision = UUID() }) { route in NativeServerEditor(kind: route.kind, existingID: route.existing).environmentObject(library) }
+        #endif
         .lucentHierarchicalPresentation(isPresented: $storageManager, onDismiss: {
             if let pendingStorage {
                 self.pendingStorage = nil
@@ -211,10 +224,23 @@ struct NativeServerEditor: View {
     @State private var error: String?
     var body: some View {
         NavigationStack {
+            editorForm
+        }
+    }
+
+    @ViewBuilder private var editorForm: some View {
+        #if os(tvOS)
+        TVSettingsLayout(title: kind.title, symbol: "server.rack") { form }
+        #else
+        form
+        #endif
+    }
+
+    private var form: some View {
             Form {
                 Section {
                     LucentFormField("名称") { TextField("选填（自动获取）", text: $draft.name) }
-                    LucentFormField("协议") { Toggle("HTTPS", isOn: $draft.usesHTTPS) }
+                    Toggle("HTTPS", isOn: $draft.usesHTTPS)
                     LucentFormField("服务器地址") { TextField("必填（127.0.0.1 / sample.com）", text: $draft.host) }
                     LucentFormField("端口号") { TextField(kind.port, text: $draft.port) }
                     LucentFormField("路径") { TextField("选填（/path）", text: $draft.path) }
@@ -236,7 +262,6 @@ struct NativeServerEditor: View {
                 .toolbar { LucentEditorToolbar(actionTitle: existingID == nil ? "添加" : "保存", busy: busy, canSave: draft.address != nil, close: { dismiss() }, save: save) }
                 .onChange(of: draft.host) { _, _ in draft.absorbPastedAddress() }
                 .task { load() }
-        }.frame(idealWidth: 680, idealHeight: 760)
     }
     private func load() {
         if let source = library.embySources.first(where: { $0.id == existingID }) {

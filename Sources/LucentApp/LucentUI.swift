@@ -62,7 +62,7 @@ enum LucentUI {
         #elseif os(macOS)
         Color(nsColor: .windowBackgroundColor)
         #else
-        Color("AppBackground")
+        Color.clear
         #endif
     }
     static var serverCardGradient: LinearGradient {
@@ -189,6 +189,9 @@ struct LucentSettingsPageStyle: ViewModifier {
             #if !os(tvOS)
             .toggleStyle(SwitchToggleStyle(tint: LucentUI.switchTint))
             #endif
+            #if os(tvOS)
+            .font(.system(size: 29))
+            #endif
             #if os(macOS)
             .formStyle(.grouped)
             #endif
@@ -225,10 +228,10 @@ struct LucentSettingsRow: View {
     let icon: String
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: icon).font(.system(size: LucentUI.controlSize == 72 ? 28 : 17, weight: .medium)).foregroundStyle(.primary)
+            Image(systemName: icon).font(.system(size: LucentUI.controlSize == 72 ? 28 : 17, weight: .medium))
                 .frame(width: LucentUI.controlSize == 72 ? 36 : 24, height: LucentUI.controlSize == 72 ? 36 : 24)
                 .accessibilityHidden(true)
-            Text(LocalizedStringKey(title)).font(.body).foregroundStyle(.primary)
+            Text(LocalizedStringKey(title)).font(.body)
             Spacer(minLength: 6)
         }.padding(.vertical, 4).contentShape(Rectangle())
     }

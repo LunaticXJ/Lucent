@@ -84,10 +84,10 @@ struct HomeLibraryEmptyState: View {
                 }
                 .font(.headline)
                 .padding(.horizontal, 22).padding(.vertical, 17)
-                .foregroundStyle(Color(uiColor: .systemBackground))
-                .background(Color.primary, in: RoundedRectangle(cornerRadius: 18))
+
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: 18))
             .frame(maxWidth: 320)
 
             if !aggregateLibrary {
@@ -1413,12 +1413,6 @@ struct MobileHomeView: View {
             indicatorIndex = heroIndex
             hasLoadedHome = true
             restoredStartup = true
-        }
-        if pausesHomeRefreshForComparison && !manualRefresh && restoredStartup {
-            isLoading = false
-            hasLoadedHome = true
-            errorMessage = nil
-            return
         }
         if !restoredStartup { manualRefreshSourceID = source.id }
         isLoading = true

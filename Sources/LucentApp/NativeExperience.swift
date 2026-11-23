@@ -53,11 +53,86 @@ struct NativeAppShell<Home: View, Sources: View, Search: View, Settings: View>: 
             NavigationStack { home() }.tabItem { Label("首页", systemImage: "house") }.tag(NativeAppPage.home)
             sources().tabItem { Label("片源", systemImage: "externaldrive") }.tag(NativeAppPage.sources)
             NavigationStack { search() }.tabItem { Label("搜索", systemImage: "magnifyingglass") }.tag(NativeAppPage.search)
-            NavigationStack { settings() }.tabItem { Label("设置", systemImage: "gearshape") }.tag(NativeAppPage.settings)
+            NavigationStack {
+                TVSettingsLayout(title: "设置", symbol: "play.rectangle.on.rectangle") { settings() }
+            }.tabItem { Label("设置", systemImage: "gearshape") }.tag(NativeAppPage.settings)
         }
+        .background(TVAmbientBackground())
         #endif
     }
 }
+
+#if os(tvOS)
+struct TVAmbientBackground: View {
+    var body: some View {
+        LinearGradient(colors: [
+            Color(red: 0.19, green: 0.25, blue: 0.28),
+            Color(red: 0.29, green: 0.21, blue: 0.24),
+            Color(red: 0.12, green: 0.17, blue: 0.24)
+        ], startPoint: .topLeading, endPoint: .bottomTrailing)
+        .ignoresSafeArea()
+    }
+}
+
+struct TVDetailHero<Title: View, Actions: View>: View {
+    let summary: String
+    let information: String
+    var metadata: String = ""
+    @ViewBuilder let title: () -> Title
+    @ViewBuilder let actions: () -> Actions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            title().frame(maxWidth: 500, alignment: .leading)
+            HStack(alignment: .top, spacing: 64) {
+                actions().frame(width: 480).focusSection()
+                VStack(alignment: .leading, spacing: 20) {
+                    if !metadata.isEmpty {
+                        Text(metadata).font(.system(size: 28, weight: .semibold))
+                    }
+                    if !information.isEmpty {
+                        Text(information).font(.system(size: 26)).foregroundStyle(.secondary)
+                    }
+                    Text(summary).font(.system(size: 26)).lineLimit(3).lineSpacing(4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 80)
+        .padding(.bottom, 48)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct TVSettingsLayout<Content: View>: View {
+    let title: String
+    let symbol: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 90) {
+            VStack(spacing: 28) {
+                if title == "设置" {
+                    Image("AppIconGraphiteIcePreview")
+                        .resizable().scaledToFit().frame(width: 420, height: 420)
+                        .clipShape(RoundedRectangle(cornerRadius: 80))
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 170, weight: .ultraLight))
+                    Text(title).font(.largeTitle.weight(.semibold))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+            content()
+                .frame(maxWidth: 900, maxHeight: .infinity)
+                .focusSection()
+        }
+        .padding(.horizontal, 80)
+        .background(TVAmbientBackground())
+    }
+}
+#endif
 
 struct NativeCatalog: Identifiable, Hashable, Sendable {
     let id: String
@@ -147,6 +222,9 @@ struct NativeMediaCard: View {
                     if landscape && showsProgress { LucentPlaybackProgressOverlay(position: entry.position, duration: entry.duration, progress: entry.progress) }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: LucentUI.cardRadius))
+                #if os(tvOS)
+                .hoverEffect(.highlight)
+                #endif
             LucentPosterCaption(title: entry.title, subtitle: showsProgress && landscape && !entry.isMovie ? nil : entry.yearText, lines: 1)
         }.contentShape(Rectangle())
     }
@@ -305,6 +383,7 @@ struct NativeHomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.contentLocalizationID) private var contentLocalizationID
     @State private var heroArtwork: TMDBService.DetailArtwork?
+    @State private var heroVisible = true
     let showSources: () -> Void
     private var catalogs: [NativeCatalog] { NativeCatalog.all(in: library) }
     private var catalog: NativeCatalog {
@@ -339,7 +418,12 @@ struct NativeHomeView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
-                if !heroes.isEmpty { hero }
+                if !heroes.isEmpty {
+                    hero
+                        .onScrollVisibilityChange(threshold: 0.5) { visible in
+                            withAnimation(.easeInOut(duration: 0.35)) { heroVisible = visible }
+                        }
+                }
                 if catalog.id == "library", !library.localLibraryItems.isEmpty {
                     NavigationLink { LocalCatalogCollectionView(collection: .mediaLibraries, detailPresented: .constant(false)) } label: {
                         Label("我的媒体", systemImage: "square.grid.2x2").font(.title2.bold())
@@ -370,14 +454,64 @@ struct NativeHomeView: View {
                             LazyHStack(alignment: .top, spacing: 22) {
                                 ForEach(shelf.entries.prefix(24)) { entry in
                                     Button { selected = entry.destination(in: library) } label: { NativeMediaCard(entry: entry, landscape: shelf.landscape, showsProgress: shelf.id == "continue").frame(width: cardWidth(shelf.landscape)) }
-                                        .buttonStyle(.bordered).buttonBorderShape(.roundedRectangle)
+                                        .buttonStyle(.borderless).buttonBorderShape(.roundedRectangle)
                                 }
                             }.padding(20)
-                        }.focusSection()
+                        }
+                        .scrollClipDisabled()
+                        .focusSection()
                     }
                 }
-            }.padding(contentInset)
-        }.background(LucentUI.page).lucentPageTitle(catalog.name)
+            }
+            .padding(.horizontal, contentInset)
+            .padding(.bottom, contentInset)
+        }
+        .background(LucentUI.page)
+        #if os(tvOS)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+        .background {
+            GeometryReader { geometry in
+                if !heroes.isEmpty {
+                    NativeHeroBackground(entry: heroes[min(heroIndex, heroes.count - 1)])
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .overlay {
+                            Rectangle().fill(.regularMaterial)
+                                .mask {
+                                    LinearGradient(stops: [
+                                        .init(color: .black, location: 0),
+                                        .init(color: .black.opacity(heroVisible ? 0.1 : 1), location: 0.65),
+                                        .init(color: .clear, location: 1)
+                                    ], startPoint: .bottom, endPoint: .top)
+                                }
+                        }
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .ignoresSafeArea(edges: .top)
+        .overlay(alignment: .topLeading) {
+            HStack(spacing: 24) {
+                Menu {
+                    Picker("首页内容", selection: $selection) {
+                        ForEach(catalogs) { value in Text(value.name).tag(value.id) }
+                    }
+                    Button("刷新首页", systemImage: "arrow.clockwise") { refresh() }
+                } label: {
+                    HStack(spacing: 12) {
+                        if let asset = catalog.asset { Image(asset).resizable().scaledToFit().frame(width: 32, height: 32) }
+                        Text(catalog.name).font(.callout.weight(.semibold))
+                    }
+                }
+                NavigationLink { LucentFavoritesView().environmentObject(library) } label: { Image(systemName: "heart") }
+            }
+            .buttonStyle(.borderless)
+            .padding(.leading, 60).padding(.top, 38)
+        }
+        #else
+        .lucentPageTitle(catalog.name)
+        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink { LucentFavoritesView().environmentObject(library) } label: {
@@ -429,6 +563,13 @@ struct NativeHomeView: View {
         landscape ? 280 : 160
         #endif
     }
+    private var heroHeight: CGFloat {
+        #if os(tvOS)
+        820
+        #else
+        440
+        #endif
+    }
     private var hero: some View {
         let entry = heroes[min(heroIndex, heroes.count - 1)]
         return VStack(alignment: .leading, spacing: 16) {
@@ -445,7 +586,8 @@ struct NativeHomeView: View {
         }
         .padding(32)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 440, alignment: .bottomLeading)
+        .frame(height: heroHeight, alignment: .bottomLeading)
+        #if !os(tvOS)
         .background {
             GeometryReader { geometry in
                 NativeHeroBackground(entry: entry)
@@ -453,7 +595,13 @@ struct NativeHomeView: View {
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.88)], startPoint: .top, endPoint: .bottom) }
             }
         }
+        #endif
+        #if os(tvOS)
+        .padding(.horizontal, -contentInset)
+        .focusSection()
+        #else
         .clipShape(RoundedRectangle(cornerRadius: 24)).focusSection()
+        #endif
             .transition(.opacity).animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: heroIndex)
             .task(id: "\(entry.id)|\(contentLocalizationID)") {
                 heroArtwork = nil

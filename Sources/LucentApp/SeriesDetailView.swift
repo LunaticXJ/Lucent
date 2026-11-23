@@ -398,10 +398,11 @@ struct SeriesDetailView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    StretchyHeroHeader(height: (max(550, geometry.size.height * 0.68) * posterDisplayScale).rounded(.up) / posterDisplayScale) { height, pull in
+                    StretchyHeroHeader(height: (max(550, geometry.size.height * detailHeroFraction) * posterDisplayScale).rounded(.up) / posterDisplayScale) { height, pull in
                         hero(height: height, width: geometry.size.width, pull: pull)
                     }
                     VStack(alignment: .leading, spacing: 24) {
+                        #if !os(tvOS)
                         if let summary = page?.series.overview ?? (isSeriesEntry ? item.metadata?.summary ?? item.serverSummary : nil),
                            !summary.isEmpty { synopsisPreview(summary, title: "剧集简介", lines: 3) }
                         else if loading {
@@ -410,6 +411,7 @@ struct SeriesDetailView: View {
                                 DetailSkeletonBlock().frame(width: 250, height: 14)
                             }
                         }
+                        #endif
                         episodeSection
                         castSection
                         if loading { DetailMediaSkeleton() }
@@ -421,6 +423,9 @@ struct SeriesDetailView: View {
                 }
                 .frame(width: geometry.size.width, alignment: .leading)
             }
+            #if os(tvOS)
+            .contentMargins(.horizontal, 0, for: .scrollContent)
+            #endif
             .background(detailBackground)
             .detailDiscPageSurface()
             .ignoresSafeArea(edges: .top)
@@ -433,6 +438,8 @@ struct SeriesDetailView: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { if !discControlsHidden { navigationActions } } }
         #elseif os(tvOS)
         .focusScope(detailFocusScope)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 if !discControlsHidden { navigationActions }
@@ -523,6 +530,26 @@ struct SeriesDetailView: View {
         return ServerDetailClient.logoRequest(baseAddress: server.base, token: server.token, itemID: id)
     }
 
+    #if os(tvOS)
+    private var televisionMetadata: String {
+        var values: [String] = []
+        if let rating = page?.series.communityRating ?? item.metadata?.rating, rating > 0 {
+            values.append("★ " + rating.formatted(.number.precision(.fractionLength(1))))
+        }
+
+        if let genres = page?.series.genres, !genres.isEmpty { values.append(genres.prefix(3).joined(separator: "、")) }
+        return values.joined(separator: "  ·  ")
+    }
+    #endif
+
+    private var detailHeroFraction: CGFloat {
+        #if os(tvOS)
+        0.94
+        #else
+        0.68
+        #endif
+    }
+
     private func hero(height: CGFloat, width: CGFloat, pull: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             ZStack {
@@ -550,6 +577,21 @@ struct SeriesDetailView: View {
             }
             .frame(width: width, height: height)
             .mask { HeroArtworkFade() }
+            #if os(tvOS)
+            TVDetailHero(summary: page?.series.overview ?? item.metadata?.summary ?? item.serverSummary ?? "", information: details, metadata: televisionMetadata) {
+                DetailTitleArtwork(url: artwork?.logoURL, title: artwork?.localizedTitle ?? seriesName,
+                                   maximumWidth: 500, maximumHeight: 160, foreground: detailInk)
+            } actions: {
+                VStack(spacing: 24) {
+                    LucentPlayButton(resumeTime: activeIsInProgress ? clock(activeProgressSeconds) : nil, episodeLabel: activeEpisodeLabel, enabled: !isSeriesEntry || activeEpisode != nil, isLoading: loading) { play(activeEpisode) }
+                        .prefersDefaultFocus(true, in: detailFocusScope)
+                    HStack(spacing: 28) {
+                        Button { toggleSeriesFavorite() } label: { Image(systemName: isSeriesFavorite ? "heart.fill" : "heart") }.disabled(!canFavoriteSeries)
+                        Button { toggleSeriesWatched() } label: { Image(systemName: isSeriesWatched ? "flag.fill" : "flag") }.disabled(episodes.isEmpty || loading)
+                    }.buttonStyle(.bordered).font(.title3)
+                }
+            }
+            #else
             VStack(spacing: 13) {
                 Group {
                 if artworkResolved {
@@ -605,6 +647,7 @@ struct SeriesDetailView: View {
                 }
             }
             .padding(.horizontal, 28).padding(.bottom, 0).frame(maxWidth: LucentUI.detailHeroContentWidth)
+            #endif
         }
         .frame(width: width, height: height)
         .clipped()

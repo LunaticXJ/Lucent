@@ -63,10 +63,11 @@ struct MovieDetailView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    StretchyHeroHeader(height: (max(620, geometry.size.height * 0.76) * posterDisplayScale).rounded(.up) / posterDisplayScale) { height, pull in
+                    StretchyHeroHeader(height: (max(620, geometry.size.height * detailHeroFraction) * posterDisplayScale).rounded(.up) / posterDisplayScale) { height, pull in
                         hero(width: geometry.size.width, height: height, pull: pull)
                     }
                     VStack(alignment: .leading, spacing: 26) {
+                        #if !os(tvOS)
                         if let summary = detail?.overview ?? item.metadata?.summary ?? item.serverSummary,
                            !summary.isEmpty {
                             Button { overviewExpanded = true } label: {
@@ -87,6 +88,7 @@ struct MovieDetailView: View {
                                 DetailSkeletonBlock().frame(width: 250, height: 14)
                             }
                         }
+                        #endif
                         if detail == nil && loadError == nil {
                             DetailSkeletonBlock().frame(width: 110, height: 18)
                             HStack(spacing: 13) {
@@ -111,6 +113,9 @@ struct MovieDetailView: View {
                 }
                 .frame(width: geometry.size.width, alignment: .leading)
             }
+            #if os(tvOS)
+            .contentMargins(.horizontal, 0, for: .scrollContent)
+            #endif
             .background(background)
             .detailDiscPageSurface()
             .ignoresSafeArea(edges: .top)
@@ -123,6 +128,8 @@ struct MovieDetailView: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { if !discControlsHidden { navigationActions } } }
         #elseif os(tvOS)
         .focusScope(detailFocusScope)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 if !discControlsHidden { navigationActions }
@@ -184,6 +191,26 @@ struct MovieDetailView: View {
         .padding(.horizontal, 26)
     }
 
+    #if os(tvOS)
+    private var televisionMetadata: String {
+        var values: [String] = []
+        if let rating = detail?.communityRating ?? item.metadata?.rating, rating > 0 {
+            values.append("★ " + rating.formatted(.number.precision(.fractionLength(1))))
+        }
+        if let date = displayDate { values.append(date) }
+        if let genres = detail?.genres, !genres.isEmpty { values.append(genres.prefix(3).joined(separator: "、")) }
+        return values.joined(separator: "  ·  ")
+    }
+    #endif
+
+    private var detailHeroFraction: CGFloat {
+        #if os(tvOS)
+        0.94
+        #else
+        0.76
+        #endif
+    }
+
     private func hero(width: CGFloat, height: CGFloat, pull: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             ZStack {
@@ -211,6 +238,21 @@ struct MovieDetailView: View {
             }
             .frame(width: width, height: height)
             .mask { HeroArtworkFade() }
+            #if os(tvOS)
+            TVDetailHero(summary: detail?.overview ?? item.metadata?.summary ?? item.serverSummary ?? "", information: technicalSummary, metadata: televisionMetadata) {
+                DetailTitleArtwork(url: artwork?.logoURL, title: artwork?.localizedTitle ?? detail?.name ?? item.title,
+                                   maximumWidth: 500, maximumHeight: 160, foreground: detailInk)
+            } actions: {
+                VStack(spacing: 24) {
+                    LucentPlayButton(resumeTime: isInProgress ? clock(progressSeconds) : nil, isLoading: detail == nil && loadError == nil) { play() }
+                        .prefersDefaultFocus(true, in: detailFocusScope)
+                    HStack(spacing: 28) {
+                        Button { library.toggleFavorite(id: item.id) } label: { Image(systemName: item.isFavorite ? "heart.fill" : "heart") }
+                        Button { if item.watched { library.markUnwatched(id: item.id) } else { library.markWatched(id: item.id) } } label: { Image(systemName: "flag") }
+                    }.buttonStyle(.bordered).font(.title3)
+                }
+            }
+            #else
             VStack(spacing: 12) {
                 Group {
                 if artworkResolved {
@@ -270,6 +312,7 @@ struct MovieDetailView: View {
             .frame(maxWidth: LucentUI.detailHeroContentWidth)
             .padding(.horizontal, 28)
             .padding(.bottom, 0)
+            #endif
         }
         .frame(width: width, height: height)
         .clipped()
